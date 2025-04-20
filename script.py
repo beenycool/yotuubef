@@ -1,1502 +1,1993 @@
-import os
-import random
 import argparse
-import praw
-import yt_dlp
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from googleapiclient import errors
-from google_auth_oauthlib.flow import InstalledAppFlow
-import google.generativeai as genai
-from elevenlabs.client import ElevenLabs
-from elevenlabs import save
+import base64
+import json
+import math
 import os
-from elevenlabs.core import ApiError
-import numpy as np
-imagemagick_path = r"C:\Program Files\ImageMagick-7.1.1-Q16-HDRI\magick.exe"
-if os.path.exists(imagemagick_path):
-    os.environ["IMAGEMAGICK_BINARY"] = imagemagick_path
-    print(f"Set IMAGEMAGICK_BINARY to: {imagemagick_path}")
-else:
-    # Check if it's already set in env vars
-    if not os.environ.get("IMAGEMAGICK_BINARY"):
-        print(f"Warning: ImageMagick path not found: {imagemagick_path} and IMAGEMAGICK_BINARY environment variable not set. MoviePy text features might fail.")
-    else:
-        print(f"Using IMAGEMAGICK_BINARY from environment: {os.environ.get('IMAGEMAGICK_BINARY')}")
+import pathlib
+import random
+import re
+import shutil
+import sqlite3
+import subprocess
+import sys
+import time
+import traceback
+from typing import Optional, List, Dict, Tuple, Any, Union
 
-from moviepy.editor import (VideoFileClip, AudioFileClip, TextClip, VideoClip, # Added VideoClip
-                            CompositeVideoClip, CompositeAudioClip, concatenate_audioclips, ImageClip, concatenate_videoclips,
-                            ColorClip)
-from moviepy.video.fx.all import crop, colorx, lum_contrast
+import cv2
+import google.generativeai as genai
+import numpy as np
+import praw
+import prawcore
+import yt_dlp
+
+from elevenlabs import save
+from elevenlabs.client import ElevenLabs
+from elevenlabs.core import ApiError
+
+from googleapiclient import errors as google_api_errors
+from googleapiclient.discovery import build as build_google_api
+from googleapiclient.http import MediaFileUpload
+from video_processor import _prepare_initial_video
+from google_auth_oauthlib.flow import InstalledAppFlow
+
 from joblib import Parallel, delayed
 from PIL import Image
-import sqlite3
-import json
-import time
-import math
-import cv2
-import numpy as np
-import re
-import pathlib
 
-def ensure_frame_shape(frame, target_shape):
-    """
-    Ensures the frame has the exact target_shape (h, w, c).
-    Pads, crops, or resizes as needed, but prefers minimal resizing.
-    """
-    h, w, c = target_shape
-    fh, fw = frame.shape[:2]
-    fc = frame.shape[2] if frame.ndim == 3 else 1
-    # Add channel if missing
-    if frame.ndim == 2:
-        frame = np.expand_dims(frame, axis=2)
-    if fc != c:
-        if fc == 1 and c == 3:
-            frame = np.repeat(frame, 3, axis=2)
-        else:
-            frame = frame[:, :, :c]
-    # Pad or crop height
-    if fh < h:
-        pad = h - fh
-        top = pad // 2
-        bottom = pad - top
-        frame = cv2.copyMakeBorder(frame, top, bottom, 0, 0, cv2.BORDER_REFLECT)
-    elif fh > h:
-        start = (fh - h) // 2
-        frame = frame[start:start + h, :, :]
-    # Pad or crop width
-    fh, fw = frame.shape[:2]
-    if fw < w:
-        pad = w - fw
-        left = pad // 2
-        right = pad - left
-        frame = cv2.copyMakeBorder(frame, 0, 0, left, right, cv2.BORDER_REFLECT)
-    elif fw > w:
-        start = (fw - w) // 2
-        frame = frame[:, start:start + w, :]
-    # Final check: resize if still not matching
-    if frame.shape[:2] != (h, w):
-        frame = cv2.resize(frame, (w, h))
-    if frame.shape[2] != c:
-        frame = frame[:, :, :c]
-    return frame
-import base64
-import prawcore
-import traceback
-import sys
-import shutil
-import subprocess
+from moviepy.editor import (
+    AudioFileClip, ColorClip, CompositeAudioClip, CompositeVideoClip,
+    ImageClip, TextClip, VideoClip, VideoFileClip,
+    concatenate_audioclips, concatenate_videoclips
+)
+from moviepy.video.fx.all import colorx, crop, lum_contrast
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+import moviepy.video.fx.all as vfx
+from moviepy.config import change_settings
 
+change_settings({"IMAGEMAGICK_BINARY": r"C:\Program Files\ImageMagick-7.1.1-Q16-HDRI\magick.exe"})
+
+imagemagick_path_str = r"C:\Program Files\ImageMagick-7.1.1-Q16-HDRI\magick.exe"
+imagemagick_env_var = "IMAGEMAGICK_BINARY"
+
+if os.path.exists(imagemagick_path_str):
+    os.environ[imagemagick_env_var] = imagemagick_path_str
+else:
+    existing_env = os.environ.get(imagemagick_env_var)
+    if not existing_env:
+        print(f"Warning: ImageMagick path not found: {imagemagick_path_str} and {imagemagick_env_var} environment variable not set. MoviePy text features might fail.")
+
+REDDIT_CLIENT_ID = os.environ.get('REDDIT_CLIENT_ID')
+REDDIT_CLIENT_SECRET = os.environ.get('REDDIT_CLIENT_SECRET')
+REDDIT_USER_AGENT = os.environ.get('REDDIT_USER_AGENT', f'python:VideoBot:v1.4 (by /u/YOUR_USERNAME_HERE)')
+GOOGLE_CLIENT_SECRETS_FILE = os.environ.get('GOOGLE_CLIENT_SECRETS_FILE')
+GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
+ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY')
+
+GEMINI_MODEL_ID = 'gemini-2.0-flash' # KEEP 2.0 FLASH
 DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
 
-imagemagick_path = r"C:\Program Files\ImageMagick-7.1.1-Q16-HDRI\magick.exe"
-if os.path.exists(imagemagick_path):
-    os.environ["IMAGEMAGICK_BINARY"] = imagemagick_path
-    print(f"Set IMAGEMAGICK_BINARY to: {imagemagick_path}")
-else:
-    # Check if it's already set in env vars
-    if not os.environ.get("IMAGEMAGICK_BINARY"):
-        print(f"Warning: ImageMagick path not found: {imagemagick_path} and IMAGEMAGICK_BINARY environment variable not set. MoviePy text features might fail.")
-    else:
-        print(f"Using IMAGEMAGICK_BINARY from environment: {os.environ.get('IMAGEMAGICK_BINARY')}")
+BASE_DIR = pathlib.Path(__file__).parent.resolve()
+TEMP_DIR = BASE_DIR / "temp_processing"
+MUSIC_FOLDER = BASE_DIR / "music"
+WATERMARK_PATH = BASE_DIR / "watermark.png"
+DB_FILE = BASE_DIR / 'uploaded_videos.db'
 
-# Helper function to ensure a frame is RGBA
-def frame_to_rgba(frame):
-    if frame.ndim == 2: # Grayscale
-        frame = np.expand_dims(frame, axis=2) # Add channel dim
-    
-    if frame.shape[2] == 1: # Single channel (like grayscale after expand_dims)
-        frame = np.repeat(frame, 3, axis=2) # Convert to RGB
+TARGET_VIDEO_DURATION_SECONDS = 60
+TARGET_ASPECT_RATIO = 9 / 16
+TARGET_RESOLUTION = (1080, 1920)
+TARGET_FPS = 30
+AUDIO_CODEC = 'aac'
+VIDEO_CODEC_CPU = 'libx264'
+VIDEO_CODEC_GPU = 'h264_nvenc'
+FFMPEG_CPU_PRESET = 'medium'
+FFMPEG_GPU_PRESET = 'p5'
+FFMPEG_CRF_CPU = '23'
+FFMPEG_CQ_GPU = '23'
+LOUDNESS_TARGET_LUFS = -16
 
-    if frame.shape[2] == 3:
-        # Add alpha channel if it's RGB
-        alpha_channel = np.full(frame.shape[:2], 255, dtype=frame.dtype)
-        return np.dstack((frame, alpha_channel))
-    elif frame.shape[2] == 4:
-        # Already RGBA
-        return frame
-    else:
-        # Fallback for unexpected channel counts, try to force RGB then add Alpha
-        print(f"Warning: Unexpected frame shape {frame.shape} in frame_to_rgba. Attempting conversion.")
-        rgb_frame = frame[:, :, :3] # Take first 3 channels
-        alpha_channel = np.full(rgb_frame.shape[:2], 255, dtype=frame.dtype)
-        return np.dstack((rgb_frame, alpha_channel))
+OVERLAY_FONT = 'Impact'
+OVERLAY_FONT_SIZE_RATIO = 1 / 12
+OVERLAY_TEXT_COLOR = 'white'
+OVERLAY_STROKE_COLOR = 'black'
+OVERLAY_STROKE_WIDTH = 3
+OVERLAY_POSITION = ('center', 0.8)
+OVERLAY_BG_COLOR = 'transparent'
 
+API_DELAY_SECONDS = 6
+MAX_REDDIT_POSTS_TO_FETCH = 10
+ADD_VISUAL_EMPHASIS = True
+APPLY_STABILIZATION = False
+MIX_ORIGINAL_AUDIO = False
+ORIGINAL_AUDIO_MIX_VOLUME = 0.7
+BACKGROUND_MUSIC_VOLUME = 0.15
+BACKGROUND_MUSIC_DUCKED_VOLUME = 0.04
+AUDIO_DUCKING_FADE_TIME = 0.3
+SHAKE_EFFECT_ENABLED = True
+SUBTLE_ZOOM_ENABLED = True
+COLOR_GRADE_ENABLED = True
+PARALLEL_FRAME_PROCESSING = True
+N_JOBS_PARALLEL = max(1, os.cpu_count() // 2)
 
-# Helper function to ensure a frame is RGBA (moved from later in the script)
-def ensure_rgba(frame):
-    """Safely convert any frame format to RGBA (4 channels with alpha)"""
-    # Handle different input cases
-    if frame is None:
-        return None
-        
-    # Convert grayscale to RGB
-    if frame.ndim == 2:
-        # Grayscale to RGB (3 identical channels)
-        frame = np.repeat(frame[:, :, np.newaxis], 3, axis=2)
-    
-    # Get frame shape info
-    h, w = frame.shape[:2]
-    channels = frame.shape[2] if frame.ndim == 3 else 1
-    
-    # Already RGBA
-    if channels == 4:
-        return frame
-    
-    # RGB to RGBA (add alpha channel)
-    if channels == 3:
-        # Create fully opaque alpha channel (255)
-        alpha = np.full((h, w, 1), 255, dtype=frame.dtype)
-        # Return RGBA
-        return np.dstack((frame, alpha))
-        
-    # Handle odd number of channels (convert to RGB first, then add alpha)
-    if channels != 3 and channels != 4:
-        print(f"Warning: Unexpected channel count: {channels}. Converting to RGBA.")
-        if channels == 1:
-            # Convert single channel to RGB
-            rgb = np.repeat(frame, 3, axis=2)
-        else:
-            # Take first 3 channels for RGB
-            rgb = frame[:, :, :3]
-        # Add alpha
-        alpha = np.full((h, w, 1), 255, dtype=frame.dtype)
-        return np.dstack((rgb, alpha))
-    
-    # Should never reach here
-    return frame
+FORBIDDEN_WORDS = [
+    "fuck", "fucking", "fucked", "fuckin", "shit", "shitty", "shitting",
+    "damn", "damned", "bitch", "bitching", "cunt", "asshole", "piss", "pissed"
+]
 
+YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.force-ssl']
+YOUTUBE_API_SERVICE_NAME = 'youtube'
+YOUTUBE_API_VERSION = 'v3'
+YOUTUBE_UPLOAD_CATEGORY_ID = '22'
+YOUTUBE_UPLOAD_PRIVACY_STATUS = 'private'
 
-def add_visual_emphasis(clip, focus_x=0.5, focus_y=0.5, start_time=0, duration=1.5, zoom_factor=1.1):
-    w, h = clip.size
-
-    def zoom_at(t):
-        if start_time <= t <= start_time + duration:
-            progress = (t - start_time) / duration
-            factor = 1 + (zoom_factor - 1) * math.sin(progress * math.pi)
-            return factor
-        return 1
-
-    zoomed = clip.resize(lambda t: zoom_at(t))
-
-    def make_circle_frame(t):
-        frame = np.zeros((h, w, 4), dtype=np.uint8)
-        if start_time <= t <= start_time + duration:
-            progress = (t - start_time) / duration
-            pulse = 0.5 + 0.5 * math.sin(progress * math.pi * 4)
-            radius = int(min(w, h) * 0.1)
-            thickness = 4
-            color = (255, 0, 0, int(255 * pulse * 0.5))
-            center = (int(focus_x * w), int(focus_y * h))
-            cv2.circle(frame, center, radius, color, thickness, lineType=cv2.LINE_AA)
-        return frame
-
-    circle_overlay = (VideoClip(make_circle_frame, duration=clip.duration)
-                      .set_position(('center', 'center')))
-
-    def brightness_factor(t):
-        if start_time <= t <= start_time + duration:
-            progress = (t - start_time) / duration
-            return 1 + 0.2 * math.sin(progress * math.pi)
-        return 1
-
-    bright_zoomed = zoomed.fl(lambda gf, t: gf(t) * brightness_factor(t))
-
-    # Ensure the base clip is RGBA before compositing with the RGBA overlay
-    bright_zoomed_rgba = bright_zoomed.fl_image(frame_to_rgba)
-
-    emphasized = CompositeVideoClip([bright_zoomed_rgba, circle_overlay.set_opacity(0.5)])
-    return emphasized.set_duration(clip.duration)
-
-def apply_subtle_zoom(clip, zoom_range=(1.0, 1.05)):
-    z_start, z_end = zoom_range
-    if random.choice([True, False]):
-        z_start, z_end = z_end, z_start
-    def zoom(t):
-        return z_start + (z_end - z_start) * (t / clip.duration)
-    return clip.resize(lambda t: zoom(t))
-
-def parallel_process_frames(clip, frame_func, n_jobs=4):
-    """
-    Utility to process frames in parallel using joblib.
-    Returns a new VideoFileClip with processed frames.
-    """
-    fps = clip.fps
-    frames = list(clip.iter_frames())
-    processed = Parallel(n_jobs=n_jobs)(delayed(frame_func)(f, i / fps) for i, f in enumerate(frames))
-    from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-    if processed:
-        first_shape = processed[0].shape
-        # Enforce all frames have the same shape as the first
-        processed = [ensure_frame_shape(f, first_shape) if f.shape != first_shape else f for f in processed]
-    return ImageSequenceClip(processed, fps=fps).set_duration(clip.duration).set_audio(clip.audio)
-
-def apply_shake(clip, max_translate=5, shake_duration=0.3, shake_times=3, parallel=True, n_jobs=4):
-    if clip.duration is None or clip.duration <= shake_duration:
-        return clip
-    shake_moments = sorted(random.uniform(0, max(0, clip.duration - shake_duration)) for _ in range(shake_times))
-    def shake_transform(frame, t):
-        offset_x, offset_y = 0, 0
-        for moment in shake_moments:
-            if moment <= t <= moment + shake_duration:
-                dx = random.uniform(-max_translate, max_translate)
-                dy = random.uniform(-max_translate, max_translate)
-                offset_x += dx
-                offset_y += dy
-        h, w = frame.shape[:2]
-        if abs(offset_x) > 0 or abs(offset_y) > 0:
-            M = np.float32([[1, 0, offset_x], [0, 1, offset_y]])
-            try:
-                warped = cv2.warpAffine(frame, M, (w, h), borderMode=cv2.BORDER_REFLECT)
-                wh, ww = warped.shape[:2]
-                # Pad if too small (centered)
-                pad_h = max(0, h - wh)
-                pad_w = max(0, w - ww)
-                if pad_h > 0 or pad_w > 0:
-                    top = pad_h // 2
-                    bottom = pad_h - top
-                    left = pad_w // 2
-                    right = pad_w - left
-                    warped = cv2.copyMakeBorder(warped, top, bottom, left, right, cv2.BORDER_REFLECT)
-                # Crop if too large (centered)
-                wh, ww = warped.shape[:2]
-                if wh > h or ww > w:
-                    start_y = (wh - h) // 2
-                    start_x = (ww - w) // 2
-                    warped = warped[start_y:start_y + h, start_x:start_x + w]
-                # Final check: ensure shape matches
-                # Always enforce shape (h, w, c)
-                return ensure_frame_shape(warped, (h, w, frame.shape[2]))
-            except Exception as e:
-                print(f"Warning: cv2.warpAffine failed during shake: {e}")
-                return frame
-        return frame
-    if parallel:
-        print(f"Applying shake in parallel using {n_jobs} jobs...")
-        return parallel_process_frames(clip, shake_transform, n_jobs=n_jobs)
-    else:
-        # Fallback to original serial method
-        def shake_transform_serial(get_frame, t):
-            return shake_transform(get_frame(t), t)
-        return clip.fl(shake_transform_serial, apply_to='video')
-
-
-def apply_color_grade(clip):
-    preset = random.choice(['none', 'cool', 'warm', 'vibrant'])
-    if preset == 'cool':
-        color = random.uniform(0.92, 0.98)
-        contrast = random.uniform(0.03, 0.08)
-        clip = clip.fx(colorx, color).fx(lum_contrast, contrast=contrast, lum=0)
-    elif preset == 'warm':
-        color = random.uniform(1.02, 1.08)
-        contrast = random.uniform(0.03, 0.08)
-        clip = clip.fx(colorx, color).fx(lum_contrast, contrast=contrast, lum=0)
-    elif preset == 'vibrant':
-        color = random.uniform(1.08, 1.15)
-        contrast = random.uniform(0.12, 0.18)
-        clip = clip.fx(colorx, color).fx(lum_contrast, contrast=contrast, lum=0)
-    return clip
-
-
-def is_ffmpeg_installed():
-    try:
-        return shutil.which("ffmpeg") is not None
-    except Exception:
-        return False
-
-def is_ffmpeg_normalize_installed():
-    try:
-        return shutil.which("ffmpeg-normalize") is not None
-    except Exception:
-        return False
+db_conn: Optional[sqlite3.Connection] = None
+db_cursor: Optional[sqlite3.Cursor] = None
+elevenlabs_client: Optional[ElevenLabs] = None
+gemini_model: Optional[genai.GenerativeModel] = None
+reddit: Optional[praw.Reddit] = None
+youtube_service: Optional[Any] = None
 
 class UploadLimitExceededError(Exception):
     pass
 
-REDDIT_CLIENT_ID = os.environ.get('REDDIT_CLIENT_ID')
-REDDIT_CLIENT_SECRET = os.environ.get('REDDIT_CLIENT_SECRET')
-REDDIT_USER_AGENT = os.environ.get('REDDIT_USER_AGENT', f'python:VideoBot:v1.2 (by /u/YOUR_USERNAME_HERE)')
+FALLBACK_ANALYSIS = {
+    'fallback': True,
+    'suggested_title': 'Interesting Reddit Clip',
+    'summary_for_description': 'Check out this video from Reddit!',
+    'mood': 'neutral',
+    'best_segment': None,
+    'key_visual_moments': [],
+    'speech_segments': [],
+    'hashtags': ['#reddit', '#shorts', '#video'],
+    'original_duration': 0.0
+}
 
-if not REDDIT_CLIENT_ID or not REDDIT_CLIENT_SECRET:
-    raise ValueError("Reddit API credentials (REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET) not found in environment variables.")
-if REDDIT_USER_AGENT == 'python:VideoBot:v1.2 (by /u/YOUR_USERNAME_HERE)':
-    print("Warning: Default REDDIT_USER_AGENT detected. Please set a unique User-Agent in your environment variables.")
-
-
-SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.force-ssl']
-CLIENT_SECRETS_FILE = os.environ.get('GOOGLE_CLIENT_SECRETS_FILE')
-if not CLIENT_SECRETS_FILE:
-    raise ValueError("Google Client Secrets file path (GOOGLE_CLIENT_SECRETS_FILE) not found in environment variables.")
-if not os.path.exists(CLIENT_SECRETS_FILE):
-     raise FileNotFoundError(f"Google Client Secrets file not found at specified path: {CLIENT_SECRETS_FILE}. Check the GOOGLE_CLIENT_SECRETS_FILE environment variable.")
-
-GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
-if not GEMINI_API_KEY:
-    raise ValueError("GEMINI_API_KEY environment variable not set.")
-genai.configure(api_key=GEMINI_API_KEY)
-GEMINI_MODEL_ID = 'gemini-2.0-flash'
-
-ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY')
-if not ELEVENLABS_API_KEY:
-     raise ValueError("ELEVENLABS_API_KEY environment variable not set.")
-
-API_DELAY = 6
-DB_FILE = 'uploaded_videos.db'
-conn = None
-c = None
-
-OVERLAY_FONT = 'Impact'
-OVERLAY_FONT_SIZE_RATIO = 1 / 10
-OVERLAY_TEXT_COLOR = 'white'
-OVERLAY_STROKE_COLOR = 'black'
-OVERLAY_STROKE_WIDTH = 3
-OVERLAY_POSITION = ('center', 'center')
-OVERLAY_BG_COLOR = 'transparent'
-
-ADD_VISUAL_EMPHASIS = True
-
-TEMP_DIR = "./temp_processing"
-pathlib.Path(TEMP_DIR).mkdir(exist_ok=True)
-MUSIC_FOLDER = "./music" # Changed from ./musci
-WATERMARK_PATH = "./watermark.png"
-FORBIDDEN_WORDS = [ "fuck", "fucking", "fucked", "fuckin", "shit", "shitty", "shitting", "damn", "damned", "bitch", "bitching", "cunt", "asshole", "piss", "pissed" ]
-
-if not is_ffmpeg_installed():
-    print("\n" + "="*40)
-    print("CRITICAL WARNING: FFmpeg is not installed or not found in PATH.")
-    print("Video and audio processing will likely fail.")
-    print("Please install FFmpeg and ensure it's in your system's PATH.")
-    print("="*40 + "\n")
-else:
-    print("FFmpeg check successful.")
-
-try:
-    elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
-    print("ElevenLabs client initialized.")
-except Exception as e:
-    print(f"Error initializing ElevenLabs client: {e}")
-    raise
-
-def setup_database():
-    global conn, c
+def check_ffmpeg_install(command: str) -> bool:
     try:
-        conn = sqlite3.connect(DB_FILE)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS uploads
-                     (reddit_url TEXT PRIMARY KEY, youtube_url TEXT)''')
-        conn.commit()
-        print("Database setup complete.")
-    except sqlite3.Error as e:
-        print(f"Database Error: {e}")
-        raise
-
-def close_database():
-    global conn
-    if conn:
-        try:
-            conn.close()
-            print("Database connection closed.")
-        except sqlite3.Error as e:
-            print(f"Error closing database: {e}")
-        finally:
-            conn = None
-
-def get_reddit_instance():
-    try:
-        reddit = praw.Reddit(client_id=REDDIT_CLIENT_ID,
-                           client_secret=REDDIT_CLIENT_SECRET,
-                           user_agent=REDDIT_USER_AGENT,
-                           check_for_async=False)
-        print("Testing Reddit authentication...")
-        me = reddit.user.me()
-        print(f"Reddit instance created successfully. Authenticated as: {me}")
-        return reddit
-    except prawcore.exceptions.OAuthException as e:
-        print(f"Reddit Authentication Error: {e}. Check your credentials in environment variables.")
-        raise
-    except prawcore.exceptions.ResponseException as e:
-         print(f"Reddit API Response Error: {e.response.status_code} - {e}")
-         raise
-    except Exception as e:
-        print(f"Error creating Reddit instance: {e}")
-        traceback.print_exc()
-        raise
-
-def get_youtube_service():
-    try:
-        flow = InstalledAppFlow.from_client_secrets_file(CLIENT_SECRETS_FILE, SCOPES)
-        credentials = flow.run_local_server(port=8090)
-        print("YouTube authentication successful.")
-        return build('youtube', 'v3', credentials=credentials)
-    except FileNotFoundError:
-        print(f"Error: YouTube client secrets file not found at {CLIENT_SECRETS_FILE}")
-        raise
-    except Exception as e:
-        print(f"Error creating YouTube service: {e}")
-        traceback.print_exc()
-        raise
-
-def cleanup_temp_files(*args):
-    cleaned_count = 0
-    for file_path in args:
-        if file_path and isinstance(file_path, (str, pathlib.Path)):
-             path_obj = pathlib.Path(file_path)
-             if path_obj.is_file():
-                 try:
-                     print(f"  - Removing temp file: {path_obj.name}")
-                     path_obj.unlink()
-                     cleaned_count += 1
-                 except OSError as e: print(f"  - Error removing {path_obj.name}: {e}")
-    if cleaned_count > 0:
-        print(f"Cleanup complete. Removed {cleaned_count} temporary files.")
-
-
-def combine_video_audio_subs(original_video_path, processed_video_stream_path, tts_audio_path, subtitle_clips, output_path, mix_audio=False,
-                             stabilize=False, transforms_file=None, skip_enhancements=False, color_factor=1.05, contrast=0.1, luminance=3,
-                             speech_segments=None, gemini_data=None):
-    original_clip_for_audio = None
-    original_audio = None
-    processed_video_clip = None
-    tts_clip = None
-    tts_audio = None
-    bg_music_clip = None
-    bg_music_audio = None
-    final_video = None
-    final_audio = None
-    temp_normalized_tts_path = None
-    temp_bg_music_path = None # Temp path for potentially processed bg music
-
-    print(f"\n--- Combining Video Elements ---")
-    print(f"  Video Stream: {os.path.basename(processed_video_stream_path)}")
-    print(f"  Original Audio Ref: {os.path.basename(original_video_path) if original_video_path else 'None'}")
-    print(f"  TTS Audio: {os.path.basename(tts_audio_path) if tts_audio_path else 'None'}")
-    print(f"  Subtitles: {len(subtitle_clips)}")
-    print(f"  Output: {os.path.basename(output_path)}")
-
-    try:
-        # 1. Load Processed Video Stream
-        print(f"Loading processed video stream...")
-        if not os.path.exists(processed_video_stream_path): raise FileNotFoundError(f"Processed video stream not found: {processed_video_stream_path}")
-        processed_video_clip = VideoFileClip(processed_video_stream_path)
-        if not processed_video_clip: raise ValueError(f"Failed to load processed video: {processed_video_stream_path}")
-        video_duration = processed_video_clip.duration
-        video_w, video_h = processed_video_clip.size
-        print(f"  Video loaded: {video_duration:.2f}s, {video_w}x{video_h}")
-
-        # Apply visual enhancements
-        if not skip_enhancements:
-            mood = ""
-            if gemini_data: mood = gemini_data.get("mood", "").lower()
-
-            if "energetic" in mood or "action" in mood:
-                current_color_factor = random.uniform(1.12, 1.18)
-                current_contrast = random.uniform(0.13, 0.18)
-            elif "sad" in mood or "calm" in mood:
-                current_color_factor = random.uniform(0.92, 0.98)
-                current_contrast = random.uniform(0.03, 0.08)
-            else:
-                current_color_factor = random.uniform(color_factor - 0.03, color_factor + 0.03)
-                current_contrast = random.uniform(contrast - 0.03, contrast + 0.03)
-
-            print(f"Applying enhancements: colorx({current_color_factor:.2f}), lum_contrast(contrast={current_contrast:.2f}, lum={luminance})")
-            processed_video_clip = colorx(processed_video_clip, current_color_factor)
-            processed_video_clip = lum_contrast(processed_video_clip, contrast=current_contrast, lum=luminance)
-
-            # Randomize subtle zoom, shake, and color grade parameters
-            zoom_start = random.uniform(1.01, 1.04)
-            zoom_end = random.uniform(1.04, 1.08)
-            processed_video_clip = apply_subtle_zoom(processed_video_clip, zoom_range=(zoom_start, zoom_end))
-
-            max_translate = random.uniform(3, 7)
-            shake_duration = random.uniform(0.2, 0.4)
-            shake_times = random.randint(2, 5)
-            processed_video_clip = apply_shake(processed_video_clip, max_translate=max_translate, shake_duration=shake_duration, shake_times=shake_times)
-
-            processed_video_clip = apply_color_grade(processed_video_clip)
-        else:
-             print("Skipping visual enhancements.")
-
-        # Add visual emphasis
-        if ADD_VISUAL_EMPHASIS and gemini_data:
-             try:
-                 key_moments_data = gemini_data.get("key_visual_moments", []) # Use the right key
-                 if key_moments_data:
-                     print(f"Adding emphasis based on {len(key_moments_data)} key moments.")
-                     for moment in key_moments_data:
-                         t = moment.get('timestamp')
-                         fp = moment.get('focus_point')
-                         # Ensure timestamp and focus point are valid
-                         if t is not None and isinstance(fp, dict) and 'x' in fp and 'y' in fp:
-                             try:
-                                 t_float = float(t)
-                                 fx = float(fp['x'])
-                                 fy = float(fp['y'])
-                                 # Only apply if within duration
-                                 if 0 <= t_float < video_duration:
-                                     emphasis_duration = 1.5 # Standard duration
-                                     emphasis_start = max(0, t_float - emphasis_duration / 2)
-                                     print(f"  - Emphasis at {emphasis_start:.2f}s (moment at {t_float:.2f}s), focus ({fx:.2f}, {fy:.2f})")
-                                     processed_video_clip = add_visual_emphasis(
-                                         processed_video_clip, focus_x=fx, focus_y=fy,
-                                         start_time=emphasis_start, duration=emphasis_duration, zoom_factor=1.1
-                                     )
-                                 else: print(f"  - Skipping emphasis for moment at {t_float:.2f}s (out of bounds)")
-                             except (ValueError, TypeError) as parse_err:
-                                 print(f"  - Warning: Skipping emphasis due to invalid data format: {moment}, Error: {parse_err}")
-                         else: print(f"  - Warning: Skipping emphasis due to missing data: {moment}")
-                 else: print("No key visual moments found in Gemini data for emphasis.")
-             except Exception as e:
-                 print(f"Warning: Failed to add visual emphasis: {e}")
-                 traceback.print_exc()
-        else:
-             print("Skipping visual emphasis (disabled or no Gemini data).")
-
-        print(f"Processed video duration after effects: {processed_video_clip.duration:.2f}s")
-
-        # 2. Load Original Audio (if requested or needed)
-        # This audio should correspond to the processed_video_stream timeframe
-        # We assume the `original_video_path` passed IS the correct source (e.g., already trimmed if needed)
-        if mix_audio and original_video_path and os.path.exists(original_video_path):
-            print(f"Loading original audio from: {os.path.basename(original_video_path)}")
-            try:
-                # Try loading as VideoFileClip first to get audio
-                original_clip_for_audio = VideoFileClip(original_video_path)
-                original_audio = original_clip_for_audio.audio
-                if original_audio:
-                    print(f"  Original audio duration: {original_audio.duration:.2f}s")
-                    # Trim/pad original audio to match video duration *exactly* if mixing
-                    original_audio = original_audio.set_duration(video_duration)
-                    print(f"  Original audio adjusted to video duration: {original_audio.duration:.2f}s")
-                else:
-                    print("  Warning: Original video has no audio track.")
-                # Close the source clip now that we have the audio object
-                original_clip_for_audio.close()
-                original_clip_for_audio = None
-            except Exception as e_orig_aud:
-                print(f"  Warning: Could not load original audio from {original_video_path}: {e_orig_aud}")
-                original_audio = None # Ensure it's None if loading failed
-        elif mix_audio:
-             print("Warning: Mix audio requested but original_video_path not valid.")
-
-
-        # 3. Normalize and Load TTS Audio
-        if tts_audio_path and os.path.exists(tts_audio_path):
-            print("Preparing TTS audio...")
-            tts_base_name = os.path.basename(tts_audio_path)
-            temp_normalized_tts_path = os.path.join(TEMP_DIR, os.path.splitext(tts_base_name)[0] + "_norm.aac")
-
-            print(f"Normalizing TTS audio: {tts_base_name} -> {os.path.basename(temp_normalized_tts_path)}")
-            norm_success = normalize_loudness(tts_audio_path, temp_normalized_tts_path, target_lufs=-16)
-
-            if norm_success and os.path.exists(temp_normalized_tts_path):
-                print(f"Loading normalized TTS audio clip...")
-                try:
-                    tts_clip = AudioFileClip(temp_normalized_tts_path)
-                    if tts_clip:
-                        tts_audio = tts_clip
-                        print(f"  Loaded normalized TTS audio duration: {tts_audio.duration:.2f}s")
-                        # Ensure TTS audio matches video duration (pad with silence if needed)
-                        tts_audio = tts_audio.set_duration(video_duration)
-                        print(f"  TTS audio adjusted to video duration: {tts_audio.duration:.2f}s")
-                    else: print(f"  Warning: Failed to load normalized TTS audio clip.")
-                except Exception as e_load_tts:
-                    print(f"  Warning: Failed to load normalized TTS audio: {e_load_tts}")
-                    if tts_clip: tts_clip.close(); tts_clip = None
-                    tts_audio = None # Ensure it's None
-            else:
-                print(f"  Warning: Normalized TTS file not found or normalization failed. Skipping TTS.")
-                cleanup_temp_files(temp_normalized_tts_path)
-                temp_normalized_tts_path = None
-        else:
-            print("No TTS audio path provided or file not found.")
-
-
-        # 4. Add Background Music
-        if os.path.isdir(MUSIC_FOLDER):
-            bg_music_files = [f for f in os.listdir(MUSIC_FOLDER) if f.lower().endswith((".mp3", ".wav", ".aac", ".m4a"))]
-            if bg_music_files:
-                bg_music_path = os.path.join(MUSIC_FOLDER, random.choice(bg_music_files))
-                print(f"Attempting to add background music: {os.path.basename(bg_music_path)}")
-                try:
-                    bg_music_clip = AudioFileClip(bg_music_path)
-                    bg_music_audio = bg_music_clip
-
-                    print(f"  Music duration: {bg_music_audio.duration:.2f}s")
-
-                    # Loop or trim background music
-                    if bg_music_audio.duration < video_duration:
-                        loops = math.ceil(video_duration / bg_music_audio.duration)
-                        print(f"  Looping background music {loops} times.")
-                        bg_music_audio = concatenate_audioclips([bg_music_audio] * loops)
-
-                    bg_music_audio = bg_music_audio.subclip(0, video_duration)
-                    print(f"  Background music adjusted to video duration: {bg_music_audio.duration:.2f}s")
-
-                    # --- Dynamic ducking based on speech segments ---
-                    if speech_segments:
-                        print(f"  Applying dynamic audio ducking based on {len(speech_segments)} speech segments.")
-                        def ducking_volume(t):
-                            base_vol = 0.15 # Lower base volume for BG music
-                            duck_vol = 0.04 # Volume during speech
-                            fade = 0.15     # Fade time
-
-                            for seg in speech_segments:
-                                try:
-                                    start = float(seg.get('start_time', 0))
-                                    end = float(seg.get('end_time', 0))
-                                except (ValueError, TypeError): continue # Skip invalid segment
-
-                                if start - fade <= t <= end + fade:
-                                    if start - fade <= t < start: # Fade down
-                                        progress = max(0, min(1, (t - (start - fade)) / fade))
-                                        return base_vol - (base_vol - duck_vol) * progress
-                                    elif end < t <= end + fade: # Fade up
-                                        progress = max(0, min(1, (t - end) / fade))
-                                        return duck_vol + (base_vol - duck_vol) * progress
-                                    else: # During speech (start <= t <= end)
-                                        return duck_vol
-                            # If not in any speech segment or its fade buffer
-                            return base_vol
-
-                        if isinstance(bg_music_audio, AudioFileClip): # Changed AudioClip to AudioFileClip
-                            bg_music_audio = bg_music_audio.volumex(ducking_volume)
-                        else:
-                            print("  Warning: bg_music_audio is not an AudioFileClip, skipping ducking.")
-                        print("  Applied ducking volume effect to background music.")
-                    else:
-                        print("  No speech segments provided, applying constant low volume (0.15) to background music.")
-                        bg_music_audio = bg_music_audio.volumex(0.15)
-
-                except Exception as e:
-                    print(f"  Warning: Failed to load or process background music: {e}")
-                    traceback.print_exc()
-                    if bg_music_clip: bg_music_clip.close() # Close clip if loaded but failed processing
-                    bg_music_clip = None
-                    bg_music_audio = None
-            else: print(f"No compatible music files found in {MUSIC_FOLDER}.")
-        else: print(f"Warning: Music folder '{MUSIC_FOLDER}' not found. Skipping background music.")
-
-
-        # 5. Choose and Combine Final Audio Tracks
-        audio_tracks = []
-        is_original_usable = original_audio is not None and original_audio.duration > 0.1
-        is_tts_usable = tts_audio is not None and tts_audio.duration > 0.1
-        is_bg_music_usable = bg_music_audio is not None and bg_music_audio.duration > 0.1
-
-        if mix_audio and is_original_usable and is_tts_usable:
-            print("Mixing original (80% vol) and TTS audio.")
-            original_audio = original_audio.volumex(0.8) # Adjust volume before adding
-            audio_tracks.append(original_audio)
-            audio_tracks.append(tts_audio)
-        elif is_tts_usable:
-             print("Using TTS audio as primary.")
-             audio_tracks.append(tts_audio)
-        elif is_original_usable:
-            print("Using original audio as primary (TTS unusable or not mixed).")
-            audio_tracks.append(original_audio)
-        else:
-            print("Warning: No primary audio (Original or TTS) is usable.")
-
-        if is_bg_music_usable:
-            print("Adding background music to the mix.")
-            audio_tracks.append(bg_music_audio)
-        else: print("No background music added.")
-
-        if len(audio_tracks) > 1:
-            print(f"Compositing {len(audio_tracks)} audio tracks.")
-            valid_tracks = [track for track in audio_tracks if hasattr(track, 'duration')]
-            if len(valid_tracks) > 1:
-                final_audio = CompositeAudioClip(valid_tracks)
-            elif len(valid_tracks) == 1:
-                final_audio = valid_tracks[0]
-            else: final_audio = None
-        elif len(audio_tracks) == 1:
-            print("Using single audio track.")
-            final_audio = audio_tracks[0]
-        else:
-            print("Warning: No audio tracks available for the final video.")
-            final_audio = None
-
-        # Ensure final audio duration matches video duration *exactly*
-        if final_audio:
-            # Removed explicit set_duration for final_audio to avoid OSError with shorter clips
-            # CompositeAudioClip should handle durations correctly when set on the video.
-            # if abs(final_audio.duration - video_duration) > 0.05: # Allow tiny discrepancy
-            #      print(f"  Adjusting final audio duration ({final_audio.duration:.2f}s) to match video ({video_duration:.2f}s)")
-            #      final_audio = final_audio.set_duration(video_duration)
-            print(f"Final audio duration determined by composition: {final_audio.duration:.2f}s (Video duration: {video_duration:.2f}s)")
-        else: print("Proceeding without audio.")
-
-
-        # 6. Set final audio onto the processed video clip
-        print("Setting final audio onto video clip...")
-        final_video_with_audio = processed_video_clip.set_audio(final_audio)
-
-
-        # 7. Apply overlays (watermark)
-        overlays = []
-        if os.path.exists(WATERMARK_PATH):
-            try:
-                # Convert watermark to RGBA immediately when loading
-                watermark = (ImageClip(WATERMARK_PATH)
-                             .set_duration(final_video_with_audio.duration)
-                             .resize(height=max(20, int(final_video_with_audio.h * 0.04))) # Smaller watermark
-                             .margin(right=15, bottom=15, opacity=0)
-                             .set_pos(("right", "bottom"))
-                             .set_opacity(0.5)) # More subtle
-                # Ensure watermark is RGBA
-                watermark = watermark.fl_image(ensure_rgba)
-                overlays.append(watermark)
-                print("Added watermark overlay.")
-            except Exception as e:
-                 print(f"Warning: Failed to create watermark overlay: {e}")
-        else:
-            print(f"Warning: Watermark file not found at {WATERMARK_PATH}, skipping.")
-
-        # Combine video with overlays
-        if overlays:
-            # Ensure the base clip is RGBA before adding RGBA overlays (like watermark)
-            print("Converting main clip to RGBA before adding overlays...")
-            # This is the key fix - ensure consistent RGBA format
-            final_video_with_audio_rgba = final_video_with_audio.fl_image(ensure_rgba)
-            
-            print("Compositing RGBA base clip with overlays...")
-            main_with_overlays = CompositeVideoClip([final_video_with_audio_rgba] + overlays, size=final_video_with_audio.size)
-            print("Overlays composited.")
-        else:
-            main_with_overlays = final_video_with_audio # No overlays, keep original format
-
-
-        # 8. Create final composite with subtitles
-        print(f"Adding {len(subtitle_clips)} subtitle clips...")
-        if len(subtitle_clips) > 0:
-            print(f"Ensuring consistent RGBA format for all clips before compositing...")
-            # Convert main clip to RGBA if it isn't already
-            if not hasattr(main_with_overlays, 'is_rgba') or not main_with_overlays.is_rgba:
-                main_with_overlays_rgba = main_with_overlays.fl_image(ensure_rgba)
-            else:
-                main_with_overlays_rgba = main_with_overlays
-            
-            # Ensure all subtitle clips are RGBA
-            compatible_subtitles = []
-            for sub in subtitle_clips:
-                try:
-                    sub_rgba = sub.fl_image(ensure_rgba)
-                    compatible_subtitles.append(sub_rgba)
-                except Exception as e:
-                    print(f"Warning: Error converting subtitle to RGBA: {e}. Skipping this subtitle.")
-            
-            # Composite with consistent RGBA format
-            final_video = CompositeVideoClip([main_with_overlays_rgba] + compatible_subtitles)
-            print(f"Composited main clip with {len(compatible_subtitles)} subtitle clips.")
-        else:
-            final_video = main_with_overlays
-            print("No subtitles to composite.")
-
-
-        # 9. Trim final video to max 60 seconds
-        if final_video.duration > 60.5: # Allow slightly over 60 before trimming
-            print(f"Trimming final video from {final_video.duration:.2f}s to 60s.")
-            final_video = final_video.subclip(0, 60)
-        elif final_video.duration <= 0:
-             raise ValueError(f"Final video has invalid duration: {final_video.duration:.2f}s")
-
-
-        # 10. Write Final Video
-        print(f"Writing final combined video (Duration: {final_video.duration:.2f}s)...")
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        if os.path.exists(output_path): cleanup_temp_files(output_path)
-
-        # --- GPU Acceleration Check ---
-        # Note: has_nvidia_gpu() is defined globally earlier in the script
-        gpu_available = has_nvidia_gpu()
-
-        if gpu_available:
-            print("GPU detected: Using h264_nvenc for final encoding.")
-            write_params = {
-                'codec': 'h264_nvenc', # Use NVENC codec
-                'audio_codec': 'aac',
-                'temp_audiofile': os.path.join(TEMP_DIR, 'final-temp-audio.m4a'),
-                'remove_temp': True,
-                # 'preset': 'medium', # NVENC uses different presets
-                'fps': 30,
-                # 'threads': os.cpu_count() or 4, # Not typically needed/used by NVENC
-                'logger': 'bar',
-                'write_logfile': False
-            }
-            ffmpeg_extra_params = [
-                # '-crf', '23', # CRF is for libx264
-                '-cq', '23',      # Use Constant Quality for NVENC (similar target)
-                '-preset', 'p5',  # Use NVENC preset (p1=fastest, p7=slowest/best quality, p5=slow)
-                '-pix_fmt', 'yuv420p', # Still needed for compatibility
-                '-movflags', '+faststart'
-            ]
-        else:
-            print("No GPU detected or nvidia-smi failed: Using libx264 (CPU) for final encoding.")
-            write_params = {
-                'codec': 'libx264',
-                'audio_codec': 'aac',
-                'temp_audiofile': os.path.join(TEMP_DIR, 'final-temp-audio.m4a'),
-                'remove_temp': True,
-                'preset': 'medium', # Keep CPU preset
-                'fps': 30,
-                'threads': os.cpu_count() or 4, # Keep CPU threads
-                'logger': 'bar',
-                'write_logfile': False
-            }
-            ffmpeg_extra_params = [
-                '-crf', '23', # Keep CPU CRF
-                '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart'
-            ]
-
-        # Add stabilization filter (common logic for both CPU/GPU)
-        if stabilize and transforms_file and os.path.exists(transforms_file):
-             print(f"Adding stabilization filter using {os.path.basename(transforms_file)}")
-             escaped_transforms_path = str(transforms_file).replace('\\', '/')
-             # Check if -vf already exists in params (unlikely here, but safer)
-             vf_index = -1
-             try: vf_index = ffmpeg_extra_params.index('-vf')
-             except ValueError: pass
-
-             stabilization_filter = f'vidstabtransform=input="{escaped_transforms_path}":zoom=0:smoothing=10,unsharp=5:5:0.8:3:3:0.4'
-
-             if vf_index != -1:
-                 # Append to existing filtergraph (safer if other filters were added)
-                 ffmpeg_extra_params[vf_index + 1] += f',{stabilization_filter}'
-                 print(f"  Appended stabilization to existing -vf filter.")
-             else:
-                 # Add new filtergraph
-                 ffmpeg_extra_params.extend(['-vf', stabilization_filter])
-                 print(f"  Added new -vf filter for stabilization.")
-        elif stabilize:
-             print("Warning: Stabilization requested but transforms file missing or invalid. Skipping stabilization.")
-
-        write_params['ffmpeg_params'] = ffmpeg_extra_params
-
-        # Before writing, convert final video to RGB format (important fix)
-        print("Converting final video to RGB format for encoding...")
-        final_video = final_video.fl_image(lambda frame: frame[:,:,:3] if frame.shape[2] == 4 else frame)
-
-        # Ensure final video dimensions are even (required by libx264)
-        w, h = final_video.size
-        even_w, even_h = w - (w % 2), h - (h % 2)
-
-        if (w != even_w) or (h != even_h):
-            print(f"Adjusting final video size from ({w}x{h}) to ({even_w}x{even_h}) for libx264 compatibility.")
-            final_video = final_video.resize(newsize=(even_w, even_h))
-
-        final_video.write_videofile(output_path, **write_params)
-
-        print(f"Final video written. Verifying: {output_path}")
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
-            # Final audio check
-            if final_audio and not has_audio_track(output_path):
-                 print(f"CRITICAL ERROR: Final combined video {output_path} is missing audio track, but audio was expected!")
-                 cleanup_temp_files(output_path) # Clean up failed file
-                 return None # Signal failure
-            elif not final_audio:
-                 print("Final video created without audio (as expected).")
-                 return output_path
-            else:
-                 print(f"Audio track verified for final combined video.")
-                 return output_path
-        else:
-            print(f"CRITICAL ERROR: Final combined video file is missing or empty: {output_path}")
-            cleanup_temp_files(output_path)
-            return None
-
-    except Exception as e:
-        print(f"Error combining video elements: {e}")
-        traceback.print_exc()
-        cleanup_temp_files(output_path) # Clean up potentially failed output file
-        return None
-    finally:
-        # Ensure all clips are closed
-        print("Closing MoviePy clips...")
-        clips_to_close = [
-            original_clip_for_audio, processed_video_clip, tts_clip,
-            bg_music_clip, final_video, final_audio, original_audio
-            ]
-        # Also close subtitle clips if they are moviepy objects
-        if subtitle_clips:
-             clips_to_close.extend([sub for sub in subtitle_clips if hasattr(sub, 'close')])
-
-        for i, clip_obj in enumerate(clips_to_close):
-            if clip_obj and hasattr(clip_obj, 'close'):
-                try:
-                    # print(f"Closing clip {i}...") # Verbose
-                    clip_obj.close()
-                except Exception as e_close:
-                    print(f"Warning: Error closing clip object {i}: {e_close}")
-
-        # Clean up temporary normalized TTS file
-        cleanup_temp_files(temp_normalized_tts_path)
-
-def normalize_loudness(input_path, output_path, target_lufs=-14):
-    """
-    Normalize audio loudness using ffmpeg-normalize if available
-    """
-    if not os.path.exists(input_path):
-        print(f"Error: Input file for normalization not found: {input_path}")
-        return False
-
-    if not is_ffmpeg_normalize_installed():
-        print("Warning: ffmpeg-normalize not found. Copying input to output without loudness normalization.")
-        try:
-            shutil.copy(input_path, output_path)
-            return True # Indicate copy success
-        except Exception as e:
-            print(f"Error copying file during normalize fallback: {e}")
-            return False # Indicate failure
-
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    if os.path.exists(output_path): cleanup_temp_files(output_path)
-
-    cmd = [
-        "ffmpeg-normalize", str(input_path),
-        "-o", str(output_path),
-        "-c:a", "aac",
-        "-b:a", "192k",
-        "-ar", "44100",
-        "-f",
-        "-nt", "ebu",
-        "-t", str(target_lufs),
-        "--keep-loudness-range-target" # Try to preserve dynamic range
-    ]
-    print(f"Running ffmpeg-normalize: {' '.join(cmd)}")
-    try:
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
-        print(f"Loudness normalized to {target_lufs} LUFS: {output_path}")
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
-            return True
-        else:
-            print("Error: ffmpeg-normalize ran but output file is missing or empty.")
-            cleanup_temp_files(output_path)
-            return False # Treat as failure if output isn't valid
-    except subprocess.CalledProcessError as e:
-        print(f"ffmpeg-normalize failed (exit code {e.returncode}): {e.stderr}")
-        print("Attempting to copy input to output as fallback.")
-        try:
-            shutil.copy(input_path, output_path)
-            return True # Indicate copy success even if normalization failed
-        except Exception as copy_e:
-            print(f"Error copying file during normalize fallback: {copy_e}")
-            return False
-    except Exception as e:
-        print(f"Unexpected error during normalization: {e}")
-        return False
-
-
-def has_nvidia_gpu():
-    """Check if an NVIDIA GPU is available for encoding"""
-    try:
-        result = subprocess.run(['nvidia-smi'], capture_output=True, text=True)
-        return result.returncode == 0
+        return shutil.which(command) is not None
     except Exception:
         return False
 
-
-def analyze_video_with_gemini(video_path, title, subreddit_name):
-    """
-    Use Gemini to analyze video content and get structured data for a more engaging output.
-    Returns a dictionary with analysis data.
-    """
-    if not os.path.exists(video_path):
-        print(f"Video file not found for Gemini analysis: {video_path}")
-        return None
-
-    # Extract frames for analysis (at 1fps to keep sample size reasonable)
-    temp_frames_dir = os.path.join(TEMP_DIR, "gemini_frames")
-    os.makedirs(temp_frames_dir, exist_ok=True)
-    
+def has_nvidia_gpu() -> bool:
+    if sys.platform == "win32":
+        command = ['nvidia-smi']
+    else:
+        command = ['nvidia-smi']
     try:
-        print("Extracting frames for Gemini analysis...")
-        clip = VideoFileClip(video_path)
-        video_duration = clip.duration
-        
-        # Extract one frame per second (max 20 frames)
-        frame_count = min(20, int(video_duration))
-        frame_interval = max(1, video_duration / frame_count)
-        sample_frames = []
-        
-        for i in range(frame_count):
-            t = i * frame_interval
-            if t >= video_duration:
-                break
-                
-            frame_path = os.path.join(temp_frames_dir, f"frame_{i:03d}.jpg")
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=10)
+        return result.returncode == 0 and "NVIDIA-SMI" in result.stdout
+    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
+        return False
+
+def cleanup_temp_files(*file_paths: Optional[pathlib.Path]):
+    for file_path in file_paths:
+        if file_path and file_path.is_file():
             try:
-                frame = clip.get_frame(t)
-                # Convert to RGB if frame has alpha
-                if frame.shape[2] == 4:
-                    frame = frame[:, :, :3]
-                
-                # Convert numpy array to PIL Image and save
-                Image.fromarray((frame * 255).astype(np.uint8)).save(frame_path, quality=85)
-                sample_frames.append({
-                    'path': frame_path,
-                    'time': t
-                })
-            except Exception as frame_err:
-                print(f"Error extracting frame at {t}s: {frame_err}")
-                continue
-        
-        clip.close()
-        
-        if not sample_frames:
-            print("Failed to extract any frames for analysis")
-            return None
-            
-        print(f"Extracted {len(sample_frames)} frames for analysis")
-        
-        # Prepare prompt for Gemini
-        prompt = f"""
-        Analyze this video content from Reddit: r/{subreddit_name}
-        Original title: "{title}"
-        
-        I'm showing you {len(sample_frames)} frames from this video.
-        Provide a structured analysis in JSON format with the following information:
-        
-        1. A brief summary of what's happening in the video (summary_for_description)
-        2. A suggested title for YouTube Shorts that's catchy but accurate, under 100 chars (suggested_title)
-        3. The overall mood of the video (mood) - choose one: [funny, serious, informative, emotional, action, calm, exciting, sad]
-        4. Best segment to feature (if you can determine): provide start_time and end_time in seconds (best_segment)
-        5. Key visual moments: list timestamps and focus points (x,y coordinates from 0-1) (key_visual_moments)
-        6. Speech segments for subtitles (if applicable): list of segments with start_time, end_time and text (speech_segments)
-        7. Relevant hashtags for social media (hashtags) - 3 to 5 hashtags
-        
-        Return in clean JSON format only, no explanations.
-        """
-        
-        # Convert frames to base64 for Gemini input
-        image_parts = []
-        for frame in sample_frames[:10]:  # Limit to 10 frames to avoid token limits
-            with open(frame['path'], 'rb') as f:
-                image_data = f.read()
-                image_parts.append({
-                    'mime_type': 'image/jpeg',
-                    'data': base64.b64encode(image_data).decode('utf-8')
-                })
-        
-        print("Sending frames to Gemini for analysis...")
-        try:
-            # Set up Gemini model (using placeholder for compatibility)
-            gemini_model = genai.GenerativeModel(GEMINI_MODEL_ID)
-            
-            # Process in batches if there are many frames
-            if len(image_parts) > 5:
-                print("Processing frames in batches...")
-                batch_size = 5
-                batch_results = []
-                
-                for i in range(0, len(image_parts), batch_size):
-                    batch = image_parts[i:i+batch_size]
-                    batch_prompt = f"{prompt}\n(Batch {i//batch_size + 1} of {(len(image_parts) + batch_size - 1)//batch_size})"
-                    
-                    response = gemini_model.generate_content(
-                        [batch_prompt, *[{'image': img} for img in batch]]
-                    )
-                    
-                    batch_results.append(response.text)
-                
-                # Combine batch results
-                combined_text = "\n".join(batch_results)
-                # Extract JSON data from combined text
-                json_match = re.search(r'\{.*\}', combined_text, re.DOTALL)
-                if json_match:
-                    result_text = json_match.group(0)
-                else:
-                    result_text = combined_text
-            else:
-                # Process all frames at once if few
-                content_parts = [prompt]
-                for img in image_parts:
-                    content_parts.append({'image': img})
-                
-                response = gemini_model.generate_content(content_parts)
-                result_text = response.text
-                
-            # Extract JSON from response
-            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-            if json_match:
-                json_text = json_match.group(0)
-            else:
-                json_text = result_text
-                
-            # Parse JSON data
-            try:
-                analysis_data = json.loads(json_text)
-                print("Gemini analysis successful!")
-                return analysis_data
-            except json.JSONDecodeError:
-                print("Failed to parse Gemini response as JSON")
-                print(f"Response text: {result_text[:500]}...")
-                return None
-                
-        except Exception as gemini_err:
-            print(f"Gemini API error: {gemini_err}")
-            traceback.print_exc()
-            return None
-    except Exception as e:
-        print(f"Error during video analysis with Gemini: {e}")
-        traceback.print_exc()
-        return None
-    finally:
-        # Clean up temp frames
-        try:
-            if os.path.exists(temp_frames_dir):
-                shutil.rmtree(temp_frames_dir)
-                print("Cleaned up temporary frame directory")
-        except Exception as cleanup_err:
-            print(f"Error cleaning up temp frames: {cleanup_err}")
+                file_path.unlink()
+            except OSError as e:
+                print(f"  - Warning: Error removing {file_path.name}: {e}")
 
-
-def create_animated_subtitle_clips(speech_segments, video_width, video_height, font_size=None):
-    """
-    Creates animated subtitle clips for each speech segment
-    Returns a list of TextClip objects with timing and animations
-    """
-    if not speech_segments:
-        return []
-        
-    print(f"Creating {len(speech_segments)} subtitle clips...")
-    
-    # Calculate font size based on video height if not specified
-    if font_size is None:
-        font_size = max(24, int(video_height * OVERLAY_FONT_SIZE_RATIO))
-        print(f"Using auto-calculated font size: {font_size}")
-    
-    subtitle_clips = []
-    
-    for segment in speech_segments:
-        try:
-            text = segment.get('text', '')
-            start_time = float(segment.get('start_time', 0))
-            end_time = float(segment.get('end_time', 0))
-            
-            if not text or start_time >= end_time:
-                continue  # Skip invalid segments
-                
-            # Truncate long text (max 2 lines)
-            if len(text) > 80:
-                text = text[:77] + "..."
-                
-            # Create a TextClip
-            txt_clip = (TextClip(text, fontsize=font_size, font=OVERLAY_FONT, color=OVERLAY_TEXT_COLOR,
-                                 bg_color=OVERLAY_BG_COLOR, stroke_color=OVERLAY_STROKE_COLOR,
-                                 stroke_width=OVERLAY_STROKE_WIDTH, align='center',
-                                 method='caption', size=(int(video_width * 0.9), None))
-                         .set_start(start_time)
-                         .set_end(end_time)
-                         .set_position(OVERLAY_POSITION))
-            
-            # Add fade in/out animation
-            fade_time = min(0.3, (end_time - start_time) * 0.2)  # 20% of duration or max 0.3s
-            txt_clip = txt_clip.fadein(fade_time).fadeout(fade_time)
-            
-            subtitle_clips.append(txt_clip)
-            
-        except Exception as e:
-            print(f"Error creating subtitle clip for segment: {e}")
-            traceback.print_exc()
-    
-    return subtitle_clips
-
-
-def generate_tts(text, output_path, voice_id=DEFAULT_VOICE_ID):
-    """
-    Generate TTS audio from text using ElevenLabs API
-    Returns True on success, False on failure
-    """
-    if not text or not text.strip():
-        print("No text provided for TTS generation")
+def contains_forbidden_words(text: str) -> bool:
+    if not text:
         return False
-        
-    print(f"Generating TTS for text ({len(text)} chars)...")
-    
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    if os.path.exists(output_path):
-        cleanup_temp_files(output_path)
-    
-    try:
-        # Send request to ElevenLabs API
-        print(f"Using voice ID: {voice_id}")
-        
-        # Add a slight pause at beginning and end
-        processed_text = f"{text}"
-        
-        tts_response = elevenlabs_client.generate(
-            text=processed_text,
-            voice=voice_id,
-            model_id="eleven_multilingual_v2"
-        )
-        
-        # Save audio file
-        save(tts_response, output_path)
-        
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 100:
-            print(f"TTS generated successfully: {output_path}")
-            return True
-        else:
-            print("TTS file is missing or too small")
-            return False
-    except ApiError as api_err:
-        print(f"ElevenLabs API Error: {api_err}")
-        return False
-    except Exception as e:
-        print(f"Error generating TTS: {e}")
-        traceback.print_exc()
-        return False
+    text_lower = text.lower()
+    return any(word in text_lower for word in FORBIDDEN_WORDS)
 
+def sanitize_filename(name: str) -> str:
+    name = re.sub(r'[\\/*?:"<>|]', "", name)
+    name = name.replace(" ", "_")
+    return name[:100]
 
-def make_video_vertical(input_path, output_path):
-    """Convert a horizontal video to vertical format (9:16 aspect ratio)"""
-    clip = None
-    cropped_clip = None
-    try:
-        print(f"Attempting to convert {os.path.basename(input_path)} to vertical 9:16 -> {os.path.basename(output_path)}")
-        clip = VideoFileClip(input_path)
-        original_w, original_h = clip.size
-        if original_w == 0 or original_h == 0: raise ValueError("Invalid video dimensions")
-        
-        target_w, target_h = 1080, 1920  # Standard vertical video resolution
-        
-        # Calculate new dimensions preserving aspect ratio
-        if original_h / original_w >= target_h / target_w:
-            # Video is already tall enough or taller than 9:16
-            # Crop sides to achieve 9:16
-            new_w = int(original_h * target_w / target_h)
-            new_h = original_h
-            x_center = original_w / 2
-            crop_x1 = max(0, int(x_center - new_w / 2))
-            crop_x2 = min(original_w, int(x_center + new_w / 2))
-            crop_width = crop_x2 - crop_x1
-            
-            cropped_clip = clip.crop(x1=crop_x1, y1=0, width=crop_width, height=new_h)
-            
-            # Resize to target size
-            final_clip = cropped_clip.resize(height=target_h)
-            print(f"Vertical by cropping sides: {crop_width}x{new_h} -> {final_clip.size}")
-        else:
-            # Video is wider than 9:16 ratio
-            # Crop top/bottom to achieve 9:16
-            new_h = int(original_w * target_h / target_w)
-            new_w = original_w
-            y_center = original_h / 2
-            crop_y1 = max(0, int(y_center - new_h / 2))
-            crop_y2 = min(original_h, int(y_center + new_h / 2))
-            crop_height = crop_y2 - crop_y1
-            
-            cropped_clip = clip.crop(y1=crop_y1, x1=0, width=new_w, height=crop_height)
-            
-            # Resize to target size
-            final_clip = cropped_clip.resize(width=target_w)
-            print(f"Vertical by cropping top/bottom: {new_w}x{crop_height} -> {final_clip.size}")
-        
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        # Write the final clip
-        final_clip.write_videofile(
-            output_path,
-            codec='libx264',
-            audio_codec='aac',
-            temp_audiofile=os.path.join(TEMP_DIR, 'vertical-temp-audio.m4a'),
-            remove_temp=True,
-            preset='medium',
-            threads=4,
-            fps=30,
-            logger=None
-        )
-        
-        # Verify the output exists and has a reasonable size
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-            print(f"Successfully created vertical video: {os.path.basename(output_path)}")
-            return output_path
-        else:
-            print(f"Error: Vertical video output missing or too small.")
-            cleanup_temp_files(output_path)
-            return None
-    except Exception as e:
-        print(f"Error making video vertical: {e}")
-        traceback.print_exc()
-        cleanup_temp_files(output_path)
-        return None
-    finally:
-        # Close clips to release resources
-        if clip:
-            try: clip.close()
-            except: pass
-        if cropped_clip and cropped_clip != clip:
-            try: cropped_clip.close() 
-            except: pass
-
-
-def get_video_details(video_path):
-    """
-    Get basic video details using FFmpeg.
-    Returns (duration_in_seconds, width, height)
-    """
-    if not os.path.exists(video_path):
-        print(f"Video file not found: {video_path}")
-        return 0, 0, 0
+def get_video_details(video_path: pathlib.Path) -> Tuple[float, int, int]:
+    if not video_path.is_file(): return 0.0, 0, 0
+    if not check_ffmpeg_install("ffprobe"): return 0.0, 0, 0
 
     try:
-        probe_cmd = [
+        command = [
             'ffprobe', '-v', 'error',
-            '-show_entries', 'stream=width,height,duration,r_frame_rate',
             '-select_streams', 'v:0',
-            '-of', 'json',
-            str(video_path)
+            '-show_entries', 'stream=width,height,duration,r_frame_rate:format=duration',
+            '-of', 'json', str(video_path)
         ]
-        
-        result = subprocess.run(probe_cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"FFprobe error: {result.stderr}")
-            return 0, 0, 0
-            
+        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=30)
         data = json.loads(result.stdout)
-        
-        if 'streams' not in data or not data['streams']:
-            print("No video streams found in file")
-            return 0, 0, 0
-            
-        stream = data['streams'][0]
-        width = int(stream.get('width', 0))
-        height = int(stream.get('height', 0))
-        
-        duration = 0
-        if 'duration' in stream:
-            duration = float(stream['duration'])
-        else:
-            # If no duration in stream, try format
-            format_cmd = [
-                'ffprobe', '-v', 'error',
-                '-show_entries', 'format=duration',
-                '-of', 'json',
-                str(video_path)
-            ]
-            format_result = subprocess.run(format_cmd, capture_output=True, text=True)
-            if format_result.returncode == 0:
-                format_data = json.loads(format_result.stdout)
-                if 'format' in format_data and 'duration' in format_data['format']:
-                    duration = float(format_data['format']['duration'])
-        
+
+        duration, width, height = 0.0, 0, 0
+        if 'streams' in data and data['streams']:
+            stream = data['streams'][0]
+            width = int(stream.get('width', 0))
+            height = int(stream.get('height', 0))
+            if 'duration' in stream and stream['duration'] != 'N/A':
+                duration = float(stream['duration'])
+        if duration <= 0 and 'format' in data and 'duration' in data['format'] and data['format']['duration'] != 'N/A':
+            duration = float(data['format']['duration'])
+
         return duration, width, height
-        
-    except Exception as e:
-        print(f"Error getting video details: {e}")
-        traceback.print_exc()
-        return 0, 0, 0
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
+        print(f"Error getting video details for {video_path.name}: {e}")
+        return 0.0, 0, 0
 
+def has_audio_track(media_path: pathlib.Path) -> bool:
+    if not media_path.is_file(): return False
+    if not check_ffmpeg_install("ffprobe"): return False
 
-def trim_video(input_path, start_time, end_time, output_path):
-    """
-    Trim video from start_time to end_time
-    """
-    if not os.path.exists(input_path):
-        print(f"Input file not found: {input_path}")
-        return None
-        
     try:
-        # Ensure output directory exists
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        
-        print(f"Trimming video from {start_time:.2f}s to {end_time:.2f}s...")
-        
-        # Use ffmpeg directly for more consistent trimming
-        cmd = [
-            'ffmpeg',
-            '-i', str(input_path),
-            '-ss', str(start_time),
-            '-to', str(end_time),
-            '-c:v', 'libx264', 
-            '-c:a', 'aac',
-            '-preset', 'medium',
-            '-crf', '23',
-            '-y',
-            str(output_path)
+        command = [
+            'ffprobe', '-v', 'error', '-select_streams', 'a:0',
+            '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', str(media_path)
         ]
-        
-        print(f"Running FFmpeg: {' '.join(cmd)}")
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            print(f"FFmpeg error: {result.stderr}")
-            return None
-            
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-            print(f"Successfully trimmed video: {os.path.basename(output_path)}")
-            return output_path
-        else:
-            print("Trimmed video is missing or too small")
-            return None
-            
-    except Exception as e:
-        print(f"Error trimming video: {e}")
-        traceback.print_exc()
-        return None
+        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=15)
+        return result.returncode == 0 and 'audio' in result.stdout.strip()
+    except (subprocess.TimeoutExpired, Exception) as e:
+        print(f"Error checking audio track in {media_path.name}: {e}")
+        return False
 
+def validate_environment():
+    essential_vars = {
+        'REDDIT_CLIENT_ID': REDDIT_CLIENT_ID,
+        'REDDIT_CLIENT_SECRET': REDDIT_CLIENT_SECRET,
+        'GOOGLE_CLIENT_SECRETS_FILE': GOOGLE_CLIENT_SECRETS_FILE,
+        'GEMINI_API_KEY': GEMINI_API_KEY,
+        'ELEVENLABS_API_KEY': ELEVENLABS_API_KEY,
+    }
+    missing_vars = [name for name, value in essential_vars.items() if not value]
+    if missing_vars:
+        raise ValueError(f"Missing essential environment variables: {', '.join(missing_vars)}")
+    if not GOOGLE_CLIENT_SECRETS_FILE or not os.path.exists(GOOGLE_CLIENT_SECRETS_FILE):
+        raise FileNotFoundError(f"Google Client Secrets file not found: {GOOGLE_CLIENT_SECRETS_FILE}")
+    if not check_ffmpeg_install("ffmpeg"):
+        raise RuntimeError("FFmpeg is required but not found.")
+    if not check_ffmpeg_install("ffprobe"):
+        print("Warning: ffprobe not found.")
+    if not check_ffmpeg_install("ffmpeg-normalize"):
+        print("Warning: ffmpeg-normalize not found. Audio normalization will be skipped.")
 
-def download_media(url, output_path, media_type='best'):
-    """
-    Download media from URL using yt-dlp
-    Returns the path to the downloaded media file
-    """
-    print(f"Downloading media from: {url}")
-    
-    # Ensure output directory exists
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+def setup_directories():
+    for dir_path in [TEMP_DIR, MUSIC_FOLDER]:
+        dir_path.mkdir(parents=True, exist_ok=True)
+
+def setup_database():
+    global db_conn, db_cursor
     try:
-        ydl_opts = {
-            'format': media_type,
-            'outtmpl': output_path,
-            'quiet': False,
-            'no_warnings': False,
-            'ignoreerrors': True,
-            'noprogress': False,
-            'retries': 3,
-            'nocheckcertificate': True,
-        }
-        
+        db_conn = sqlite3.connect(DB_FILE)
+        db_cursor = db_conn.cursor()
+        db_cursor.execute('''
+            CREATE TABLE IF NOT EXISTS uploads (
+                reddit_url TEXT PRIMARY KEY,
+                youtube_url TEXT,
+                upload_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        db_conn.commit()
+    except sqlite3.Error as e:
+        raise RuntimeError(f"Database setup failed: {e}") from e
+
+def close_database():
+    global db_conn
+    if db_conn:
+        try: db_conn.close()
+        except sqlite3.Error as e: print(f"Warning: Error closing database: {e}")
+        finally: db_conn = None
+
+def setup_api_clients():
+    global reddit, youtube_service, gemini_model, elevenlabs_client
+    try:
+        reddit = praw.Reddit(
+            client_id=REDDIT_CLIENT_ID, client_secret=REDDIT_CLIENT_SECRET,
+            user_agent=REDDIT_USER_AGENT, check_for_async=False
+        )
+        reddit.user.me()
+    except (prawcore.exceptions.OAuthException, prawcore.exceptions.ResponseException, Exception) as e:
+        raise ConnectionError(f"Failed to initialize Reddit client: {e}") from e
+
+    try:
+        flow = InstalledAppFlow.from_client_secrets_file(GOOGLE_CLIENT_SECRETS_FILE, YOUTUBE_SCOPES)
+        credentials = flow.run_local_server(port=0)
+        youtube_service = build_google_api(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, credentials=credentials)
+    except Exception as e:
+        raise ConnectionError(f"Failed to initialize YouTube client: {e}") from e
+
+    try:
+        genai.configure(api_key=GEMINI_API_KEY)
+        gemini_model = genai.GenerativeModel(GEMINI_MODEL_ID)
+    except Exception as e:
+        raise ConnectionError(f"Failed to initialize Gemini client: {e}") from e
+
+    try:
+        elevenlabs_client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
+    except Exception as e:
+        raise ConnectionError(f"Failed to initialize ElevenLabs client: {e}") from e
+
+def is_already_uploaded(reddit_url: str) -> bool:
+    if not db_cursor: return True
+    try:
+        db_cursor.execute("SELECT 1 FROM uploads WHERE reddit_url = ?", (reddit_url,))
+        return db_cursor.fetchone() is not None
+    except sqlite3.Error as e:
+        print(f"Error checking DB for URL {reddit_url}: {e}")
+        return True
+
+def add_upload_record(reddit_url: str, youtube_url: str):
+    if not db_conn or not db_cursor: return
+    try:
+        db_cursor.execute("INSERT INTO uploads (reddit_url, youtube_url) VALUES (?, ?)", (reddit_url, youtube_url))
+        db_conn.commit()
+    except sqlite3.IntegrityError:
+        print(f"Warning: Record for {reddit_url} already exists.")
+    except sqlite3.Error as e:
+        print(f"Error adding DB record for {reddit_url}: {e}")
+
+def get_reddit_submissions(subreddit_name: str, limit: int) -> List[praw.models.Submission]:
+    if not reddit: return []
+    submissions = []
+    try:
+        subreddit = reddit.subreddit(subreddit_name)
+        for submission in subreddit.hot(limit=limit * 2):
+            if len(submissions) >= limit: break
+            if (submission.is_video or any(submission.url.endswith(ext) for ext in ['.mp4', '.mov', '.gifv']) or
+                any(host in submission.url for host in ['v.redd.it', 'gfycat.com', 'streamable.com'])) and \
+               not submission.over_18 and not submission.stickied:
+                submissions.append(submission)
+            time.sleep(0.1)
+        return submissions
+    except (prawcore.exceptions.NotFound, prawcore.exceptions.PrawcoreException, Exception) as e:
+        print(f"Error fetching from r/{subreddit_name}: {e}")
+        return []
+
+def download_media(url: str, output_path: pathlib.Path) -> Optional[pathlib.Path]:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cleanup_temp_files(output_path)
+
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': str(output_path),
+        'quiet': True, 'no_warnings': True, 'ignoreerrors': True, 'noprogress': True,
+        'retries': 3, 'socket_timeout': 30, 'nocheckcertificate': True,
+        'merge_output_format': 'mp4',
+        # 'max_filesize': '100M',
+        # 'download_ranges': yt_dlp.utils.download_range_func(None, [(0, TARGET_VIDEO_DURATION_SECONDS + 10)])
+    }
+
+    try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-            
-        if os.path.exists(output_path) and os.path.getsize(output_path) > 10240:
-            print(f"Media downloaded successfully: {output_path}")
+
+        if output_path.is_file() and output_path.stat().st_size > 10240:
             return output_path
         else:
-            # Check for suffixed files (yt-dlp sometimes adds resolution or format info)
-            output_dir = os.path.dirname(output_path)
-            base_name = os.path.basename(output_path)
-            name, ext = os.path.splitext(base_name)
-            
-            for file in os.listdir(output_dir):
-                if file.startswith(name) and os.path.getsize(os.path.join(output_dir, file)) > 10240:
-                    print(f"Found downloaded file with modified name: {file}")
-                    return os.path.join(output_dir, file)
-                    
-            print("Downloaded file not found or too small")
+            base_name = output_path.stem
+            for file in output_path.parent.iterdir():
+                if file.stem.startswith(base_name) and file.is_file() and file.stat().st_size > 10240:
+                    if file != output_path:
+                        try: file.rename(output_path)
+                        except OSError: pass
+                    return output_path
+            cleanup_temp_files(output_path)
             return None
-            
-    except Exception as e:
-        print(f"Error downloading media: {e}")
-        traceback.print_exc()
+    except (yt_dlp.utils.DownloadError, Exception) as e:
+        print(f"Error downloading {url}: {e}")
+        cleanup_temp_files(output_path)
         return None
 
+def analyze_video_with_gemini(video_path: pathlib.Path, title: str, subreddit_name: str) -> Dict[str, Any]:
+    global gemini_model
+    if not gemini_model or not video_path.is_file(): return FALLBACK_ANALYSIS.copy()
 
-def has_audio_track(media_path):
-    """Check if a media file has an audio track"""
+    analysis_result = FALLBACK_ANALYSIS.copy()
+
     try:
-        cmd = ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', media_path]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        return result.returncode == 0 and 'audio' in result.stdout.strip()
+        # Get video duration and details first
+        duration, width, height = get_video_details(video_path)
+        if not duration or duration <= 0: return analysis_result
+
+        analysis_result['original_duration'] = duration # Store original duration
+
+        # Prepare the prompt for Gemini
+        prompt = f"""Analyze this video from Reddit (r/{subreddit_name}). Original title: "{title}". Video duration: {duration:.2f}s. 
+Output ONLY a JSON object with keys: 
+- "summary_for_description" (string, 2-3 sentences)
+- "suggested_title" (string, < 70 chars)
+- "mood" (string, ONE from [funny, heartwarming, informative, suspenseful, action, calm, exciting, sad, shocking, weird])
+- "best_segment" (object {{"start_time": float, "end_time": float}} or null)
+- "key_visual_moments" (list of objects {{"timestamp": float, "description": string, "focus_point": {{"x": float, "y": float}}}} or empty list)
+- "speech_segments" (list of objects {{"start_time": float, "end_time": float, "text": string}} or empty list)
+- "hashtags" (list of 3-5 strings)
+
+Focus point 0.5,0.5 is center. Ensure times are within duration. Return ONLY JSON."""
+
+        # Read the video file as binary data
+        with open(video_path, 'rb') as f:
+            video_data = f.read()
+
+        # Create the content parts for Gemini
+        content_parts = [
+            prompt,
+            {"mime_type": "video/mp4", "data": base64.b64encode(video_data).decode('utf-8')}
+        ]
+
+        # Configure safety settings
+        safety_settings = [
+            {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+            {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
+        ]
+
+        # Generate response from Gemini
+        try:
+            response = gemini_model.generate_content(
+                content_parts,
+                generation_config=genai.types.GenerationConfig(temperature=0.6),
+                safety_settings=safety_settings
+            )
+
+            result_text = ""
+            if response.candidates:
+                try:
+                    result_text = response.text
+                except ValueError as e: # Handles cases where .text access fails (e.g., blocked)
+                    print(f"  Warning: Gemini response blocked or invalid. Finish Reason: {response.candidates[0].finish_reason if response.candidates else 'N/A'}")
+                    if hasattr(response, 'prompt_feedback'): print(f"  Safety Feedback: {response.prompt_feedback}")
+                    return analysis_result
+
+            json_start = result_text.find('{')
+            json_end = result_text.rfind('}')
+            if json_start == -1 or json_end == -1 or json_end < json_start:
+                 if response.prompt_feedback and response.prompt_feedback.block_reason:
+                      print(f"  Content blocked: {response.prompt_feedback.block_reason}")
+                 return analysis_result
+
+            json_text = result_text[json_start : json_end + 1]
+            try:
+                parsed_data = json.loads(json_text)
+                parsed_data['original_duration'] = duration # Ensure duration is in the final dict
+                parsed_data['fallback'] = False # Indicate success
+                return parsed_data
+            except json.JSONDecodeError:
+                return analysis_result
+
+        except Exception as gemini_err:
+            print(f"  Error: Gemini API call failed: {gemini_err}")
+            return analysis_result
+
     except Exception as e:
-        print(f"Error checking for audio track: {e}")
+        print(f"  Error during Gemini analysis pipeline: {e}")
+        return analysis_result
+
+def generate_tts(text: str, output_path: pathlib.Path, voice_id: str = DEFAULT_VOICE_ID) -> bool:
+    """Generate TTS using ElevenLabs API (fallback only)"""
+    if not text or not text.strip():
+        print("  Error: Empty text for TTS")
         return False
+    
+    print("  ElevenLabs TTS disabled - using local TTS only")
+    return False
+
+def hugging_face_tts(text: str, output_path: pathlib.Path) -> bool:
+    """Generate TTS using local SpeechT5 model with enhanced reliability"""
+    if not text or not text.strip():
+        print("  Error: Empty text for TTS")
+        return False
+    
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    wav_path = output_path.with_suffix('.wav')
+    cleanup_temp_files(output_path, wav_path)
+    
+    try:
+        import torch
+        import soundfile as sf
+        from transformers import SpeechT5ForTextToSpeech, AutoProcessor
+        import numpy as np
+        
+        print("  Generating TTS with SpeechT5 (local)")
+        
+        # Use smaller model for better reliability
+        model_name = "microsoft/speecht5_tts"
+        processor = AutoProcessor.from_pretrained(model_name)
+        model = SpeechT5ForTextToSpeech.from_pretrained(model_name)
+        
+        # Configure logging
+        import logging
+        logging.getLogger("transformers").setLevel(logging.ERROR)
+        
+        # Device selection with fallback
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"  Using {device.upper()} for TTS generation")
+        
+        try:
+            model = model.to(device)
+        except RuntimeError as e:
+            print(f"  Warning: Couldn't move model to {device}, using CPU")
+            device = "cpu"
+            model = model.to(device)
+        
+        # Simple deterministic speaker embedding
+        speaker_embeddings = torch.zeros((1, 512)).to(device)
+        speaker_embeddings[0, :256] = 0.5  # Neutral voice
+        
+        # Process text in chunks if too long
+        max_length = 500
+        if len(text) > max_length:
+            print(f"  Splitting long text into chunks of {max_length} characters")
+            text_chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
+            audio_chunks = []
+            
+            for chunk in text_chunks:
+                inputs = processor(text=chunk, return_tensors="pt").to(device)
+                with torch.no_grad():
+                    output = model.generate_speech(
+                        inputs["input_ids"],
+                        speaker_embeddings=speaker_embeddings,
+                        vocoder=None
+                    )
+                    audio_chunks.append(output.cpu().numpy())
+                    del output
+                    torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
+            audio_data = np.concatenate(audio_chunks)
+        else:
+            inputs = processor(text=text, return_tensors="pt").to(device)
+            with torch.no_grad():
+                output = model.generate_speech(
+                    inputs["input_ids"],
+                    speaker_embeddings=speaker_embeddings,
+                    vocoder=None
+                )
+                audio_data = output.cpu().numpy()
+                del output
+                torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        
+        # Clean up
+        del inputs, model, speaker_embeddings
+        torch.cuda.empty_cache() if torch.cuda.is_available() else None
+        
+        # Ensure proper audio format
+        if len(audio_data.shape) > 1:
+            if audio_data.shape[0] > 2:  # Multi-channel -> mono
+                audio_data = np.mean(audio_data, axis=0)
+            elif audio_data.shape[0] == 2:  # Stereo -> mono
+                audio_data = np.mean(audio_data, axis=0)
+        
+        # Save as WAV first
+        sf.write(str(wav_path), audio_data, 16000)
+        
+        # Convert to desired format
+        if output_path.suffix.lower() != '.wav':
+            try:
+                if check_ffmpeg_install("ffmpeg"):
+                    cmd = [
+                        "ffmpeg", "-y", "-i", str(wav_path),
+                        "-ac", "1", "-ar", "44100",
+                        "-hide_banner", "-loglevel", "error",
+                        str(output_path)
+                    ]
+                    subprocess.run(cmd, check=True, timeout=30)
+                    if not output_path.is_file() or output_path.stat().st_size < 500:
+                        raise ValueError("Invalid output file")
+                else:
+                    shutil.copy(str(wav_path), str(output_path))
+            except Exception as e:
+                print(f"  Warning: Format conversion failed: {e}")
+                shutil.copy(str(wav_path), str(output_path))
+        
+        cleanup_temp_files(wav_path)
+        return output_path.is_file() and output_path.stat().st_size > 500
+            
+    except ImportError as e:
+        print(f"  Error: Required TTS libraries not installed: {e}")
+        print("  Please run: pip install torch transformers soundfile")
+        return False
+    except Exception as e:
+        print(f"  Error generating TTS with Kokoro: {e}")
+        traceback.print_exc()
+        return False
+
+def upload_to_youtube(video_path: pathlib.Path, title: str, description: str, tags: List[str]) -> Optional[str]:
+    global youtube_service
+    if not youtube_service or not video_path.is_file(): return None
+
+    try:
+        body = {
+            'snippet': {'title': title, 'description': description, 'tags': tags, 'categoryId': YOUTUBE_UPLOAD_CATEGORY_ID},
+            'status': {'privacyStatus': YOUTUBE_UPLOAD_PRIVACY_STATUS, 'selfDeclaredMadeForKids': False}
+        }
+        media = MediaFileUpload(str(video_path), chunksize=-1, resumable=True)
+        request = youtube_service.videos().insert(part=",".join(body.keys()), body=body, media_body=media)
+
+        response = None
+        while response is None:
+            try:
+                status, response = request.next_chunk()
+                # if status: print(f"  Upload progress: {int(status.progress() * 100)}%") # Optional progress
+            except google_api_errors.HttpError as e:
+                if e.resp.status in [403, 500, 503]:
+                    if 'quotaExceeded' in str(e) or 'uploadLimitExceeded' in str(e):
+                        raise UploadLimitExceededError("YouTube daily upload limit likely reached.") from e
+                    time.sleep(API_DELAY_SECONDS)
+                else: raise ConnectionError(f"YouTube API HTTP error: {e}") from e
+            except Exception as e: raise ConnectionError(f"YouTube upload failed: {e}") from e
+
+        return f"https://www.youtube.com/watch?v={response['id']}"
+    except UploadLimitExceededError as quota_err:
+        raise quota_err
+    except Exception as e:
+        print(f"  Error uploading video: {e}")
+        return None
+
+def normalize_loudness(input_path: pathlib.Path, output_path: pathlib.Path, target_lufs: float = LOUDNESS_TARGET_LUFS) -> bool:
+    if not input_path.is_file(): return False
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cleanup_temp_files(output_path)
+
+    if not check_ffmpeg_install("ffmpeg-normalize"):
+        try:
+            shutil.copy(str(input_path), str(output_path))
+            return output_path.is_file() and output_path.stat().st_size > 100
+        except Exception: return False
+
+    command = [
+        "ffmpeg-normalize", str(input_path), "-o", str(output_path),
+        "-c:a", AUDIO_CODEC, "-b:a", "192k", "-ar", "44100", "-f",
+        "-nt", "ebu", "-t", str(target_lufs), "--keep-loudness-range-target"
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True, timeout=60)
+        return output_path.is_file() and output_path.stat().st_size > 100
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, Exception) as e:
+        print(f"ffmpeg-normalize failed: {e}. Falling back to copy.")
+        cleanup_temp_files(output_path)
+        try:
+            shutil.copy(str(input_path), str(output_path))
+            return output_path.is_file() and output_path.stat().st_size > 100
+        except Exception: return False
+
+def make_video_vertical(input_path: pathlib.Path, output_path: pathlib.Path) -> Optional[pathlib.Path]:
+    clip, final_clip = None, None
+    try:
+        clip = VideoFileClip(str(input_path))
+        original_w, original_h = clip.size
+        if original_w <= 0 or original_h <= 0: return None
+
+        target_w, target_h = TARGET_RESOLUTION
+        target_aspect = target_w / target_h
+        original_aspect = original_w / original_h
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cleanup_temp_files(output_path)
+
+        if abs(original_aspect - target_aspect) < 0.01:
+            final_clip = clip.resize(TARGET_RESOLUTION)
+        else:
+            if original_aspect > target_aspect:
+                new_w = int(target_aspect * original_h)
+                final_clip = crop(clip, width=new_w, height=original_h, x_center=original_w / 2, y_center=original_h / 2)
+                final_clip = final_clip.resize(height=target_h)
+            else:
+                new_h = int(original_w / target_aspect)
+                final_clip = crop(clip, width=original_w, height=new_h, x_center=original_w / 2, y_center=original_h / 2)
+                final_clip = final_clip.resize(width=target_w)
+
+        if final_clip.size != TARGET_RESOLUTION:
+             final_clip = final_clip.resize(TARGET_RESOLUTION)
+
+        # Use GPU encoding if available
+        use_gpu = has_nvidia_gpu()
+        codec = VIDEO_CODEC_GPU if use_gpu else VIDEO_CODEC_CPU
+        preset = FFMPEG_GPU_PRESET if use_gpu else FFMPEG_CPU_PRESET
+        quality_param = ['-cq', FFMPEG_CQ_GPU] if use_gpu else ['-crf', FFMPEG_CRF_CPU]
+        ffmpeg_extra_params = quality_param + ['-pix_fmt', 'yuv420p']
+        
+        temp_audio_path = TEMP_DIR / f"{output_path.stem}_temp_audio.m4a"
+        final_clip.write_videofile(
+            str(output_path), codec=codec, audio_codec=AUDIO_CODEC,
+            temp_audiofile=str(temp_audio_path), remove_temp=True,
+            preset=preset, fps=TARGET_FPS, threads=N_JOBS_PARALLEL, logger=None,
+            ffmpeg_params=ffmpeg_extra_params
+        )
+        cleanup_temp_files(temp_audio_path)
+
+        return output_path if output_path.is_file() and output_path.stat().st_size > 10240 else None
+    except Exception as e:
+        print(f"  Error making video vertical: {e}")
+        cleanup_temp_files(output_path)
+        return None
+    finally:
+        if clip:
+            try: clip.close()
+            except Exception: pass
+        if final_clip and final_clip != clip:
+            try: final_clip.close()
+            except Exception: pass
+
+def trim_video(input_path: pathlib.Path, start_time: float, end_time: float, output_path: pathlib.Path) -> Optional[pathlib.Path]:
+    if not input_path.is_file() or start_time < 0 or end_time <= start_time: return None
+    if not check_ffmpeg_install("ffmpeg"): return None
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    cleanup_temp_files(output_path)
+
+    try:
+        print(f"  Attempting to trim video: {input_path.name}")
+        print(f"  Time range: {start_time:.2f}s to {end_time:.2f}s")
+        
+        # First try with stream copy (fast but not always accurate for exact frames)
+        command_copy = [
+            'ffmpeg', '-i', str(input_path), '-ss', str(start_time), '-to', str(end_time),
+            '-c:v', 'copy', '-c:a', 'copy', '-avoid_negative_ts', 'make_zero',
+            '-loglevel', 'warning', '-y', str(output_path)
+        ]
+        print("  Running ffmpeg copy command:", ' '.join(command_copy))
+        result = subprocess.run(command_copy, capture_output=True, text=False, check=False, timeout=60)
+        
+        stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+        stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+        
+        print("\n  FFmpeg copy result:")
+        print(f"  - Return code: {result.returncode}")
+        print(f"  - Error output: {stderr if stderr else 'None'}")
+        print(f"  - Standard output: {stdout if stdout else 'None'}")
+        
+        # Verify input file still exists
+        if not input_path.is_file():
+            print(f"  Error: Input file no longer exists: {input_path}")
+            return None
+            
+        # Check output file
+        size = output_path.stat().st_size if output_path.is_file() else 0
+        if result.returncode != 0:
+            print(f"  FFmpeg copy failed with code {result.returncode}")
+            cleanup_temp_files(output_path)
+        elif not output_path.is_file():
+            print("  FFmpeg copy completed but output file not found")
+            cleanup_temp_files(output_path)
+        elif size < 1024:
+            print(f"  FFmpeg copy output too small: {size} bytes")
+            cleanup_temp_files(output_path)
+        else:
+            print(f"  FFmpeg copy successful: {size} bytes")
+            if size >= 10240:
+                return output_path
+            
+            # If copy method failed, use re-encoding with GPU if available
+            print("  Fast copy failed, attempting re-encode method...")
+            use_gpu = has_nvidia_gpu()
+            codec = VIDEO_CODEC_GPU if use_gpu else VIDEO_CODEC_CPU
+            preset = FFMPEG_GPU_PRESET if use_gpu else FFMPEG_CPU_PRESET
+            quality = FFMPEG_CQ_GPU if use_gpu else FFMPEG_CRF_CPU
+            
+            print(f"  Using {'GPU' if use_gpu else 'CPU'} encoding:")
+            print(f"  - Codec: {codec}")
+            print(f"  - Preset: {preset}")
+            print(f"  - Quality: {quality}")
+            
+            command_recode = [
+                'ffmpeg', '-i', str(input_path), '-ss', str(start_time), '-to', str(end_time),
+                '-c:v', codec, '-preset', preset,
+                '-loglevel', 'warning',
+                '-max_muxing_queue_size', '1024'
+            ]
+            
+            # Add quality parameter with appropriate flag
+            if use_gpu:
+                command_recode.extend(['-cq:v', quality])
+            else:
+                command_recode.extend(['-crf', quality])
+                
+            command_recode.extend([
+                '-c:a', AUDIO_CODEC, '-b:a', '192k',
+                '-avoid_negative_ts', 'make_zero',
+                '-y', str(output_path)
+            ])
+            
+            print("  Executing ffmpeg re-encode command...")
+            
+            print("  Running ffmpeg command:", ' '.join(command_recode))
+            result = subprocess.run(command_recode, capture_output=True, text=False, check=False, timeout=120)
+            
+            stderr = result.stderr.decode('utf-8', errors='replace') if result.stderr else ''
+            stdout = result.stdout.decode('utf-8', errors='replace') if result.stdout else ''
+            
+            print("  FFmpeg recode result:")
+            print(f"  - Return code: {result.returncode}")
+            print(f"  - Error output: {stderr if stderr else 'None'}")
+            print(f"  - Standard output: {stdout if stdout else 'None'}")
+            
+            if result.returncode != 0:
+                print(f"  FFmpeg recode failed with code {result.returncode}")
+                cleanup_temp_files(output_path)
+                return None
+
+            if not output_path.is_file():
+                print("  FFmpeg recode completed but output file not found")
+                cleanup_temp_files(output_path)
+                return None
+                
+            size = output_path.stat().st_size if output_path.is_file() else 0
+            if size < 10240:
+                print(f"  FFmpeg recode output too small: {size} bytes")
+                cleanup_temp_files(output_path)
+                return None
+                
+            print(f"  Successfully created trimmed video: {size} bytes")
+            
+        return output_path
+        
+    except subprocess.TimeoutExpired as e:
+        print(f"  Error: FFmpeg process timed out: {e}")
+        cleanup_temp_files(output_path)
+        return None
+    except Exception as e:
+        print(f"  Error trimming video: {str(e)}")
+        cleanup_temp_files(output_path)
+        return None
+
+def ensure_frame_shape(frame: np.ndarray, target_shape: Tuple[int, int, int]) -> np.ndarray:
+    h, w, c = target_shape
+    fh, fw = frame.shape[:2]
+    fc = frame.shape[2] if frame.ndim == 3 else 1
+
+    if frame.ndim == 2:
+        frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR if c == 3 else cv2.COLOR_GRAY2BGRA)
+        fc = frame.shape[2]
+    if fc != c:
+        if fc == 3 and c == 4: frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+        elif fc == 4 and c == 3: frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        elif fc < c:
+             if fc == 1 and c >= 3: frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR if c == 3 else cv2.COLOR_GRAY2BGRA)
+             else: # Basic padding
+                 padding = np.zeros((fh, fw, c - fc), dtype=frame.dtype)
+                 frame = np.concatenate((frame, padding), axis=2)
+        else: frame = frame[:, :, :c] # Slice channels
+
+    fh, fw = frame.shape[:2]
+    if fh != h:
+        if fh < h:
+            pad_top = (h - fh) // 2; pad_bottom = h - fh - pad_top
+            frame = cv2.copyMakeBorder(frame, pad_top, pad_bottom, 0, 0, cv2.BORDER_REFLECT_101)
+        else: crop_top = (fh - h) // 2; frame = frame[crop_top:crop_top + h, :]
+    fw = frame.shape[1]
+    if fw != w:
+        if fw < w:
+            pad_left = (w - fw) // 2; pad_right = w - fw - pad_left
+            frame = cv2.copyMakeBorder(frame, 0, 0, pad_left, pad_right, cv2.BORDER_REFLECT_101)
+        else: crop_left = (fw - w) // 2; frame = frame[:, crop_left:crop_left + w]
+
+    if frame.shape[0] != h or frame.shape[1] != w:
+        frame = cv2.resize(frame, (w, h), interpolation=cv2.INTER_AREA)
+    if frame.shape[2] != c: # Final channel check
+         frame = frame[:, :, :c] if frame.shape[2] > c else cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR if c == 3 else cv2.COLOR_GRAY2BGRA) # Simplistic correction
+
+    return frame
+
+def ensure_rgba(frame: Optional[np.ndarray]) -> Optional[np.ndarray]:
+    if frame is None: return None
+    if frame.ndim == 2: return cv2.cvtColor(frame, cv2.COLOR_GRAY2RGBA)
+    elif frame.shape[2] == 3: return cv2.cvtColor(frame, cv2.COLOR_BGR2RGBA)
+    elif frame.shape[2] == 4: return frame
+    elif frame.shape[2] == 1: return cv2.cvtColor(frame, cv2.COLOR_GRAY2RGBA)
+    else:
+        try: return cv2.cvtColor(frame[:, :, :3], cv2.COLOR_BGR2RGBA)
+        except Exception: return frame
+
+def apply_subtle_zoom(clip: VideoClip, zoom_range: Tuple[float, float] = (1.01, 1.06)) -> VideoClip:
+    z_start, z_end = zoom_range
+    if random.choice([True, False]): z_start, z_end = z_end, z_start
+    def zoom_factor(t):
+        return z_start + (z_end - z_start) * (t / clip.duration) if clip.duration and clip.duration > 0 else 1.0
+    return clip.resize(zoom_factor)
+
+def apply_shake(clip: VideoClip, max_translate: int = 5, shake_duration: float = 0.3, shake_times: int = 3, parallel: bool = PARALLEL_FRAME_PROCESSING, n_jobs: int = N_JOBS_PARALLEL) -> VideoClip:
+    if clip.duration is None or clip.duration <= shake_duration or shake_times <= 0: return clip
+
+    shake_moments = sorted(random.uniform(0, max(0.01, clip.duration - shake_duration)) for _ in range(shake_times))
+    target_shape = (*clip.size[::-1], 3 if not clip.ismask else 4)
+
+    def shake_transform_frame(frame: np.ndarray, t: float) -> np.ndarray:
+        offset_x, offset_y = 0.0, 0.0
+        active_shake = False
+        for moment in shake_moments:
+            if moment <= t <= moment + shake_duration:
+                progress = (t - moment) / shake_duration
+                intensity = math.sin(progress * math.pi)
+                offset_x += random.uniform(-max_translate, max_translate) * intensity
+                offset_y += random.uniform(-max_translate, max_translate) * intensity
+                active_shake = True
+        if active_shake:
+            h, w = frame.shape[:2]
+            M = np.float32([[1, 0, int(round(offset_x))], [0, 1, int(round(offset_y))]])
+            try:
+                warped_frame = cv2.warpAffine(frame, M, (w, h), borderMode=cv2.BORDER_REFLECT_101)
+                return ensure_frame_shape(warped_frame, target_shape)
+            except Exception: return ensure_frame_shape(frame, target_shape)
+        else: return ensure_frame_shape(frame, target_shape)
+
+    if parallel and n_jobs > 1:
+        frames = list(clip.iter_frames(with_times=True, dtype='uint8', logger=None))
+        if not frames: return clip
+        processed_frames = Parallel(n_jobs=n_jobs, prefer="threads")( # Use threads for less overhead with numpy/cv2
+            delayed(shake_transform_frame)(f, t) for t, f in frames
+        )
+        if not processed_frames or len(processed_frames) != len(frames): return clip
+        try:
+            return ImageSequenceClip(processed_frames, fps=clip.fps).set_duration(clip.duration).set_audio(clip.audio)
+        except Exception as e:
+            print(f"Error creating ImageSequenceClip for shake: {e}")
+            return clip # Fallback
+    else:
+        return clip.fl(lambda gf, t: shake_transform_frame(gf(t), t), apply_to='video')
+
+def apply_color_grade(clip: VideoClip) -> VideoClip:
+    preset = random.choice(['none', 'cool', 'warm', 'vibrant', 'subtle_contrast'])
+    if preset == 'cool':
+        clip = clip.fx(colorx, factor=random.uniform(0.95, 0.99))
+        clip = clip.fx(lum_contrast, contrast=random.uniform(0.03, 0.07), lum=random.uniform(-2, 1))
+    elif preset == 'warm':
+        clip = clip.fx(colorx, factor=random.uniform(1.01, 1.05))
+        clip = clip.fx(lum_contrast, contrast=random.uniform(0.03, 0.07), lum=random.uniform(-1, 2))
+    elif preset == 'vibrant':
+        clip = clip.fx(colorx, factor=random.uniform(1.08, 1.15))
+        clip = clip.fx(lum_contrast, contrast=random.uniform(0.10, 0.18), lum=random.uniform(-3, 3))
+    elif preset == 'subtle_contrast':
+        clip = clip.fx(lum_contrast, contrast=random.uniform(0.05, 0.12), lum=random.uniform(-4, 4))
+    return clip
+
+def add_visual_emphasis(clip: VideoClip, focus_x: float = 0.5, focus_y: float = 0.5,
+                        start_time: float = 0, duration: float = 1.5, zoom_factor: float = 1.1) -> VideoClip:
+    w, h = clip.size
+    if duration <= 0 or zoom_factor <= 1.0: return clip
+
+    def calculate_zoom(t):
+        if start_time <= t <= start_time + duration:
+            progress = (t - start_time) / duration
+            return 1 + (zoom_factor - 1) * math.sin(progress * math.pi)
+        return 1.0
+
+    # Create a function that resizes and crops to keep focus point centered
+    def zoom_and_crop_frame(get_frame, t):
+        frame = get_frame(t)
+        current_zoom = calculate_zoom(t)
+        if current_zoom == 1.0: return frame # No effect outside duration
+
+        # Resize
+        zoomed_h, zoomed_w = int(h * current_zoom), int(w * current_zoom)
+        # Need resizing that might create non-standard shapes, OpenCV is better here
+        frame_resized = cv2.resize(frame, (zoomed_w, zoomed_h), interpolation=cv2.INTER_LINEAR)
+
+        # Calculate crop coordinates to keep focus point centered
+        crop_x = int(focus_x * zoomed_w - w / 2)
+        crop_y = int(focus_y * zoomed_h - h / 2)
+
+        # Clamp crop coordinates to be within the resized frame bounds
+        crop_x = max(0, min(crop_x, zoomed_w - w))
+        crop_y = max(0, min(crop_y, zoomed_h - h))
+
+        # Crop
+        cropped_frame = frame_resized[crop_y:crop_y + h, crop_x:crop_x + w]
+
+        # Ensure output shape matches original (handling potential rounding errors)
+        if cropped_frame.shape[0] != h or cropped_frame.shape[1] != w:
+             cropped_frame = cv2.resize(cropped_frame, (w, h), interpolation=cv2.INTER_AREA)
+
+        return cropped_frame
+
+    # Use fl for frame-by-frame transformation
+    return clip.fl(zoom_and_crop_frame)
+
+
+def create_animated_subtitle_clips(speech_segments: List[Dict], video_width: int, video_height: int) -> List[TextClip]:
+    if not speech_segments: return []
+
+    subtitle_clips = []
+    font_size = max(24, int(video_height * OVERLAY_FONT_SIZE_RATIO))
+
+    for i, segment in enumerate(speech_segments):
+        try:
+            text = segment.get('text', '').strip()
+            start_time = float(segment.get('start_time', -1))
+            end_time = float(segment.get('end_time', -1))
+            if not text or start_time < 0 or end_time <= start_time: continue
+
+            max_chars_per_line = 35; lines = []; current_line = ""
+            for word in text.split():
+                if not current_line: current_line = word
+                elif len(current_line) + len(word) + 1 <= max_chars_per_line: current_line += " " + word
+                else: lines.append(current_line); current_line = word
+            lines.append(current_line)
+            processed_text = "\n".join(lines[:3])
+            if len(lines) > 3: processed_text += "..."
+
+            txt_clip = TextClip(
+                txt=processed_text, fontsize=font_size, font=OVERLAY_FONT,
+                color=OVERLAY_TEXT_COLOR, bg_color=OVERLAY_BG_COLOR,
+                stroke_color=OVERLAY_STROKE_COLOR, stroke_width=OVERLAY_STROKE_WIDTH,
+                method='caption', align='center', size=(int(video_width * 0.9), None)
+            )
+            clip_duration = end_time - start_time
+            txt_clip = txt_clip.set_start(start_time).set_duration(clip_duration).set_position(OVERLAY_POSITION)
+            fade_duration = min(0.2, clip_duration * 0.15)
+            if fade_duration > 0.01: txt_clip = txt_clip.fadein(fade_duration).fadeout(fade_duration)
+
+            subtitle_clips.append(txt_clip)
+        except Exception as e:
+            print(f"  Error creating subtitle clip {i}: {e}")
+            traceback.print_exc()
+
+    return subtitle_clips
+
+def _prepare_audio_tracks(
+    original_video_for_audio_path: Optional[pathlib.Path],
+    tts_audio_path: Optional[pathlib.Path],
+    video_duration: float,
+    gemini_data: Optional[Dict[str, Any]],
+    clips_to_close: List[Any],
+    temp_files_to_clean: List[pathlib.Path]
+) -> Tuple[List[AudioFileClip], Optional[AudioFileClip]]:
+    """Loads, processes, and prepares original, TTS, and music audio tracks."""
+    print(f"  Preparing audio tracks for {video_duration:.2f}s video")
+    audio_tracks = []
+    original_audio, tts_audio, bg_music_audio = None, None, None
+    
+    def safely_load_audio(path: pathlib.Path, description: str) -> Optional[AudioFileClip]:
+        try:
+            print(f"  Loading {description} from: {path.name}")
+            clip = AudioFileClip(str(path))
+            if clip.duration <= 0:
+                print(f"  Warning: {description} has zero duration")
+                clip.close()
+                return None
+            return clip
+        except Exception as e:
+            print(f"  Error loading {description}: {e}")
+            return None
+
+    # Original Audio
+    if MIX_ORIGINAL_AUDIO and original_video_for_audio_path and original_video_for_audio_path.is_file():
+        orig_audio_clip = safely_load_audio(original_video_for_audio_path, "original audio")
+        if orig_audio_clip:
+            clips_to_close.append(orig_audio_clip)
+            try:
+                # Ensure audio duration matches video duration
+                if orig_audio_clip.duration > video_duration:
+                    original_audio = orig_audio_clip.subclip(0, video_duration)
+                else:
+                    original_audio = orig_audio_clip
+                    
+                original_audio = original_audio.set_duration(video_duration)
+                original_audio = original_audio.volumex(ORIGINAL_AUDIO_MIX_VOLUME)
+                print(f"  Prepared original audio: {original_audio.duration:.2f}s")
+                audio_tracks.append(original_audio)
+            except Exception as e:
+                print(f"  Error processing original audio: {e}")
+                if orig_audio_clip in clips_to_close:
+                    clips_to_close.remove(orig_audio_clip)
+                    orig_audio_clip.close()
+
+    # TTS Audio
+    if tts_audio_path and tts_audio_path.is_file() and tts_audio_path.stat().st_size > 0:
+        print(f"  Processing TTS audio from: {tts_audio_path.name}")
+        norm_tts_path = TEMP_DIR / f"{tts_audio_path.stem}_norm.aac"
+        temp_files_to_clean.append(norm_tts_path)
+        
+        # First convert to proper format using ffmpeg
+        converted_tts_path = TEMP_DIR / f"{tts_audio_path.stem}_converted.wav"
+        temp_files_to_clean.append(converted_tts_path)
+        
+        try:
+            # Convert to standard format: mono, 44100Hz, 16-bit WAV
+            command = [
+                "ffmpeg", "-y", "-i", str(tts_audio_path),
+                "-ac", "1", "-ar", "44100", "-acodec", "pcm_s16le",
+                "-hide_banner", "-loglevel", "error",
+                str(converted_tts_path)
+            ]
+            result = subprocess.run(command, check=True, timeout=30, capture_output=True)
+            
+            if not converted_tts_path.is_file() or converted_tts_path.stat().st_size == 0:
+                raise ValueError("FFmpeg conversion failed - empty output file")
+                
+            # Normalize loudness with more robust checks
+            if normalize_loudness(converted_tts_path, norm_tts_path, target_lufs=LOUDNESS_TARGET_LUFS):
+                tts_audio_clip = safely_load_audio(norm_tts_path, "normalized TTS audio")
+                if not tts_audio_clip or tts_audio_clip.duration <= 0:
+                    raise ValueError("Invalid TTS audio clip after normalization")
+        except Exception as e:
+            print(f"  Error processing TTS audio: {e}")
+            # Fallback to direct processing if conversion fails
+            try:
+                if normalize_loudness(tts_audio_path, norm_tts_path, target_lufs=LOUDNESS_TARGET_LUFS):
+                    tts_audio_clip = safely_load_audio(norm_tts_path, "normalized TTS audio")
+                    if not tts_audio_clip or tts_audio_clip.duration <= 0:
+                        raise ValueError("Invalid TTS audio in fallback processing")
+            except Exception as fallback_error:
+                print(f"  Fallback processing failed: {fallback_error}")
+                return audio_tracks, None
+                
+        if tts_audio_clip:
+            clips_to_close.append(tts_audio_clip)
+            try:
+                # Handle TTS duration
+                if tts_audio_clip.duration > video_duration:
+                    tts_audio = tts_audio_clip.subclip(0, video_duration)
+                else:
+                    tts_audio = tts_audio_clip
+                
+                tts_audio = tts_audio.set_duration(video_duration)
+                print(f"  Prepared TTS audio: {tts_audio.duration:.2f}s")
+                audio_tracks.append(tts_audio)
+            except Exception as e:
+                print(f"  Error finalizing TTS audio: {e}")
+                if tts_audio_clip in clips_to_close:
+                    clips_to_close.remove(tts_audio_clip)
+                    tts_audio_clip.close()
+                    if tts_audio_clip in clips_to_close:
+                        clips_to_close.remove(tts_audio_clip)
+                        tts_audio_clip.close()
+        else:
+            print("  Warning: TTS audio normalization failed")
+
+    # Background Music
+    if MUSIC_FOLDER.is_dir():
+        print("  Processing background music")
+        music_files = []
+        for ext in ['.mp3', '.wav', '.aac', '.m4a']:
+            music_files.extend(MUSIC_FOLDER.glob(f"*{ext}"))
+            
+        if music_files:
+            bg_music_path = random.choice(music_files)
+            print(f"  Selected music: {bg_music_path.name}")
+            
+            try:
+                bg_music_clip_orig = safely_load_audio(bg_music_path, "background music")
+                if bg_music_clip_orig:
+                    clips_to_close.append(bg_music_clip_orig)
+                    
+                    # Calculate how many loops we need
+                    loops_needed = math.ceil(video_duration / bg_music_clip_orig.duration)
+                    print(f"  Looping music {loops_needed} times to cover {video_duration:.2f}s")
+                    
+                    # Create looped version if needed
+                    if loops_needed > 1:
+                        bg_music_list = [bg_music_clip_orig] * loops_needed
+                        bg_music_concat = concatenate_audioclips(bg_music_list)
+                        clips_to_close.append(bg_music_concat)
+                    else:
+                        bg_music_concat = bg_music_clip_orig
+                    
+                    # Trim to exact duration and apply volume
+                    bg_music_processed = bg_music_concat.subclip(0, video_duration).set_duration(video_duration)
+                    
+                    # Apply ducking if needed
+                    # Move ducking_volume_func outside of _prepare_audio_tracks
+                    def ducking_volume_func(t: float, segments: List[Dict]) -> float:
+                        """Calculate volume multiplier for audio ducking at a given time."""
+                        for seg in segments:
+                            try:
+                                start = float(seg.get('start_time', -1))
+                                end = float(seg.get('end_time', -1))
+                                if start >= 0 and end > start:
+                                    fade_start = start - AUDIO_DUCKING_FADE_TIME
+                                    fade_end = end + AUDIO_DUCKING_FADE_TIME
+                                    if fade_start <= t <= fade_end:
+                                        if fade_start <= t < start:  # Fade down
+                                            progress = (t - fade_start) / AUDIO_DUCKING_FADE_TIME
+                                            return BACKGROUND_MUSIC_VOLUME - (BACKGROUND_MUSIC_VOLUME - BACKGROUND_MUSIC_DUCKED_VOLUME) * progress
+                                        elif end < t <= fade_end:  # Fade up
+                                            progress = (t - end) / AUDIO_DUCKING_FADE_TIME
+                                            return BACKGROUND_MUSIC_DUCKED_VOLUME + (BACKGROUND_MUSIC_VOLUME - BACKGROUND_MUSIC_DUCKED_VOLUME) * progress
+                                        else:  # During speech
+                                            return BACKGROUND_MUSIC_DUCKED_VOLUME
+                            except (ValueError, TypeError, KeyError):
+                                continue
+                        return BACKGROUND_MUSIC_VOLUME
+                
+                    speech_segments = gemini_data.get("speech_segments", []) if gemini_data else []
+                    if isinstance(speech_segments, list) and speech_segments:
+                        print("  Applying audio ducking for speech segments")
+                        bg_music_audio = bg_music_processed.fl(
+                            lambda gf, t: ducking_volume_func(t, speech_segments) * gf(t)
+                        )
+                    else:
+                        print("  Applying constant volume to background music")
+                        bg_music_audio = bg_music_processed.volumex(BACKGROUND_MUSIC_VOLUME)
+                    
+                    clips_to_close.append(bg_music_audio)
+                    audio_tracks.append(bg_music_audio)
+                    print(f"  Successfully prepared background music: {bg_music_audio.duration:.2f}s")
+                    
+            except Exception as e:
+                print(f"  Warning: Failed to process background music {bg_music_path.name}: {e}")
+                # Clean up any opened clips
+                for clip in [bg_music_clip_orig, bg_music_concat, bg_music_audio]:
+                    if clip in clips_to_close:
+                        clips_to_close.remove(clip)
+                        clip.close()
+
+                bg_music_processed = bg_music_concat.subclip(0, video_duration).set_duration(video_duration)
+
+                # Apply ducking
+                speech_segments = gemini_data.get("speech_segments", []) if gemini_data else []
+                if isinstance(speech_segments, list) and speech_segments:
+                    # Create a fixed volume function that returns a float based on time
+                    def ducking_volume_func(t):
+                        for seg in speech_segments:
+                            try:
+                                start = float(seg.get('start_time', -1))
+                                end = float(seg.get('end_time', -1))
+                                if start >= 0 and end > start:
+                                    fade_start = start - AUDIO_DUCKING_FADE_TIME
+                                    fade_end = end + AUDIO_DUCKING_FADE_TIME
+                                    if fade_start <= t <= fade_end:
+                                        if fade_start <= t < start: # Fade down
+                                            progress = max(0, min(1, (t - fade_start) / AUDIO_DUCKING_FADE_TIME))
+                                            return BACKGROUND_MUSIC_VOLUME - (BACKGROUND_MUSIC_VOLUME - BACKGROUND_MUSIC_DUCKED_VOLUME) * progress
+                                        elif end < t <= fade_end: # Fade up
+                                            progress = max(0, min(1, (t - end) / AUDIO_DUCKING_FADE_TIME))
+                                            return BACKGROUND_MUSIC_DUCKED_VOLUME + (BACKGROUND_MUSIC_VOLUME - BACKGROUND_MUSIC_DUCKED_VOLUME) * progress
+                                        else: # During speech
+                                            return BACKGROUND_MUSIC_DUCKED_VOLUME
+                            except (ValueError, TypeError): continue
+                        return BACKGROUND_MUSIC_VOLUME
+                    
+                    # Apply the volumex effect with our volume function
+                    bg_music_audio = bg_music_processed.fl(lambda gf, t: ducking_volume_func(t) * gf(t))
+                else:
+                    bg_music_audio = bg_music_processed.volumex(BACKGROUND_MUSIC_VOLUME)
+
+                clips_to_close.append(bg_music_audio) # Track the final processed music clip
+                audio_tracks.append(bg_music_audio)
+
+            except Exception as e:
+                print(f"  Warning: Failed to process background music {bg_music_path.name}: {e}")
+                # Clean up potentially opened clips related to this music file
+                if 'bg_music_clip_orig' in locals() and bg_music_clip_orig in clips_to_close: clips_to_close.remove(bg_music_clip_orig); bg_music_clip_orig.close()
+                if 'bg_music_concat' in locals() and bg_music_concat in clips_to_close: clips_to_close.remove(bg_music_concat); bg_music_concat.close()
+                if 'bg_music_audio' in locals() and bg_music_audio in clips_to_close: clips_to_close.remove(bg_music_audio); bg_music_audio.close()
+                bg_music_audio = None # Ensure it's not used
+
+    # Combine Audio Tracks
+    print(f"\n  Compositing {len(audio_tracks)} audio tracks:")
+    final_audio_composite = None
+    
+    try:
+        if len(audio_tracks) > 1:
+            # Filter and validate tracks
+            valid_tracks = []
+            for i, track in enumerate(audio_tracks):
+                if hasattr(track, 'duration') and track.duration is not None:
+                    if track.duration > 0.01:
+                        try:
+                            print(f"    Processing track {i+1}: {track.duration:.2f}s")
+                            # Get audio data and reshape properly
+                            fps = track.fps if hasattr(track, 'fps') else 44100
+                            print(f"      Track FPS: {fps}")
+                            
+                            try:
+                                print(f"      Processing audio clip...")
+                                
+                                # Create a copy of the track
+                                new_track = track.copy()
+                                
+                                # Set exact duration
+                                if new_track.duration > video_duration:
+                                    new_track = new_track.subclip(0, video_duration)
+                                new_track = new_track.set_duration(video_duration)
+                                
+                                # Force stereo if needed
+                                try:
+                                    if hasattr(new_track, 'nchannels') and new_track.nchannels == 1:
+                                        print("      Converting mono to stereo")
+                                        temp_file = TEMP_DIR / f"temp_audio_{i}_{int(time.time())}.wav"
+                                        new_track.write_audiofile(
+                                            str(temp_file),
+                                            fps=44100,
+                                            nbytes=2,
+                                            codec='pcm_s16le',
+                                            ffmpeg_params=['-ac', '2']
+                                        )
+                                        new_track.close()
+                                        new_track = AudioFileClip(str(temp_file))
+                                        new_track = new_track.set_duration(video_duration)
+                                        temp_file.unlink(missing_ok=True)
+                                except Exception as e:
+                                    print(f"      Warning during stereo conversion: {e}")
+                                
+                                print(f"      Successfully processed audio track")
+                                valid_tracks.append(new_track)
+                                clips_to_close.append(new_track)
+                                
+                            except Exception as e:
+                                print(f"      Error processing audio track: {e}")
+                                if 'new_track' in locals() and new_track != track:
+                                    try: new_track.close()
+                                    except: pass
+                            
+                            # Create new clip from processed array
+                            from moviepy.audio.AudioClip import AudioArrayClip
+                            new_track = AudioArrayClip(audio_array, fps=fps)
+                            new_track = new_track.set_fps(fps)  # Ensure fps is set
+                            new_track = new_track.set_duration(video_duration)
+                            
+                            print(f"    Track {i+1} processed successfully")
+                            valid_tracks.append(new_track)
+                            clips_to_close.append(new_track)
+                        except Exception as e:
+                            print(f"    Error processing track {i+1}: {e}")
+                            continue
+                    else:
+                        print(f"    Skipping track {i+1}: Duration too short ({track.duration:.2f}s)")
+                else:
+                    print(f"    Skipping track {i+1}: Invalid duration")
+            
+            if len(valid_tracks) >= 1:
+                try:
+                    print(f"  Creating composite from {len(valid_tracks)} valid tracks")
+                    final_audio_composite = CompositeAudioClip(valid_tracks)
+                    final_audio_composite = final_audio_composite.set_duration(video_duration)
+                    clips_to_close.append(final_audio_composite)
+                except Exception as e:
+                    print(f"  Error creating audio composite: {e}")
+                    for track in valid_tracks:
+                        if track in clips_to_close:
+                            clips_to_close.remove(track)
+                            try: track.close()
+                            except: pass
+                    final_audio_composite = None
+            else:
+                print("  Warning: No valid audio tracks to composite")
+                
+        elif len(audio_tracks) == 1:
+            print("  Using single audio track")
+            final_audio_composite = audio_tracks[0].set_duration(video_duration)
+        else:
+            print("  Warning: No audio tracks available")
+            
+        if final_audio_composite:
+            print(f"  Final audio duration: {final_audio_composite.duration:.2f}s")
+            
+    except Exception as e:
+        print(f"  Error during audio composition: {e}")
+        if final_audio_composite in clips_to_close:
+            clips_to_close.remove(final_audio_composite)
+            final_audio_composite.close()
+        final_audio_composite = None
+
+    return audio_tracks, final_audio_composite
+
+
+def _apply_video_effects(
+    video_clip: VideoClip,
+    gemini_data: Optional[Dict[str, Any]]
+) -> VideoClip:
+    """Applies sequential video effects like zoom, shake, color grade, emphasis."""
+    mood = gemini_data.get("mood", "unknown").lower() if gemini_data else "unknown"
+
+    if SUBTLE_ZOOM_ENABLED:
+        video_clip = apply_subtle_zoom(video_clip)
+    if SHAKE_EFFECT_ENABLED:
+        video_clip = apply_shake(
+            video_clip, max_translate=int(random.uniform(3, 6)),
+            shake_duration=random.uniform(0.2, 0.4), shake_times=random.randint(2, 4)
+        )
+    if COLOR_GRADE_ENABLED:
+        video_clip = apply_color_grade(video_clip)
+    if ADD_VISUAL_EMPHASIS and gemini_data and "key_visual_moments" in gemini_data:
+        key_moments = gemini_data.get("key_visual_moments", [])
+        if isinstance(key_moments, list):
+            for moment in key_moments:
+                try:
+                    t = float(moment.get('timestamp', -1))
+                    fp = moment.get('focus_point', {})
+                    fx = float(fp.get('x', 0.5)); fy = float(fp.get('y', 0.5))
+                    if 0 <= t < video_clip.duration:
+                        emphasis_duration = random.uniform(1.2, 1.8)
+                        emphasis_start = max(0, t - emphasis_duration / 2)
+                        emphasis_end = min(video_clip.duration, emphasis_start + emphasis_duration)
+                        emphasis_duration = emphasis_end - emphasis_start
+                        if emphasis_duration > 0.1:
+                             video_clip = add_visual_emphasis(
+                                video_clip, focus_x=fx, focus_y=fy, start_time=emphasis_start,
+                                duration=emphasis_duration, zoom_factor=random.uniform(1.08, 1.15)
+                            )
+                except (ValueError, TypeError, KeyError) as parse_err:
+                    print(f"  - Warning: Skipping emphasis due to invalid moment data: {moment}, Error: {parse_err}")
+    return video_clip
+
+def _prepare_overlays(
+    video_w: int,
+    video_h: int,
+    video_duration: float,
+    subtitle_clips: List[TextClip],
+    clips_to_close: List[Any]
+) -> List[Union[ImageClip, TextClip]]:
+    """Creates watermark and prepares subtitle clips."""
+    overlays = []
+    if WATERMARK_PATH.is_file():
+        try:
+            # Fixed watermark handling - use ImageClip without ismask parameter
+            watermark_clip = (ImageClip(str(WATERMARK_PATH))
+                             .set_duration(video_duration)
+                             .resize(height=max(20, int(video_h * 0.05)))
+                             .margin(right=15, bottom=15, opacity=0)
+                             .set_position(("right", "bottom"))
+                             .set_opacity(0.6))
+            clips_to_close.append(watermark_clip)
+            overlays.append(watermark_clip)
+        except Exception as e_wm: print(f"  Warning: Failed to create watermark overlay: {e_wm}")
+
+    if subtitle_clips:
+        overlays.extend(subtitle_clips)
+        clips_to_close.extend(subtitle_clips)
+    return overlays
+
+def combine_video_audio_subs(
+    processed_video_path: pathlib.Path,
+    original_video_for_audio_path: Optional[pathlib.Path],
+    tts_audio_path: Optional[pathlib.Path],
+    subtitle_clips: List[TextClip],
+    output_path: pathlib.Path,
+    gemini_data: Optional[Dict[str, Any]] = None,
+    stabilization_transforms_file: Optional[pathlib.Path] = None
+) -> Optional[pathlib.Path]:
+
+    clips_to_close: List[Any] = []
+    temp_files_to_clean: List[pathlib.Path] = []
+    final_composite_clip = None # Define here for finally block
+
+    try:
+        if not processed_video_path.is_file(): raise FileNotFoundError(f"Input video not found: {processed_video_path}")
+
+        video_clip = VideoFileClip(str(processed_video_path))
+        clips_to_close.append(video_clip)
+        video_duration = video_clip.duration
+        video_w, video_h = video_clip.size
+        if not video_duration or video_duration <= 0 or video_w <= 0 or video_h <= 0:
+            raise ValueError("Loaded video clip has invalid properties.")
+
+        video_clip = _apply_video_effects(video_clip, gemini_data)
+
+        # Process audio tracks individually using ffmpeg directly
+        print("  Processing audio tracks...")
+        temp_final_audio = TEMP_DIR / f"{output_path.stem}_final_audio.m4a"
+        temp_files_to_clean.append(temp_final_audio)
+        final_audio = None
+        
+        try:
+            # Process TTS if it exists
+            if tts_audio_path and tts_audio_path.is_file():
+                print(f"  Processing TTS audio from: {tts_audio_path}")
+                temp_tts = TEMP_DIR / f"{output_path.stem}_tts.wav"
+                temp_files_to_clean.append(temp_tts)
+                
+                try:
+                    # First check if input file is valid
+                    probe_result = subprocess.run(
+                        ['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'default=nw=1:nk=1', str(tts_audio_path)],
+                        capture_output=True, text=True, check=False
+                    )
+                    
+                    if 'audio' in probe_result.stdout:
+                        print("  Converting TTS to WAV format...")
+                        # First convert to intermediate format
+                        temp_tts_raw = TEMP_DIR / f"{output_path.stem}_tts_raw.wav"
+                        temp_files_to_clean.append(temp_tts_raw)
+                        
+                        def run_ffmpeg(cmd_list):
+                            """Run ffmpeg command with proper encoding handling"""
+                            try:
+                                result = subprocess.run(
+                                    cmd_list,
+                                    capture_output=True,
+                                    encoding='utf-8',
+                                    errors='replace',
+                                    check=False
+                                )
+                                return result.returncode == 0, result.stderr
+                            except Exception as e:
+                                return False, str(e)
+                        
+                        print("  Converting TTS to WAV...")
+                        success, error = run_ffmpeg([
+                            'ffmpeg', '-y',
+                            '-i', str(tts_audio_path),
+                            '-vn',  # No video
+                            '-acodec', 'pcm_s16le',
+                            '-hide_banner',
+                            str(temp_tts_raw)
+                        ])
+                        
+                        if success:
+                            print("  Normalizing audio format...")
+                            success, error = run_ffmpeg([
+                                'ffmpeg', '-y',
+                                '-i', str(temp_tts_raw),
+                                '-ar', '44100',
+                                '-ac', '2',
+                                '-acodec', 'pcm_s16le',
+                                '-hide_banner',
+                                str(temp_tts)
+                            ])
+                            if not success:
+                                print(f"  Error normalizing audio: {error}")
+                        else:
+                            print(f"  Error converting to WAV: {error}")
+                            temp_tts_raw.unlink(missing_ok=True)
+                    else:
+                        print("  Error: TTS file contains no valid audio stream")
+                        raise ValueError("No audio stream found in TTS file")
+                        
+                except Exception as e:
+                    print(f"  Failed to convert TTS: {e}")
+                    if temp_tts.exists():
+                        temp_tts.unlink()
+                    raise
+                
+                if temp_tts.is_file():
+                    # Process background music if it exists
+                    if original_video_for_audio_path and original_video_for_audio_path.is_file():
+                        print(f"  Processing background music from: {original_video_for_audio_path}")
+                        temp_music = TEMP_DIR / f"{output_path.stem}_music.wav"
+                        temp_files_to_clean.append(temp_music)
+                        
+                        try:
+                            # Check if input file has audio
+                            probe_result = subprocess.run(
+                                ['ffprobe', '-v', 'error', '-show_entries', 'stream=codec_type', '-of', 'default=nw=1:nk=1', str(original_video_for_audio_path)],
+                                capture_output=True, text=True, check=False
+                            )
+                            
+                            if 'audio' in probe_result.stdout:
+                                print("  Converting background music to WAV format...")
+                                # First convert to intermediate format
+                                temp_music_raw = TEMP_DIR / f"{output_path.stem}_music_raw.wav"
+                                temp_files_to_clean.append(temp_music_raw)
+                                
+                                print("  Converting music to WAV...")
+                                success, error = run_ffmpeg([
+                                    'ffmpeg', '-y',
+                                    '-i', str(original_video_for_audio_path),
+                                    '-vn',  # No video
+                                    '-acodec', 'pcm_s16le',
+                                    '-ar', '44100',
+                                    '-ac', '2',
+                                    '-hide_banner',
+                                    str(temp_music_raw)
+                                ])
+                                
+                                if success:
+                                    print("  Adjusting music volume...")
+                                    success, error = run_ffmpeg([
+                                        'ffmpeg', '-y',
+                                        '-i', str(temp_music_raw),
+                                        '-filter:a', f'volume={BACKGROUND_MUSIC_VOLUME}',
+                                        '-acodec', 'pcm_s16le',
+                                        '-hide_banner',
+                                        str(temp_music)
+                                    ])
+                                    if not success:
+                                        print(f"  Error adjusting volume: {error}")
+                                else:
+                                    print(f"  Error converting music to WAV: {error}")
+                                    temp_music_raw.unlink(missing_ok=True)
+                                
+                                if result.returncode != 0:
+                                    print(f"  FFmpeg error: {result.stderr}")
+                                    raise subprocess.CalledProcessError(result.returncode, result.args)
+                                    
+                                print("  Background music processed successfully")
+                            else:
+                                print("  Error: Background music file contains no valid audio stream")
+                                raise ValueError("No audio stream found in background music file")
+                                
+                        except Exception as e:
+                            print(f"  Failed to convert background music: {e}")
+                            if temp_music.exists():
+                                temp_music.unlink()
+                        
+                        if temp_music.is_file():
+                            # Mix audio files if both exist
+                            if temp_tts.is_file() and temp_music.is_file():
+                                print("  Mixing TTS and background music...")
+                                success, error = run_ffmpeg([
+                                    'ffmpeg', '-y',
+                                    '-i', str(temp_tts),
+                                    '-i', str(temp_music),
+                                    '-filter_complex',
+                                    f'[1:a]volume={BACKGROUND_MUSIC_VOLUME}[bg];[bg]apad[bg1];[0:a]apad[tts1];[tts1][bg1]amerge=inputs=2,pan=stereo|c0<c0+c2|c1<c1+c3[a]',
+                                    '-map', '[a]',
+                                    '-c:a', 'aac',
+                                    '-b:a', '192k',
+                                    '-shortest',
+                                    '-hide_banner',
+                                    '-loglevel', 'error',
+                                    str(temp_final_audio)
+                                ])
+                                
+                                if not success:
+                                    print(f"  FFmpeg mixing error: {error}")
+                                    raise RuntimeError(f"Failed to mix audio: {error}")
+                                print("  Audio mixing completed successfully")
+                        else:
+                            # Just use TTS if music conversion failed
+                            shutil.copy(str(temp_tts), str(temp_final_audio))
+                    else:
+                        # Just use TTS if no music
+                        shutil.copy(str(temp_tts), str(temp_final_audio))
+                        
+            if temp_final_audio.is_file() and temp_final_audio.stat().st_size > 1024:
+                print("  Setting final audio...")
+                final_audio = AudioFileClip(str(temp_final_audio))
+                final_audio = final_audio.set_duration(video_duration)
+                video_clip = video_clip.set_audio(final_audio)
+                clips_to_close.append(final_audio)
+            else:
+                print("  Warning: No valid audio produced")
+                video_clip = video_clip.set_audio(None)
+                
+        except Exception as e:
+            print(f"  Error processing audio: {e}")
+            video_clip = video_clip.set_audio(None)
+        
+        # Add overlays
+        overlays = _prepare_overlays(video_w, video_h, video_duration, subtitle_clips, clips_to_close)
+        final_composite_clip = CompositeVideoClip(
+            [video_clip] + overlays,
+            size=(video_w, video_h)
+        ).set_duration(video_duration)
+        clips_to_close.append(final_composite_clip)
+
+        # Final duration clamp
+        target_duration = TARGET_VIDEO_DURATION_SECONDS
+        if final_composite_clip.duration > target_duration + 0.1:
+            final_composite_clip = final_composite_clip.subclip(0, target_duration)
+        elif final_composite_clip.duration <= 0:
+            raise ValueError(f"Final composite clip has invalid duration: {final_composite_clip.duration:.2f}s")
+
+        # Ensure dimensions are even
+        final_w, final_h = final_composite_clip.size
+        if final_w % 2 != 0 or final_h % 2 != 0:
+            target_w_even = final_w - (final_w % 2); target_h_even = final_h - (final_h % 2)
+            final_composite_clip = final_composite_clip.crop(width=target_w_even, height=target_h_even, x_center=final_w/2, y_center=final_h/2)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        cleanup_temp_files(output_path)
+
+        use_gpu = has_nvidia_gpu()
+        codec = VIDEO_CODEC_GPU if use_gpu else VIDEO_CODEC_CPU
+        preset = FFMPEG_GPU_PRESET if use_gpu else FFMPEG_CPU_PRESET
+        quality_param = ['-cq', FFMPEG_CQ_GPU] if use_gpu else ['-crf', FFMPEG_CRF_CPU]
+        ffmpeg_extra_params = quality_param + ['-pix_fmt', 'yuv420p', '-movflags', '+faststart']
+
+        if APPLY_STABILIZATION and stabilization_transforms_file and stabilization_transforms_file.is_file():
+            escaped_transforms_path = str(stabilization_transforms_file).replace('\\', '/')
+            stabilization_filter = f'vidstabtransform=input="{escaped_transforms_path}":zoom=0:smoothing=15,unsharp=5:5:0.8:3:3:0.4'
+            try:
+                vf_index = ffmpeg_extra_params.index('-vf'); ffmpeg_extra_params[vf_index + 1] += f',{stabilization_filter}'
+            except ValueError: ffmpeg_extra_params.extend(['-vf', stabilization_filter])
+        elif APPLY_STABILIZATION: print("  Warning: Stabilization requested but transforms file invalid.")
+
+        temp_final_audio_path = TEMP_DIR / f"{output_path.stem}_final_audio.m4a"
+        final_composite_clip.write_videofile(
+            str(output_path), codec=codec, audio_codec=AUDIO_CODEC,
+            temp_audiofile=str(temp_final_audio_path), remove_temp=True,
+            preset=preset, fps=TARGET_FPS, threads=N_JOBS_PARALLEL,
+            logger=None, ffmpeg_params=ffmpeg_extra_params
+        )
+        cleanup_temp_files(temp_final_audio_path)
+
+
+        if not output_path.is_file() or output_path.stat().st_size < 10240:
+             raise IOError(f"Final video file missing or empty: {output_path}")
+        if final_audio and not has_audio_track(output_path):
+             raise IOError(f"Final video missing audio track: {output_path.name}")
+
+        return output_path
+
+    except Exception as e:
+        print(f"\n--- CRITICAL ERROR during video combination: {e} ---")
+        traceback.print_exc()
+        cleanup_temp_files(output_path) # Clean up potentially failed output
+        return None
+    finally:
+        # Ensure all tracked clips are closed, even on error
+        for clip_obj in clips_to_close:
+            if clip_obj and hasattr(clip_obj, 'close'):
+                try: clip_obj.close()
+                except Exception: pass
+        cleanup_temp_files(*temp_files_to_clean)
+
+
+def _prepare_initial_video(submission: praw.models.Submission, safe_title: str, temp_files_list: List[pathlib.Path]) -> Tuple[Optional[pathlib.Path], float, int, int]:
+    """Downloads, gets details, and converts to vertical."""
+    download_path = TEMP_DIR / f"{submission.id}_{safe_title}_download.mp4"
+    vertical_path = TEMP_DIR / f"{submission.id}_{safe_title}_vertical.mp4"
+    temp_files_list.extend([download_path, vertical_path])
+
+    actual_download_path = download_media(submission.url, download_path)
+    if not actual_download_path: return None, 0.0, 0, 0
+
+    duration, width, height = get_video_details(actual_download_path)
+    if duration <= 0 or width <= 0 or height <= 0: return None, 0.0, 0, 0
+
+    aspect_ratio = width / height
+    if abs(aspect_ratio - TARGET_ASPECT_RATIO) > 0.05:
+        processed_path = make_video_vertical(actual_download_path, vertical_path)
+        if not processed_path: return None, 0.0, 0, 0
+        # Get details of the vertical video
+        duration_v, width_v, height_v = get_video_details(processed_path)
+        return processed_path, duration_v, width_v, height_v
+    else:
+        return actual_download_path, duration, width, height # Return original if already vertical
+
+
+def _get_processing_params(gemini_analysis: Dict[str, Any], original_duration: float) -> Tuple[float, float, str, bool]:
+    """Determines start/end times and TTS details from Gemini analysis."""
+    start_time = 0.0
+    end_time = min(original_duration, TARGET_VIDEO_DURATION_SECONDS)
+    trim_duration = end_time - start_time
+    best_segment = gemini_analysis.get("best_segment")
+
+    if isinstance(best_segment, dict) and 'start_time' in best_segment and 'end_time' in best_segment:
+        try:
+            seg_start = float(best_segment['start_time'])
+            seg_end = float(best_segment['end_time'])
+            seg_dur = seg_end - seg_start
+            if 5 < seg_dur <= TARGET_VIDEO_DURATION_SECONDS and 0 <= seg_start < seg_end <= original_duration:
+                start_time = seg_start; end_time = seg_end
+            elif seg_dur > TARGET_VIDEO_DURATION_SECONDS and 0 <= seg_start < original_duration:
+                start_time = seg_start; end_time = min(original_duration, seg_start + TARGET_VIDEO_DURATION_SECONDS)
+            trim_duration = end_time - start_time # Recalculate trimmed duration
+        except (ValueError, TypeError): pass
+
+    tts_text = gemini_analysis.get("summary_for_description", "")
+    generate_tts_flag = bool(tts_text and not MIX_ORIGINAL_AUDIO)
+
+    return start_time, end_time, tts_text, generate_tts_flag
+
+
+def _generate_assets(
+    gemini_analysis: Dict[str, Any],
+    tts_text: str,
+    generate_tts_flag: bool,
+    start_time: float,
+    end_time: float,
+    trimmed_video_path: pathlib.Path,
+    submission_id: str,
+    safe_title: str,
+    temp_files_list: List[pathlib.Path]
+) -> Tuple[Optional[pathlib.Path], List[TextClip]]:
+    """Generates TTS audio and subtitle clips."""
+    actual_tts_path = None
+    tts_path = TEMP_DIR / f"{submission_id}_{safe_title}_tts.mp3"
+    temp_files_list.append(tts_path)
+    if generate_tts_flag:
+        # Generate TTS using Hugging Face
+        if hugging_face_tts(tts_text, tts_path):
+            actual_tts_path = tts_path
+            print("  Hugging Face TTS generation successful")
+        else:
+            print("Warning: Hugging Face TTS generation failed")
+
+    subtitle_clips = []
+    speech_segments = gemini_analysis.get("speech_segments", [])
+    if isinstance(speech_segments, list) and speech_segments:
+        adjusted_segments = []
+        trim_duration = end_time - start_time
+        for seg in speech_segments:
+            try:
+                seg_start = float(seg['start_time']); seg_end = float(seg['end_time'])
+                if max(start_time, seg_start) < min(end_time, seg_end):
+                    new_start = max(0, seg_start - start_time)
+                    new_end = min(trim_duration, seg_end - start_time)
+                    if new_end > new_start + 0.1:
+                         adjusted_segments.append({"start_time": new_start, "end_time": new_end, "text": seg.get("text", "")})
+            except (ValueError, TypeError, KeyError): continue
+
+        if adjusted_segments:
+            _, trim_w, trim_h = get_video_details(trimmed_video_path)
+            if trim_w > 0 and trim_h > 0:
+                subtitle_clips = create_animated_subtitle_clips(adjusted_segments, trim_w, trim_h)
+            else: print("Warning: Could not get dimensions of trimmed video for subtitles.")
+
+    return actual_tts_path, subtitle_clips
+
+
+def process_submission(submission: praw.models.Submission, config: Dict[str, Any]) -> bool:
+    if is_already_uploaded(submission.permalink):
+        print(f"Skipping {submission.id}: Already uploaded.")
+        return True
+    if contains_forbidden_words(submission.title) or contains_forbidden_words(submission.selftext):
+        print(f"Skipping {submission.id}: Forbidden words.")
+        return True
+
+    print(f"\n{'='*20} Processing: {submission.id} | {submission.title[:50]}... {'='*20}")
+    safe_title = sanitize_filename(submission.title)
+    submission_temp_files = []
+
+    # Paths used across multiple steps
+    final_output_path = TEMP_DIR / f"{submission.id}_{safe_title}_final.mp4"
+    trimmed_path = TEMP_DIR / f"{submission.id}_{safe_title}_trimmed.mp4"
+    stab_analysis_path = TEMP_DIR / f"{submission.id}_{safe_title}_stab.trf"
+    submission_temp_files.extend([final_output_path, trimmed_path, stab_analysis_path])
+
+    try:
+        # 1. Prepare Initial Video (Download, Details, Vertical)
+        initial_video_path, duration, width, height = _prepare_initial_video(submission, safe_title, submission_temp_files)
+        if not initial_video_path:
+            print("Failed initial video preparation.")
+            return False
+        print(f"Initial video prepared: {initial_video_path.name}, {duration:.2f}s, {width}x{height}")
+
+        # 2. Analyze Content (Gemini)
+        gemini_analysis = analyze_video_with_gemini(initial_video_path, submission.title, submission.subreddit.display_name)
+        if gemini_analysis.get('fallback', True):
+            print("Gemini analysis failed or returned fallback. Aborting.")
+            return False # Stop if core analysis fails
+        print("Gemini analysis successful.")
+
+        # 3. Determine Processing Parameters
+        start_time, end_time, tts_text, generate_tts_flag = _get_processing_params(gemini_analysis, duration)
+        print(f"Processing segment: {start_time:.2f}s - {end_time:.2f}s. TTS needed: {generate_tts_flag}")
+
+        # 4. Trim Video
+        trimmed_video_path = trim_video(initial_video_path, start_time, end_time, trimmed_path)
+        if not trimmed_video_path:
+            print("Failed to trim video.")
+            return False
+        current_video_path = trimmed_video_path
+        print(f"Video trimmed: {trimmed_video_path.name}")
+
+        # 5. Generate Assets (TTS, Subtitles)
+        actual_tts_path, subtitle_clips = _generate_assets(
+            gemini_analysis, tts_text, generate_tts_flag, start_time, end_time,
+            trimmed_video_path, submission.id, safe_title, submission_temp_files
+        )
+        print(f"Assets generated. TTS: {'Yes' if actual_tts_path else 'No'}, Subtitles: {len(subtitle_clips)}")
+
+        # 6. Stabilization Analysis (Optional)
+        stabilization_file = None
+        if config.get('apply_stabilization', False) and check_ffmpeg_install("ffmpeg"):
+             print("--- Applying Stabilization (Experimental) ---")
+             stab_analyze_cmd = ['ffmpeg', '-y', '-i', str(current_video_path), '-vf', f'vidstabdetect=result="{str(stab_analysis_path)}":shakiness=5:accuracy=15', '-f', 'null', '-']
+             try:
+                 subprocess.run(stab_analyze_cmd, check=True, capture_output=True, text=True, timeout=120)
+                 if stab_analysis_path.is_file(): stabilization_file = stab_analysis_path
+                 else: print("  Warning: Stabilization analysis file not created.")
+             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, Exception) as e: print(f"  Error during stabilization analysis: {e}")
+
+        # 7. Combine Final Video
+        original_audio_ref = current_video_path if config.get('mix_original_audio', False) else None
+        final_video_path = combine_video_audio_subs(
+            processed_video_path=current_video_path,
+            original_video_for_audio_path=original_audio_ref,
+            tts_audio_path=actual_tts_path,
+            subtitle_clips=subtitle_clips,
+            output_path=final_output_path,
+            gemini_data=gemini_analysis,
+            stabilization_transforms_file=stabilization_file
+        )
+        if not final_video_path:
+            print("Failed to combine final video.")
+            return False
+        print(f"Final video combined: {final_video_path.name}")
+
+        # 8. Upload (if not skipped)
+        if not config.get('skip_upload', False):
+            youtube_title = gemini_analysis.get("suggested_title", submission.title[:70])[:100]
+            description_summary = gemini_analysis.get("summary_for_description", submission.title)
+            youtube_description = f"{description_summary}\n\nOriginal: https://www.reddit.com{submission.permalink}\nr/{submission.subreddit.display_name}"
+            youtube_tags = list(set(tag.strip().replace("#", "") for tag in gemini_analysis.get("hashtags", []) if tag.strip()))
+            youtube_tags.extend([submission.subreddit.display_name, "reddit", "shorts"])
+            youtube_tags = list(dict.fromkeys(youtube_tags))[:15]
+
+            youtube_url = upload_to_youtube(final_video_path, youtube_title, youtube_description, youtube_tags)
+            if not youtube_url:
+                print("Failed to upload video to YouTube.")
+                # Don't return False here if the error was UploadLimitExceededError, as it's handled by the caller
+                # For other upload errors, we might consider it a failure for this submission.
+                # Check if exception was raised and handled by caller instead. For now, assume non-quota error is failure.
+                # The exception handling in the main loop should catch UploadLimitExceededError.
+                # If upload_to_youtube returns None without raising that specific error, it's likely another issue.
+                return False # Treat other upload failures as processing failure for this item
+
+            add_upload_record(submission.permalink, youtube_url)
+            print(f"Successfully uploaded: {youtube_url}")
+        else:
+            print("--- Skipping YouTube Upload as requested ---")
+
+
+        print(f"--- Successfully processed submission {submission.id} ---")
+        return True
+
+    except UploadLimitExceededError:
+        print("YouTube upload limit reached during processing.")
+        raise # Re-raise for the main loop to catch
+    except Exception as e:
+        print(f"\n--- ERROR processing submission {submission.id}: {e} ---")
+        traceback.print_exc()
+        return False
+    finally:
+        cleanup_temp_files(*submission_temp_files)
+        # Ensure subtitle clips are closed if they exist and weren't handled by combine
+        if 'subtitle_clips' in locals() and subtitle_clips:
+             for sub_clip in subtitle_clips:
+                 if hasattr(sub_clip, 'close'):
+                     try: sub_clip.close()
+                     except Exception: pass
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Reddit Video Bot")
+    parser.add_argument("subreddits", nargs='+', help="Subreddit names (e.g., 'videos funny cats').")
+    parser.add_argument("-n", "--num_posts", type=int, default=5, help="Max posts to process.")
+    parser.add_argument("--skip_upload", action="store_true", help="Process but do not upload.")
+    args = parser.parse_args()
+
+    start_time = time.time()
+    processed_count = 0
+    success_count = 0
+    quota_error_encountered = False
+    interrupted = False
+
+    # Simplified config dict for passing options
+    config = {
+        'skip_upload': args.skip_upload,
+        'mix_original_audio': MIX_ORIGINAL_AUDIO,
+        'apply_stabilization': APPLY_STABILIZATION
+        # Add other relevant global constants if needed by process_submission indirectly
+    }
+
+    try:
+        validate_environment()
+        setup_directories()
+        setup_database()
+        setup_api_clients()
+
+        for subreddit_name in args.subreddits:
+            if interrupted or quota_error_encountered: break
+            print(f"\n===== Processing Subreddit: r/{subreddit_name} =====")
+            submissions = get_reddit_submissions(subreddit_name, args.num_posts)
+            if not submissions: continue
+
+            for submission in submissions:
+                if interrupted or quota_error_encountered: break
+                if processed_count >= args.num_posts: break
+
+                processed_count += 1
+                try:
+                    success = process_submission(submission, config)
+                    if success: success_count += 1
+                    time.sleep(2) # Small delay between posts
+                except KeyboardInterrupt:
+                    print("\n*** KeyboardInterrupt detected. Stopping... ***")
+                    interrupted = True; break
+                except UploadLimitExceededError:
+                    print("\nStopping processing due to YouTube Upload Quota Error.")
+                    quota_error_encountered = True; break
+                except Exception as e: # Catch unexpected errors from process_submission itself
+                    print(f"\n--- Unhandled Error processing submission {submission.id} from main loop: {e} ---")
+                    traceback.print_exc()
+
+    except (ValueError, FileNotFoundError, ConnectionError, sqlite3.Error, RuntimeError) as setup_err:
+        print(f"\nFATAL SETUP ERROR: {setup_err}")
+    except KeyboardInterrupt: # Catch interrupt during setup or subreddit iteration
+         print("\n*** KeyboardInterrupt detected during main execution. Stopping... ***")
+         interrupted = True
+    except Exception as e:
+        print(f"\n--- An unexpected error occurred in the main execution: {e} ---")
+        traceback.print_exc()
+    finally:
+        close_database()
+        end_time = time.time()
+        print("\n--- Processing Summary ---")
+        if interrupted: print("*** Processing Interrupted ***")
+        if quota_error_encountered: print("*** Stopped due to YouTube Quota ***")
+        print(f"Attempted: {processed_count} submissions")
+        print(f"Succeeded: {success_count} submissions")
+        print(f"Total time: {end_time - start_time:.2f} seconds")
+        print("--------------------------")
+        # Optional: Clean up TEMP_DIR more aggressively if needed
+        # if TEMP_DIR.exists(): shutil.rmtree(TEMP_DIR, ignore_errors=True)
+
+if __name__ == "__main__":
+    main()
 

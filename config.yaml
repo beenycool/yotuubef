@@ -1,0 +1,32 @@
+# Video Processing Configuration
+video:
+  target_duration: 60
+  target_resolution: [1080, 1920]
+  max_retries: 3
+  default_crop: [0.25, 0.25, 0.75, 0.75]
+
+text_overlay:
+  font: Impact
+  font_size_ratio: 0.08
+  stroke_width: 3
+  position: [0.5, 0.85]
+
+effects:
+  shake_intensity: 0.02
+  max_zoom: 1.1
+  stabilization_threshold: 5.0
+  color_grade_intensity: 0.7
+
+apis:
+  gemini:
+    max_frames: 20
+    timeout: 30
+    safety_threshold: medium
+  elevenlabs:
+    timeout: 20
+    default_voice: 21m00Tcm4TlvDq8ikWAM
+
+fallbacks:
+  enable_basic_effects: true
+  default_mood: exciting
+  default_hashtags: ['#viral', '#shorts', '#reddit']

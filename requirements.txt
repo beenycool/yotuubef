@@ -10,4 +10,10 @@ Pillow
 opencv-python
 opencv-contrib-python # Needed for CSRT tracker
 numpy
+torch
+transformers
+accelerate
+huggingface_hub
+soundfile
+ffmpeg-normalize
 # Add specific versions if needed, e.g., moviepy==1.0.3
