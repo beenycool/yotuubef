@@ -16,6 +16,8 @@ effects:
   max_zoom: 1.1
   stabilization_threshold: 5.0
   color_grade_intensity: 0.7
+processing:
+  temp_dir: /content/temp
 
 apis:
   gemini:
@@ -25,6 +27,7 @@ apis:
   elevenlabs:
     timeout: 20
     default_voice: 21m00Tcm4TlvDq8ikWAM
+
 
 fallbacks:
   enable_basic_effects: true

@@ -446,19 +446,45 @@ def apply_dynamic_panning(clip, focus_points, new_width, new_height, original_wi
         new_width, new_height: Dimensions of the crop window
         original_width, original_height: Original video dimensions
     """
+    # Validate input parameters
+    if not focus_points or len(focus_points) < 2:
+        raise ValueError("Dynamic panning requires at least 2 focus points")
+        
+    if any('time' not in fp or 'point' not in fp for fp in focus_points):
+        raise ValueError("Focus points must contain 'time' and 'point' keys")
+    
     # Convert to integers for cropping
     effective_width = int(new_width)
     effective_height = int(new_height)
     
-    # Calculate zoom progression
+    # Calculate zoom progression with validation
+    if len(focus_points) < 2:
+        raise ValueError("Dynamic panning requires at least 2 focus points")
+    
+    # Validate time points are in ascending order
+    times = [fp['time'] for fp in focus_points]
+    if any(times[i] > times[i+1] for i in range(len(times)-1)):
+        raise ValueError("Focus points must be in chronological order")
+    
+    # Generate zoom factors matching focus points count
     zoom_factors = np.linspace(initial_zoom, target_zoom, len(focus_points))
     max_zoom = max(initial_zoom, target_zoom)
     
+    # Validate array dimensions before processing
+    if len(zoom_factors) != len(focus_points):
+        raise ValueError(f"Zoom factors ({len(zoom_factors)}) must match focus points count ({len(focus_points)})")
+    
     def get_crop_center_at_time(t, zoom_factors=None):
-        # Calculate current zoom factor
-        current_zoom = np.interp(t,
-                               [fp['time'] for fp in focus_points],
-                               zoom_factors)
+        # Calculate current zoom factor with array validation
+        try:
+            time_points = [fp['time'] for fp in focus_points]
+            if len(time_points) != len(zoom_factors):
+                raise ValueError(f"Mismatched arrays: {len(time_points)} time points vs {len(zoom_factors)} zoom factors")
+            
+            current_zoom = np.interp(t, time_points, zoom_factors)
+        except ValueError as e:
+            print(f"Interpolation error: {e}")
+            current_zoom = 1.0  # Fallback to no zoom
         current_zoom = max(1.0, min(current_zoom, 1.2))  # Clamp zoom between 1.0 and 1.2
         """
         Calculate the crop center coordinates at a specific time using interpolation

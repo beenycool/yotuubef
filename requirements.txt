@@ -20,3 +20,4 @@ psutil
 pynvml; sys_platform == 'linux' and platform_machine == 'x86_64'
 ffmpeg-python
 # Add specific versions if needed, e.g., moviepy==1.0.3
+jupyter
