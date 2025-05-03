@@ -28,6 +28,18 @@ apis:
     timeout: 20
     default_voice: 21m00Tcm4TlvDq8ikWAM
 
+subreddits:
+  - CrazyFuckingVideos
+  - funny
+  - videos
+  - interestingasfuck
+  - mildlyinteresting
+  - mildlyinfuriating
+  - CasualUK
+  - BeAmazed
+  - cats
+  - Damnthatsinteresting
+  - chaoticgood
 
 fallbacks:
   enable_basic_effects: true
