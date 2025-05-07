@@ -146,6 +146,17 @@ FFMPEG_CRF_CPU = '23'
 FFMPEG_CQ_GPU = '23'
 LOUDNESS_TARGET_LUFS = -14 # Adjusted target for better compatibility
 
+# --- Enhanced Video Quality Settings ---
+# Higher bitrate for better quality videos
+VIDEO_BITRATE_HIGH = '10M'  # 10 Mbps for high quality
+VIDEO_BITRATE_MEDIUM = '8M'  # 8 Mbps for medium quality
+VIDEO_BITRATE_MOBILE = '6M'  # 6 Mbps for mobile-optimized
+AUDIO_BITRATE = '192k'       # Higher audio bitrate
+ENABLE_TWO_PASS_ENCODING = True  # Better quality with two-pass encoding
+ENABLE_VIDEO_LOOP = True     # Enable video looping for shorts
+MAX_LOOP_COUNT = 3           # Maximum number of times to loop short clips
+MIN_LOOP_DURATION = 7        # Minimum duration in seconds for loopable clips
+
 # Text Overlay Parameters (Narrative Style)
 NARRATIVE_FONT = 'Impact' # Ensure this font is installed or provide path
 NARRATIVE_FONT_SIZE_RATIO = 1 / 10
@@ -169,7 +180,7 @@ API_DELAY_SECONDS = 6
 MAX_REDDIT_POSTS_TO_FETCH = 10
 ADD_VISUAL_EMPHASIS = True
 APPLY_STABILIZATION = False # Keep disabled unless vidstab is reliable
-MIX_ORIGINAL_AUDIO = False # Narrative style usually replaces original audio
+MIX_ORIGINAL_AUDIO = True # Narrative style usually replaces original audio
 ORIGINAL_AUDIO_MIX_VOLUME = 0.1 # Very low if mixed
 BACKGROUND_MUSIC_ENABLED = True
 BACKGROUND_MUSIC_VOLUME = 0.08 # Lower default volume
@@ -323,13 +334,16 @@ class UploadLimitExceededError(Exception):
 
 FALLBACK_ANALYSIS = {
     'fallback': True,
-    'suggested_title': 'Interesting Reddit Clip',
-    'summary_for_description': 'Check out this video from Reddit!',
+    'suggested_title': 'Interesting Moment from Reddit',
+    'summary_for_description': 'An interesting clip from Reddit worth sharing.',
     'mood': 'neutral',
+    'hook_text': 'Take a look at this',
     'best_segment': None,
     'key_visual_moments': [],
     'speech_segments': [],
     'narrative_script': [], # Add narrative script field to fallback
+    'visual_cues': [], # Add visual cues
+    'retention_tactics': [], # Add retention tactics
     'hashtags': ['#reddit', '#shorts', '#video'],
     'original_duration': 0.0
 }
@@ -614,19 +628,23 @@ def analyze_video_with_gemini(video_path: pathlib.Path, title: str, subreddit_na
 Original title: "{title}". Video duration: {duration:.2f}s.
 
 Requirements:
-1. Use ALL CAPS text overlays (1-4 words each)
-2. Create concise narrative script segments
-3. Suggest visual effects for key moments
-4. Recommend appropriate music genres
-5. Identify important audio moments
+1. Create an authentic and engaging opening in the first 3 seconds
+2. Use concise text overlays (1-4 words) strategically at key moments 
+3. Create a narrative that builds genuine interest without being over-the-top
+4. Identify natural moments of surprise, satisfaction, or interest
+5. Suggest subtle visual effects at appropriate moments
+6. Recommend music that matches the authentic mood of the content
+7. Focus on honest storytelling that respects the viewer's intelligence
+8. Ensure the video has a satisfying conclusion when possible
 
 Return JSON with these fields:
 {{
-    "suggested_title": "string (<70 chars)",
-    "summary_for_description": "string (2-3 sentences)",
+    "suggested_title": "string (authentic, <70 chars, descriptive but intriguing)",
+    "summary_for_description": "string (2-3 sentences, factual with subtle interest)",
     "mood": "string (from: funny, heartwarming, informative, suspenseful, action, calm, exciting, sad, shocking, weird, cringe)",
     "has_clear_narrative": "boolean",
     "original_audio_is_key": "boolean",
+    "hook_text": "string (authentic opening hook)",
     "best_segment": {{
         "start": float,
         "end": float,
@@ -640,14 +658,14 @@ Return JSON with these fields:
     ],
     "text_overlays": [
         {{
-            "text": "string (ALL CAPS)",
+            "text": "string (concise, clear, not overhyped)",
             "time": float,
             "duration": float
         }}
     ],
     "narrative_script": [
         {{
-            "text": "string",
+            "text": "string (natural, conversational)",
             "time": float,
             "duration": float
         }}
@@ -655,17 +673,23 @@ Return JSON with these fields:
     "visual_cues": [
         {{
             "time": float,
-            "suggestion": "string"
+            "suggestion": "string (e.g., 'subtle zoom', 'gentle transition', 'focus effect')"
         }}
     ],
-    "music_genres": ["string"],
+    "music_genres": ["string (appropriate mood-matching options)"],
     "key_audio_moments": [
         {{
             "time": float,
-            "action": "string"
+            "action": "string (e.g., 'highlight reaction', 'emphasize moment')"
         }}
     ],
-    "hashtags": ["string"],
+    "retention_tactics": [
+        {{
+            "tactic": "string (e.g., 'natural pause', 'question prompt', 'interest point')",
+            "time": float
+        }}
+    ],
+    "hashtags": ["string (relevant, not excessive)"],
     "original_duration": float
 }}
 
@@ -706,6 +730,16 @@ Return ONLY valid JSON.'''
                 if "text_overlays" not in parsed_data or not isinstance(parsed_data["text_overlays"], list):
                     parsed_data["text_overlays"] = [] # Ensure list exists, even if empty
 
+                # Process hook text - add as first overlay if present
+                if "hook_text" in parsed_data and parsed_data["hook_text"].strip():
+                    hook_text = parsed_data["hook_text"].strip().upper()
+                    # Insert hook at the beginning of text_overlays
+                    parsed_data["text_overlays"].insert(0, {
+                        "text": hook_text,
+                        "timestamp": 0.0,  # Start immediately
+                        "duration": 3.0    # Show for 3 seconds
+                    })
+
                 # Generate narrative_script from text_overlays if not provided
                 if "narrative_script" not in parsed_data or not isinstance(parsed_data["narrative_script"], list):
                     parsed_data["narrative_script"] = []
@@ -715,6 +749,35 @@ Return ONLY valid JSON.'''
                             "duration": overlay["duration"],
                             "narrative_text": overlay["text"].lower().capitalize()  # Convert to natural speech
                         })
+
+                # Process retention tactics
+                if "retention_tactics" in parsed_data and isinstance(parsed_data["retention_tactics"], list):
+                    # Sort tactics by time
+                    retention_tactics = sorted(parsed_data["retention_tactics"], key=lambda x: x.get("time", 0))
+                    
+                    # Add tactics that don't already have corresponding text overlays
+                    existing_times = [overlay.get("timestamp", 0) for overlay in parsed_data["text_overlays"]]
+                    
+                    for tactic in retention_tactics:
+                        tactic_time = tactic.get("time", 0)
+                        tactic_text = tactic.get("tactic", "").upper()
+                        
+                        # Skip if there's already an overlay at this time (within 1 second)
+                        if not any(abs(tactic_time - t) < 1.0 for t in existing_times) and tactic_text:
+                            # Add as text overlay
+                            parsed_data["text_overlays"].append({
+                                "text": tactic_text,
+                                "timestamp": tactic_time,
+                                "duration": 2.5  # Default duration
+                            })
+                            
+                            # Also add to narrative script
+                            parsed_data["narrative_script"].append({
+                                "timestamp": tactic_time,
+                                "duration": 2.5,
+                                "narrative_text": tactic_text.lower().capitalize()
+                            })
+
                 # Add default values for new fields if not provided
                 parsed_data.setdefault('music_suggestion', 'neutral')
                 parsed_data.setdefault('tts_pacing', 'normal')
@@ -736,7 +799,7 @@ Return ONLY valid JSON.'''
 
 # --- TTS Generation ---
 def generate_tts_elevenlabs(text: str, output_path: pathlib.Path, voice_id: str = DEFAULT_VOICE_ID) -> bool:
-    """Generate TTS using ElevenLabs API (Primary if key exists)"""
+    """Generate TTS using ElevenLabs API (Fallback if Dia-1.6B fails)"""
     global elevenlabs_client
     if not elevenlabs_client or not text or not text.strip(): return False
     output_path.parent.mkdir(parents=True, exist_ok=True); cleanup_temp_files(output_path)
@@ -747,8 +810,8 @@ def generate_tts_elevenlabs(text: str, output_path: pathlib.Path, voice_id: str 
     except ApiError as e: print(f"  ElevenLabs API Error: {e}"); return False
     except Exception as e: print(f"  Error generating TTS with ElevenLabs: {e}"); return False
 
-def hugging_face_tts(text: str, output_path: pathlib.Path) -> bool:
-    """Generate TTS using local Dia-1.6B model (Fallback)"""
+def dia_tts(text: str, output_path: pathlib.Path) -> bool:
+    """Generate TTS using local Dia-1.6B model (Primary TTS system)"""
     if not text or not text.strip(): return False
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wav_path = output_path.with_suffix('.wav')
@@ -760,7 +823,7 @@ def hugging_face_tts(text: str, output_path: pathlib.Path) -> bool:
         from transformers import AutoProcessor, AutoModelForTextToSpeech
         import numpy as np
         
-        print("  Generating TTS with Dia-1.6B (local)")
+        print("  Generating TTS with Dia-1.6B (primary TTS model)")
         model_name = "nari-labs/Dia-1.6B"
         processor = AutoProcessor.from_pretrained(model_name)
         model = AutoModelForTextToSpeech.from_pretrained(model_name)
@@ -827,12 +890,12 @@ def hugging_face_tts(text: str, output_path: pathlib.Path) -> bool:
             torch.cuda.empty_cache()
 
 def generate_tts(text: str, output_path: pathlib.Path, voice_id: str = DEFAULT_VOICE_ID) -> bool:
-    """Attempts local Hugging Face TTS first, falls back to ElevenLabs if needed."""
-    if hugging_face_tts(text, output_path):
-        print("  Using local Hugging Face TTS (nari-labs/Dia-1.6B).")
+    """Use Dia-1.6B as the primary TTS system, falling back to ElevenLabs if needed."""
+    if dia_tts(text, output_path):
+        print("  Successfully generated TTS with Dia-1.6B model")
         return True
     elif elevenlabs_client and generate_tts_elevenlabs(text, output_path, voice_id):
-        print("  Falling back to ElevenLabs TTS.")
+        print("  Falling back to ElevenLabs TTS")
         return True
     return False
 
@@ -898,10 +961,11 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
                                       narrative_script: List[Dict], 
                                       original_audio_is_key: bool, 
                                       final_path: pathlib.Path,
-                                      temp_files_list: List[pathlib.Path]) -> bool:
+                                      temp_files_list: List[pathlib.Path],
+                                      visual_cues: Optional[List[Dict]] = None) -> bool:
     """
     Process video with effects using GPU acceleration where possible.
-    Now handles dynamic narrative overlays and TTS audio mixing based on AI analysis.
+    Now handles dynamic narrative overlays, TTS audio mixing, and targeted visual effects based on AI analysis.
     """
     try:
         # First check if video has valid fps before loading with MoviePy
@@ -952,28 +1016,81 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
         try:
             # Use safer GPU settings with minimal filters
             if has_gpu:
-                print("  Attempting GPU acceleration with simplified settings...")
-                # Use simpler command with more compatible settings
+                print("  Attempting GPU acceleration with enhanced quality settings...")
+                # Use simpler command with more compatible settings and higher quality
                 ffmpeg_enhance_cmd = [
                     'ffmpeg', '-y',
                     '-i', str(processing_path),
                     '-c:v', 'h264_nvenc',
-                    '-preset', 'medium',  # Use more compatible preset
-                    '-b:v', '5M',        # Use bitrate instead of CRF/CQ
-                    '-c:a', 'copy',
+                    '-preset', 'p5',  # Quality-focused preset (p1-p7, lower is better quality)
+                    '-rc', 'vbr',     # Variable bitrate mode
+                    '-qmin', '17',    # Minimum quantizer
+                    '-qmax', '21',    # Maximum quantizer (lower = better quality)
+                    '-b:v', VIDEO_BITRATE_HIGH,  # Higher bitrate for better quality
+                    '-c:a', AUDIO_CODEC,         # Use specified audio codec
+                    '-b:a', AUDIO_BITRATE,       # Higher audio bitrate
                     str(enhanced_path)
                 ]
                 subprocess.run(ffmpeg_enhance_cmd, check=True, capture_output=True, timeout=300)
                 base_video_path = enhanced_path
-                print("  GPU acceleration successful!")
+                print("  GPU acceleration successful with enhanced quality!")
             else:
-                # For CPU just use the original path
-                base_video_path = processing_path
-                print("  Using CPU processing (no GPU detected)")
+                # For CPU use high-quality encoding with two-pass if enabled
+                print("  Using CPU processing with enhanced quality settings...")
+                if ENABLE_TWO_PASS_ENCODING:
+                    # First pass
+                    ffmpeg_pass1_cmd = [
+                        'ffmpeg', '-y',
+                        '-i', str(processing_path),
+                        '-c:v', VIDEO_CODEC_CPU,
+                        '-preset', 'slow',  # Slower preset for better quality
+                        '-crf', '18',       # Lower CRF for higher quality (15-18 is high quality)
+                        '-b:v', VIDEO_BITRATE_HIGH,
+                        '-pass', '1',
+                        '-an',  # No audio in first pass
+                        '-f', 'mp4',
+                        '-threads', str(N_JOBS_PARALLEL),
+                        '-y', '/dev/null' if os.name != 'nt' else 'NUL'
+                    ]
+                    subprocess.run(ffmpeg_pass1_cmd, check=True, capture_output=True, timeout=300)
+                    
+                    # Second pass
+                    ffmpeg_pass2_cmd = [
+                        'ffmpeg', '-y',
+                        '-i', str(processing_path),
+                        '-c:v', VIDEO_CODEC_CPU,
+                        '-preset', 'slow',
+                        '-crf', '18',
+                        '-b:v', VIDEO_BITRATE_HIGH,
+                        '-pass', '2',
+                        '-c:a', AUDIO_CODEC,
+                        '-b:a', AUDIO_BITRATE,
+                        '-threads', str(N_JOBS_PARALLEL),
+                        str(enhanced_path)
+                    ]
+                    subprocess.run(ffmpeg_pass2_cmd, check=True, capture_output=True, timeout=300)
+                else:
+                    # Single pass with high quality
+                    ffmpeg_enhance_cmd = [
+                        'ffmpeg', '-y',
+                        '-i', str(processing_path),
+                        '-c:v', VIDEO_CODEC_CPU,
+                        '-preset', 'slow',
+                        '-crf', '18',
+                        '-b:v', VIDEO_BITRATE_HIGH,
+                        '-c:a', AUDIO_CODEC,
+                        '-b:a', AUDIO_BITRATE,
+                        '-threads', str(N_JOBS_PARALLEL),
+                        str(enhanced_path)
+                    ]
+                    subprocess.run(ffmpeg_enhance_cmd, check=True, capture_output=True, timeout=300)
+                
+                base_video_path = enhanced_path
+                print("  CPU processing successful with enhanced quality!")
         except Exception as e:
-            print(f"  GPU acceleration failed: {e}")
-            print("  Falling back to CPU processing...")
-            # On failure, fall back to CPU with a simple copy
+            print(f"  Enhanced encoding failed: {e}")
+            print("  Falling back to standard processing...")
+            # On failure, fall back to standard settings
             try:
                 ffmpeg_enhance_cmd = [
                     'ffmpeg', '-y',
@@ -987,7 +1104,7 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
                 subprocess.run(ffmpeg_enhance_cmd, check=True, capture_output=True, timeout=300)
                 base_video_path = enhanced_path
             except Exception as e2:
-                print(f"  CPU processing also failed: {e2}")
+                print(f"  Standard processing also failed: {e2}")
                 # Last resort: just use the original file
                 base_video_path = processing_path
             
@@ -999,10 +1116,79 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
                 
             print(f"  Loaded video: {video_clip.duration:.2f}s, {video_clip.size}, fps={video_clip.fps}")
             
-            # Apply shake effect if enabled and not already applied with FFmpeg
+            # Apply base effects to the entire clip
             processed_clip = video_clip
             if SHAKE_EFFECT_ENABLED:
                 processed_clip = apply_shake(processed_clip)
+            
+            # Apply dynamic visual effects at specific timestamps based on AI analysis
+            if visual_cues and isinstance(visual_cues, list) and len(visual_cues) > 0:
+                print(f"  Applying {len(visual_cues)} targeted visual effects...")
+                
+                # Create a list of subclips with their own effects
+                subclips = []
+                last_end_time = 0
+                
+                # Sort visual cues by time
+                visual_cues.sort(key=lambda x: x.get('time', 0))
+                
+                for cue in visual_cues:
+                    cue_time = cue.get('time', 0)
+                    suggestion = cue.get('suggestion', '').lower()
+                    
+                    # Default effect duration (can be adjusted based on effect type)
+                    effect_duration = 1.2  # Reduced from 1.5 seconds
+                    
+                    # Skip if cue time is beyond video duration
+                    if cue_time >= video_clip.duration:
+                        continue
+                        
+                    # Add normal segment before the effect if needed
+                    if cue_time > last_end_time:
+                        normal_subclip = video_clip.subclip(last_end_time, cue_time)
+                        subclips.append(normal_subclip)
+                    
+                    # Determine effect end time
+                    effect_end_time = min(cue_time + effect_duration, video_clip.duration)
+                    
+                    # Get the segment for the effect
+                    effect_subclip = video_clip.subclip(cue_time, effect_end_time)
+                    
+                    # Apply appropriate effect based on suggestion
+                    if 'zoom' in suggestion:
+                        # Use a more subtle zoom factor
+                        zoom_factor = 1.15  # Reduced from 1.3
+                        effect_subclip = effect_subclip.fx(vfx.zoom, zoom_factor)
+                    elif 'shake' in suggestion or 'explosion' in suggestion:
+                        # More gentle shake for emphasis
+                        effect_subclip = vfx.shake(effect_subclip, displacement_range=5, shake_duration=0.15)
+                    elif 'slow' in suggestion or 'motion' in suggestion:
+                        # Less dramatic slow motion
+                        slowdown_factor = 0.85  # 85% speed instead of 70%
+                        effect_subclip = effect_subclip.fx(vfx.speedx, slowdown_factor)
+                    elif 'bright' in suggestion or 'flash' in suggestion:
+                        # More subtle brightness adjustment
+                        effect_subclip = effect_subclip.fx(vfx.colorx, 1.2)  # Reduced from 1.5
+                    elif 'contrast' in suggestion:
+                        # More subtle contrast
+                        effect_subclip = effect_subclip.fx(vfx.lum_contrast, contrast=1.2)  # Reduced from 1.5
+                    elif 'focus' in suggestion or 'highlight' in suggestion:
+                        # Subtle focus effect (slight zoom + mild brightness)
+                        effect_subclip = effect_subclip.fx(vfx.zoom, 1.1)
+                        effect_subclip = effect_subclip.fx(vfx.colorx, 1.1)
+                    
+                    # Add the effect subclip
+                    subclips.append(effect_subclip)
+                    last_end_time = effect_end_time
+                
+                # Add remaining video after the last effect
+                if last_end_time < video_clip.duration:
+                    final_subclip = video_clip.subclip(last_end_time, video_clip.duration)
+                    subclips.append(final_subclip)
+                
+                # Concatenate all subclips
+                if subclips:
+                    processed_clip = concatenate_videoclips(subclips)
             
             # Process text overlays with enhanced styling
             text_clips_list = []
@@ -1120,18 +1306,71 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
             if text_clips_list:
                 processed_clip = CompositeVideoClip([processed_clip] + text_clips_list, size=processed_clip.size) # Ensure size is set
             
+            # --- Video Looping for Shorts ---
+            # Check if video should be looped based on duration
+            final_clip = processed_clip
+            if ENABLE_VIDEO_LOOP and processed_clip.duration < MIN_LOOP_DURATION:
+                # Create smooth loop transition
+                print(f"  Video duration ({processed_clip.duration:.2f}s) is short, creating seamless loop...")
+                
+                # Calculate how many times to loop to reach target duration
+                # While still respecting MAX_LOOP_COUNT
+                num_loops = min(
+                    MAX_LOOP_COUNT,
+                    max(1, math.ceil(TARGET_VIDEO_DURATION_SECONDS / processed_clip.duration))
+                )
+                
+                if num_loops > 1:
+                    # Use cross-fade transition between loops for smoother effect
+                    # Calculate transition duration (10% of clip duration or 0.5s max)
+                    transition_duration = min(0.5, processed_clip.duration * 0.1)
+                    
+                    # For cross-fade, we need to extend the clips slightly to overlap
+                    extended_clips = []
+                    for i in range(num_loops):
+                        if i == 0:
+                            # First clip is just the original
+                            extended_clips.append(processed_clip)
+                        else:
+                            # Subsequent clips need to be positioned with crossfade
+                            next_clip = processed_clip.copy()
+                            next_clip = next_clip.set_start(
+                                processed_clip.duration * i - transition_duration
+                            )
+                            extended_clips.append(next_clip)
+                    
+                    # Create composite with crossfaded clips
+                    final_clip = CompositeVideoClip(
+                        extended_clips,
+                        size=processed_clip.size
+                    ).subclip(0, processed_clip.duration * num_loops)
+                    
+                    print(f"  Created {num_loops}x loop with seamless transitions")
+            
             # Write out the processed video with better quality
             print("  Writing final video...")
-            final_render_bitrate = '8000k' # e.g., 8 Mbps for 1080p30
-            processed_clip.write_videofile(
+            final_render_bitrate = VIDEO_BITRATE_HIGH  # Use high bitrate for final output
+            
+            # Determine best CPU threads based on system
+            system_threads = max(1, os.cpu_count() or 4)
+            render_threads = min(system_threads - 1, 16)  # Use at most 16 threads, leave 1 for OS
+            
+            final_clip.write_videofile(
                 str(final_path),
                 codec='libx264',  # Always use CPU encoding for final output
-                preset='medium',
+                preset='slow',    # Use slow preset for better quality
                 audio_codec=AUDIO_CODEC,
-                threads=N_JOBS_PARALLEL,
-                fps=video_fps,  # Use the detected fps or our default
-                bitrate=final_render_bitrate, # Specify bitrate
-                logger='bar' # Show progress
+                threads=render_threads,
+                fps=video_fps,    # Use the detected fps or our default
+                bitrate=final_render_bitrate,   # Specify bitrate
+                ffmpeg_params=[
+                    "-profile:v", "high", 
+                    "-level", "4.2",
+                    "-pix_fmt", "yuv420p",
+                    "-movflags", "+faststart",
+                    "-b:a", AUDIO_BITRATE
+                ],
+                logger='bar'      # Show progress
             )
             
             # Clean up open clips and temporary files
@@ -1154,7 +1393,7 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
     finally:
         # Explicitly close clips to prevent memory leaks
         locals_dict = locals()
-        for var_name in ['video_clip', 'processed_clip', 'bg_music', 'tts_clip', 'narrative_audio', 'final_audio']:
+        for var_name in ['video_clip', 'processed_clip', 'final_clip', 'bg_music', 'tts_clip', 'narrative_audio', 'final_audio']:
             if var_name in locals_dict and locals_dict[var_name] is not None:
                 try:
                     locals_dict[var_name].close()
@@ -1162,6 +1401,60 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
                     pass
         # Force garbage collection
         gc.collect()
+
+# Function for checking if a video could be looped well
+def analyze_for_looping(video_path: pathlib.Path) -> bool:
+    """
+    Analyzes a video to determine if it's a good candidate for seamless looping.
+    
+    Args:
+        video_path: Path to the video file
+        
+    Returns:
+        Boolean indicating if the video is a good candidate for looping
+    """
+    try:
+        # Check if video exists and has minimum duration
+        duration, _, _ = get_video_details(video_path)
+        if duration < 3.0:
+            return False  # Too short to be worth looping
+            
+        # If video is already long enough, no need to loop
+        if duration >= MIN_LOOP_DURATION:
+            return False
+            
+        with VideoFileClip(str(video_path)) as clip:
+            # For short videos, check start and end frames for similarity
+            # Extract first and last frames
+            first_frame = clip.get_frame(0)
+            last_frame = clip.get_frame(clip.duration - 0.1)  # 0.1s before end
+            
+            # Calculate frame similarity using mean squared error
+            mse = np.mean((first_frame - last_frame) ** 2)
+            similarity = 1 / (1 + mse)
+            
+            # Check audio if present
+            audio_similarity = 0
+            if clip.audio:
+                try:
+                    # Get audio samples for first and last 0.2 seconds
+                    first_audio = clip.audio.subclip(0, 0.2).to_soundarray()
+                    last_audio = clip.audio.subclip(clip.duration - 0.2, clip.duration).to_soundarray()
+                    
+                    # Calculate audio similarity
+                    audio_mse = np.mean((first_audio - last_audio) ** 2)
+                    audio_similarity = 1 / (1 + audio_mse)
+                except:
+                    audio_similarity = 0
+            
+            # Combined score with more weight on visual similarity
+            combined_score = (similarity * 0.7) + (audio_similarity * 0.3)
+            
+            # Return True if similarity is high enough for good looping
+            return combined_score > 0.7
+    except Exception as e:
+        print(f"  Error analyzing video for looping: {e}")
+        return False
 
 def main():
     parser = argparse.ArgumentParser(description="Process and upload Reddit video.")
@@ -1254,6 +1547,7 @@ def main():
                 key_focus_points = analysis.get('key_focus_points', [])
                 narrative_overlays = analysis.get('narrative_text_overlays', [])
                 narrative_script = analysis.get('narrative_script', [])
+                visual_cues = analysis.get('visual_cues', [])
                 original_audio_is_key = analysis.get('original_audio_is_key', False)
                 
                 # Determine start/end times
@@ -1280,6 +1574,15 @@ def main():
                 if not relevant_focus_points: # Ensure at least one point
                     relevant_focus_points = [{"time": start_time, "point": {"x": 0.5, "y": 0.5}}]
                 
+                # Also adjust visual cues to be relative to the trimmed segment
+                adjusted_visual_cues = []
+                for cue in visual_cues:
+                    cue_time = cue.get('time', 0) - start_time
+                    if 0 <= cue_time < (end_time - start_time):
+                        adjusted_cue = cue.copy()
+                        adjusted_cue['time'] = cue_time
+                        adjusted_visual_cues.append(adjusted_cue)
+
                 # Apply dynamic 9:16 crop
                 cropped_video_path = TEMP_DIR / f"{submission.id}_{safe_title}_cropped_9x16.mp4"
                 temp_files_list.append(cropped_video_path)
@@ -1331,7 +1634,8 @@ def main():
                     adjusted_script,    # Use adjusted timestamps
                     original_audio_is_key,  # Pass the audio importance flag
                     final_path,
-                    temp_files_list
+                    temp_files_list,
+                    adjusted_visual_cues  # Pass the adjusted visual cues
                 )
                 
                 if not success or not final_path.is_file():
@@ -1348,9 +1652,38 @@ def main():
                 try:
                     print("  Uploading to YouTube...")
                     
-                    # Prepare upload metadata
-                    title = analysis.get('suggested_title', f"Reddit: {submission.title}")
-                    description = f"{analysis.get('summary_for_description', 'Check out this Reddit video!')}\n\nOriginal post: https://reddit.com{submission.permalink}"
+                    # Prepare upload metadata with more engaging but authentic format
+                    suggested_title = analysis.get('suggested_title', '')
+                    if not suggested_title or contains_forbidden_words(suggested_title):
+                        # Create fallback title with subtle engagement
+                        title = f"Interesting Moment from Reddit"
+                    else:
+                        # Format title for engagement without being over-the-top
+                        mood = analysis.get('mood', 'neutral')
+                        mood_emoji = {
+                            'funny': '😂', 'heartwarming': '❤️', 'informative': '📚',
+                            'suspenseful': '👀', 'action': '🔥', 'calm': '✨',
+                            'exciting': '💯', 'sad': '💭', 'shocking': '😯',
+                            'weird': '🤔', 'cringe': '😬', 'neutral': ''
+                        }.get(mood.lower(), '')
+                        
+                        # Add a single emoji prefix if appropriate for the content
+                        if mood_emoji and not any(emoji in suggested_title for emoji in '😂❤️📚👀🔥✨💯💭😯🤔😬'):
+                            title = f"{mood_emoji} {suggested_title}"
+                        else:
+                            title = suggested_title
+                    
+                    # Limit title length
+                    title = title[:70]
+                    
+                    # For description: Create interest without clickbait
+                    summary = analysis.get('summary_for_description', 'Check out this Reddit video.')
+                    
+                    # More authentic description
+                    description = f"{summary}\n\n"
+                    description += "If you enjoyed this, consider subscribing for more content.\n\n"
+                    
+                    # Add hashtags strategically
                     tags = analysis.get('hashtags', [])
                     
                     # Add subreddit as tag
@@ -1358,8 +1691,30 @@ def main():
                         tags.append(f"r/{subreddit_name}")
                     
                     # Add general tags if needed
-                    if len(tags) < 3:
-                        tags.extend(['reddit', 'viral', 'shorts'])
+                    if len(tags) < 5:
+                        tags.extend(['reddit', 'shorts', 'video', 'trending'])
+                    
+                    # Add relevant tags based on mood, but less aggressively
+                    mood_tags = {
+                        'funny': ['humor', 'comedy'],
+                        'heartwarming': ['wholesome', 'inspiring'],
+                        'suspenseful': ['unexpected', 'surprising'],
+                        'action': ['exciting', 'intense']
+                    }
+                    
+                    # Get tags for the detected mood (just add 1-2)
+                    mood = analysis.get('mood', 'neutral').lower()
+                    if mood in mood_tags:
+                        for tag in mood_tags[mood][:2]:  # Only use the first couple
+                            if tag not in tags:
+                                tags.append(tag)
+                    
+                    # Add hashtags to description (fewer)
+                    hashtag_str = " ".join(["#" + tag.strip("#") for tag in tags[:6]])
+                    description += f"\n{hashtag_str}\n\n"
+                    
+                    # Add source attribution
+                    description += f"Source: https://reddit.com{submission.permalink}"
                     
                     # Filter out any forbidden words
                     title = ' '.join(word for word in title.split() if not contains_forbidden_words(word))

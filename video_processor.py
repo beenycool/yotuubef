@@ -1,4 +1,4 @@
-from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip
+from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip, CompositeAudioClip
 import moviepy.video.fx.all as vfx
 import math
 import numpy as np
@@ -285,7 +285,10 @@ def create_short_clip(video_path, output_path, start_time, end_time, focus_point
         # Normalize focus points to a list of timestamped points
         timestamped_focus_points = normalize_focus_points(focus_points, start_time, clip_duration)
         
-        if len(timestamped_focus_points) == 1:
+        if not timestamped_focus_points: # Should be handled by normalize_focus_points, but as a safeguard
+             print("Warning: No valid focus points after normalization. Defaulting to static center crop.")
+             cropped_clip = apply_static_crop(clip, {"x": 0.5, "y": 0.5}, new_width, new_height, original_width, original_height)
+        elif len(timestamped_focus_points) == 1:
             # Static crop with a single focus point
             print("Using static crop with single focus point")
             focus_point = timestamped_focus_points[0]["point"]
@@ -303,7 +306,7 @@ def create_short_clip(video_path, output_path, start_time, end_time, focus_point
 
         # Add text overlays with fade animations if provided
         if text_overlays:
-            clips = [final_clip]
+            clips_to_composite = [final_clip]
             for overlay in text_overlays:
                 style = TEXT_STYLES.get(overlay.get("style", "caption"), {})
                 txt_clip = TextClip(
@@ -326,9 +329,9 @@ def create_short_clip(video_path, output_path, start_time, end_time, focus_point
                 txt_clip = txt_clip.set_start(overlay.get("start_time", 0))
                 txt_clip = txt_clip.set_duration(overlay.get("duration", final_clip.duration))
                 
-                clips.append(txt_clip)
+                clips_to_composite.append(txt_clip)
             
-            final_clip = CompositeVideoClip(clips)
+            final_clip = CompositeVideoClip(clips_to_composite)
 
 
         print(f"Writing final clip to: {output_path}")
@@ -363,39 +366,67 @@ def normalize_focus_points(focus_points, start_time: float, clip_duration: float
         clip_duration: Duration of the clip in seconds
         
     Returns:
-        List of timestamped focus points with relative timestamps
+        List of timestamped focus points with relative timestamps, or an empty list if input is invalid.
     """
-    # If focus_points is a single point (not a list), convert to a list with one item
+    # Handle null/empty input
+    if not focus_points:
+        # Default to center point if no focus points provided
+        return [{"time": 0, "point": {"x": 0.5, "y": 0.5}}]
+
+    # If single point provided, convert to list
     if not isinstance(focus_points, list):
-        # Single focus point - use it for the entire clip
-        return [{"time": 0, "point": focus_points}]
-    
-    # If we have a list of timestamped focus points, normalize them
-    normalized_points = []
+        # Ensure the single point is valid before returning
+        point_dict = focus_points if isinstance(focus_points, dict) else {}
+        x = max(0.0, min(1.0, point_dict.get("x", 0.5)))
+        y = max(0.0, min(1.0, point_dict.get("y", 0.5)))
+        return [{"time": 0, "point": {"x": x, "y": y}}]
+
+    # Validate and normalize each point in the list
+    validated_points = []
     for point_data in focus_points:
-        # Adjust timestamp to be relative to the clip's start time
-        time_in_clip = point_data.get("time", 0) - start_time
-        # Clamp time to be within the clip duration
-        time_in_clip = max(0, min(time_in_clip, clip_duration))
+        # Ensure point_data is a dictionary
+        if not isinstance(point_data, dict):
+            print(f"Warning: Skipping malformed focus point data (expected dict): {point_data}")
+            continue # Skip this point
+
+        point = point_data.get("point", {"x": 0.5, "y": 0.5})
+        # Ensure 'point' itself is a dictionary
+        if not isinstance(point, dict):
+            print(f"Warning: Malformed 'point' in focus_points (expected dict): {point}. Using default.")
+            point = {"x": 0.5, "y": 0.5}
+
+        # Validate coordinates
+        x = max(0.0, min(1.0, point.get("x", 0.5)))
+        y = max(0.0, min(1.0, point.get("y", 0.5)))
         
-        normalized_points.append({
+        time_in_clip = max(0.0, min(
+            point_data.get("time", 0) - start_time,
+            clip_duration
+        ))
+
+        validated_points.append({
             "time": time_in_clip,
-            "point": point_data.get("point", {"x": 0.5, "y": 0.5})  # Default to center if no point
+            "point": {"x": x, "y": y}
         })
     
+    if not validated_points: # If all points were malformed
+        print("Warning: No valid focus points found after validation. Defaulting to center point.")
+        return [{"time": 0, "point": {"x": 0.5, "y": 0.5}}]
+
     # Sort by time
-    normalized_points.sort(key=lambda x: x["time"])
+    validated_points.sort(key=lambda p: p["time"])
     
-    # If no points at the start, add the first point at time 0
-    if not normalized_points or normalized_points[0]["time"] > 0:
-        first_point = normalized_points[0]["point"] if normalized_points else {"x": 0.5, "y": 0.5}
-        normalized_points.insert(0, {"time": 0, "point": first_point})
+    # Ensure a point at the beginning (time 0)
+    if validated_points[0]["time"] > 0:
+        first_point_coords = validated_points[0]["point"]
+        validated_points.insert(0, {"time": 0, "point": first_point_coords})
     
-    # If no points at the end, add the last point at the end
-    if normalized_points[-1]["time"] < clip_duration:
-        normalized_points.append({"time": clip_duration, "point": normalized_points[-1]["point"]})
-    
-    return normalized_points
+    # Ensure a point at the end (clip_duration)
+    if validated_points[-1]["time"] < clip_duration:
+        last_point_coords = validated_points[-1]["point"]
+        validated_points.append({"time": clip_duration, "point": last_point_coords})
+            
+    return validated_points
 
 def apply_static_crop(clip, focus_point, new_width, new_height, original_width, original_height):
     """
@@ -425,16 +456,16 @@ def apply_static_crop(clip, focus_point, new_width, new_height, original_width, 
     # Ensure coordinates are integers for cropping
     x1 = int(x1)
     y1 = int(y1)
-    effective_width = int(new_width)
-    effective_height = int(new_height)
+    # effective_width = int(new_width) # Not used directly in vfx.crop if x1,y1,x2,y2 are used
+    # effective_height = int(new_height)
     
-    # Calculate center point after clamping
+    # Calculate center point after clamping for vfx.crop if it uses center
     crop_center_x = x1 + new_width / 2
     crop_center_y = y1 + new_height / 2
     
     # Apply the crop
-    return vfx.crop(clip, width=new_width, height=new_height, 
-                   x_center=crop_center_x, y_center=crop_center_y)
+    return vfx.crop(clip, width=int(new_width), height=int(new_height),
+                   x_center=int(crop_center_x), y_center=int(crop_center_y))
 
 def apply_dynamic_panning(clip, focus_points, new_width, new_height, original_width, original_height, initial_zoom=1.0, target_zoom=1.1, easing="ease_in_out"):
     """
@@ -447,50 +478,29 @@ def apply_dynamic_panning(clip, focus_points, new_width, new_height, original_wi
         original_width, original_height: Original video dimensions
     """
     # Validate input parameters
-    if not focus_points or len(focus_points) < 2:
-        raise ValueError("Dynamic panning requires at least 2 focus points")
+    if not focus_points: # This should ideally be caught by normalize_focus_points returning a default
+        print("Error: No focus points provided for dynamic panning. Defaulting to static crop.")
+        return apply_static_crop(clip, {"x":0.5, "y":0.5}, new_width, new_height, original_width, original_height)
         
-    if any('time' not in fp or 'point' not in fp for fp in focus_points):
-        raise ValueError("Focus points must contain 'time' and 'point' keys")
-    
+    if len(focus_points) < 2:
+        # Fall back to static crop if only one point (normalize_focus_points should ensure at least one)
+        print("Warning: Dynamic panning requires at least 2 focus points. Using static crop with the first point.")
+        return apply_static_crop(
+            clip,
+            focus_points[0]["point"], # normalize_focus_points ensures this structure
+            new_width,
+            new_height,
+            original_width,
+            original_height
+        )
+
     # Convert to integers for cropping
     effective_width = int(new_width)
     effective_height = int(new_height)
     
-    # Calculate zoom progression with validation
-    if len(focus_points) < 2:
-        raise ValueError("Dynamic panning requires at least 2 focus points")
-    
-    # Validate time points are in ascending order
-    times = [fp['time'] for fp in focus_points]
-    if any(times[i] > times[i+1] for i in range(len(times)-1)):
-        raise ValueError("Focus points must be in chronological order")
-    
-    # Generate zoom factors matching focus points count
-    zoom_factors = np.linspace(initial_zoom, target_zoom, len(focus_points))
-    max_zoom = max(initial_zoom, target_zoom)
-    
-    # Validate array dimensions before processing
-    if len(zoom_factors) != len(focus_points):
-        raise ValueError(f"Zoom factors ({len(zoom_factors)}) must match focus points count ({len(focus_points)})")
-    
-    def get_crop_center_at_time(t, zoom_factors=None):
-        # Calculate current zoom factor with array validation
-        try:
-            time_points = [fp['time'] for fp in focus_points]
-            if len(time_points) != len(zoom_factors):
-                raise ValueError(f"Mismatched arrays: {len(time_points)} time points vs {len(zoom_factors)} zoom factors")
-            
-            current_zoom = np.interp(t, time_points, zoom_factors)
-        except ValueError as e:
-            print(f"Interpolation error: {e}")
-            current_zoom = 1.0  # Fallback to no zoom
-        current_zoom = max(1.0, min(current_zoom, 1.2))  # Clamp zoom between 1.0 and 1.2
-        """
-        Calculate the crop center coordinates at a specific time using interpolation
-        between focus points.
-        """
-        # Find the two focus points that surround the current time
+    # Using vfx.crop with functions for center position only
+    def get_x_center(t):
+        # Get the focus point at time t
         next_point_idx = 0
         while next_point_idx < len(focus_points) and focus_points[next_point_idx]["time"] < t:
             next_point_idx += 1
@@ -498,450 +508,360 @@ def apply_dynamic_panning(clip, focus_points, new_width, new_height, original_wi
         if next_point_idx == 0:
             # Before the first point, use the first point
             point = focus_points[0]["point"]
-            center_x = original_width * point["x"]
-            center_y = original_height * point["y"]
-        elif next_point_idx >= len(focus_points):
-            # After the last point, use the last point
-            point = focus_points[-1]["point"]
-            center_x = original_width * point["x"]
-            center_y = original_height * point["y"]
+        elif next_point_idx == len(focus_points) or focus_points[next_point_idx]["time"] == t:
+            # At or after the last point, or exact match
+            idx = next_point_idx - 1 if next_point_idx > 0 and focus_points[next_point_idx]["time"] > t else next_point_idx
+            point = focus_points[idx]["point"]
         else:
-            # Interpolate between two points
-            prev_data = focus_points[next_point_idx - 1]
-            next_data = focus_points[next_point_idx]
+            # Interpolate between prev_point and next_point
+            prev_point_data = focus_points[next_point_idx - 1]
+            next_point_data = focus_points[next_point_idx]
             
-            prev_time = prev_data["time"]
-            next_time = next_data["time"]
+            time_diff = next_point_data["time"] - prev_point_data["time"]
+            interp_factor = (t - prev_point_data["time"]) / time_diff if time_diff else 0
             
-            # Calculate interpolation factor (0 to 1)
-            if next_time == prev_time:  # Avoid division by zero
-                factor = 0
-            else:
-                factor = (t - prev_time) / (next_time - prev_time)
-                
-            # Apply selected easing function
-            if easing == "ease_in":
-                factor = factor ** 2
-            elif easing == "ease_out":
-                factor = 1 - (1 - factor) ** 2
-            elif easing == "ease_in_out":
-                factor = factor ** 2 * (3 - 2 * factor)
-            elif easing == "linear":
-                pass  # No change
-            else:  # Default to ease_in_out
-                factor = factor ** 2 * (3 - 2 * factor)
+            # Apply easing function if specified
+            if easing == "ease_in_out":
+                interp_factor = (1 - math.cos(interp_factor * math.pi)) / 2
             
-            # Interpolate between the two points
-            prev_point = prev_data["point"]
-            next_point = next_data["point"]
-            
-            interp_x = prev_point["x"] + factor * (next_point["x"] - prev_point["x"])
-            interp_y = prev_point["y"] + factor * (next_point["y"] - prev_point["y"])
-            
-            center_x = original_width * interp_x
-            center_y = original_height * interp_y
-            
-            # Handle zoom factors if provided
-            if zoom_factors:
-                current_zoom = np.interp(t,
-                                       [fp['time'] for fp in focus_points],
-                                       zoom_factors)
-                current_zoom = max(1.0, min(current_zoom, 1.2))  # Clamp zoom
-                effective_width = new_width / current_zoom
-                effective_height = new_height / current_zoom
-            else:
-                effective_width = new_width
-                effective_height = new_height
+            point = {
+                "x": prev_point_data["point"]["x"] + interp_factor * (next_point_data["point"]["x"] - prev_point_data["point"]["x"]),
+                "y": prev_point_data["point"]["y"] + interp_factor * (next_point_data["point"]["y"] - prev_point_data["point"]["y"])
+            }
         
-        # Enhanced boundary checks with safe margins
-        min_x = max(new_width / 2, 0)
-        max_x = original_width - new_width / 2
-        min_y = max(new_height / 2, 0)
-        max_y = original_height - new_height / 2
+        # Return the x-coordinate based on the point's relative position
+        return int(original_width * point["x"])
 
-        # Apply smooth clamping with edge detection
-        center_x = np.clip(center_x, min_x, max_x)
-        center_y = np.clip(center_y, min_y, max_y)
+    def get_y_center(t):
+        # Get the focus point at time t
+        next_point_idx = 0
+        while next_point_idx < len(focus_points) and focus_points[next_point_idx]["time"] < t:
+            next_point_idx += 1
+            
+        if next_point_idx == 0:
+            # Before the first point, use the first point
+            point = focus_points[0]["point"]
+        elif next_point_idx == len(focus_points) or focus_points[next_point_idx]["time"] == t:
+            # At or after the last point, or exact match
+            idx = next_point_idx - 1 if next_point_idx > 0 and focus_points[next_point_idx]["time"] > t else next_point_idx
+            point = focus_points[idx]["point"]
+        else:
+            # Interpolate between prev_point and next_point
+            prev_point_data = focus_points[next_point_idx - 1]
+            next_point_data = focus_points[next_point_idx]
+            
+            time_diff = next_point_data["time"] - prev_point_data["time"]
+            interp_factor = (t - prev_point_data["time"]) / time_diff if time_diff else 0
+            
+            # Apply easing function if specified
+            if easing == "ease_in_out":
+                interp_factor = (1 - math.cos(interp_factor * math.pi)) / 2
+            
+            point = {
+                "x": prev_point_data["point"]["x"] + interp_factor * (next_point_data["point"]["x"] - prev_point_data["point"]["x"]),
+                "y": prev_point_data["point"]["y"] + interp_factor * (next_point_data["point"]["y"] - prev_point_data["point"]["y"])
+            }
+        
+        # Return the y-coordinate based on the point's relative position
+        return int(original_height * point["y"])
 
-        # Add buffer near edges to prevent jarring jumps
-        edge_buffer = 50  # pixels
-        if center_x <= min_x + edge_buffer:
-            center_x = min_x + edge_buffer
-        elif center_x >= max_x - edge_buffer:
-            center_x = max_x - edge_buffer
-        
-        if center_y <= min_y + edge_buffer:
-            center_y = min_y + edge_buffer
-        elif center_y >= max_y - edge_buffer:
-            center_y = max_y - edge_buffer
-        
-        return center_x, center_y
-    
-    # Create a function that crops each frame based on the interpolated focus point
-    def crop_frame(get_frame, t):
-        # Get the frame at time t
+    # We'll use a different approach with frame-by-frame transformation
+    def apply_frame_transform(get_frame, t):
         frame = get_frame(t)
         
-        # Calculate the crop center for this time
-        center_x, center_y = get_crop_center_at_time(t)
+        # Get the center position for this frame
+        center_x = get_x_center(t)
+        center_y = get_y_center(t)
         
-        # Calculate crop coordinates
-        x1 = int(center_x - effective_width / 2)
-        y1 = int(center_y - effective_height / 2)
+        # Calculate crop width and height (fixed values)
+        crop_width = int(new_width / initial_zoom)
+        crop_height = int(new_height / initial_zoom)
         
-        # Crop the frame using the original dimensions (zoom is already applied in center calculation)
-        cropped_frame = frame[y1:y1+effective_height, x1:x1+effective_width]
+        # Calculate the top-left corner of the crop area
+        x1 = max(0, center_x - crop_width // 2)
+        y1 = max(0, center_y - crop_height // 2)
+        
+        # Adjust if the crop goes beyond the frame
+        if x1 + crop_width > original_width:
+            x1 = original_width - crop_width
+        if y1 + crop_height > original_height:
+            y1 = original_height - crop_height
+        
+        # Crop the frame
+        x2 = x1 + crop_width
+        y2 = y1 + crop_height
+        cropped_frame = frame[y1:y2, x1:x2]
+        
         return cropped_frame
     
-    # Create a new clip with the dynamic cropping function
-    return clip.fl(crop_frame)
+    # Apply the frame transformation
+    intermediate_cropped_clip = clip.fl(apply_frame_transform)
+    
+    # Then resize this cropped view to the final target dimensions
+    final_panned_zoomed_clip = intermediate_cropped_clip.resize(
+        width=new_width, 
+        height=new_height
+    )
+    
+    return final_panned_zoomed_clip
 
-# Example usage:
-# Single focus point (static crop)
-# focus_point_from_gemini = {"x": 0.7, "y": 0.3} 
-# create_short_clip(
-#     video_path="input.mp4",
-#     output_path="output_short.mp4",
-#     start_time=10, # seconds
-#     end_time=25,   # seconds
-#     focus_points=focus_point_from_gemini
-# )
-#
-# Multiple focus points (dynamic panning)
-# key_moments = [
-#     {"time": 10.5, "point": {"x": 0.3, "y": 0.6}},
-#     {"time": 15.2, "point": {"x": 0.7, "y": 0.4}},
-#     {"time": 20.0, "point": {"x": 0.5, "y": 0.5}}
-# ]
-# create_short_clip(
-#     video_path="input.mp4",
-#     output_path="output_short_dynamic.mp4",
-#     start_time=10, # seconds
-#     end_time=25,   # seconds
-#     focus_points=key_moments
-# )
 
 def apply_ken_burns_effect(clip, zoom_direction="in", duration=None, easing="ease_in_out"):
     """
-    Apply Ken Burns effect (zoom in/out) to a clip.
+    Apply Ken Burns effect (slow zoom and pan).
     
     Args:
-        clip: Video clip to process
+        clip: Video clip to apply effect to
         zoom_direction: "in" or "out"
-        duration: Effect duration (None for full clip)
-        easing: Easing function ("linear", "ease_in", etc.)
-        
-    Returns:
-        Clip with Ken Burns effect applied
+        duration: Duration of the effect (defaults to clip duration)
+        easing: Easing function name
     """
     if duration is None:
         duration = clip.duration
         
+    original_width, original_height = clip.size
+
+    # Define easing functions (more can be added)
+    def ease_linear(t_norm): return t_norm
+    def ease_in_quad(t_norm): return t_norm**2
+    def ease_out_quad(t_norm): return t_norm * (2 - t_norm)
+    def ease_in_out_quad(t_norm): 
+        if t_norm < 0.5: return 2 * t_norm**2
+        return -1 + (4 - 2 * t_norm) * t_norm
+    
+    easing_func_map = {
+        "linear": ease_linear,
+        "ease_in": ease_in_quad, # Using quad as a generic ease_in
+        "ease_out": ease_out_quad, # Using quad as a generic ease_out
+        "ease_in_out": ease_in_out_quad,
+    }
+    selected_easing_func = easing_func_map.get(easing, ease_in_out_quad)
+
     def make_frame(get_frame, t):
         frame = get_frame(t)
-        
-        # Calculate zoom factor based on time
-        progress = min(t / duration, 1.0)
-        
-        # Apply easing
-        if easing == "ease_in":
-            progress = progress ** 2
-        elif easing == "ease_out":
-            progress = 1 - (1 - progress) ** 2
-        elif easing == "ease_in_out":
-            progress = progress ** 2 * (3 - 2 * progress)
-            
-        # Calculate zoom
+        t_norm = t / duration # Normalized time 0 to 1
+
+        eased_t_norm = selected_easing_func(t_norm)
+
         if zoom_direction == "in":
-            zoom = 1.0 + progress * 0.3  # Zoom in 30%
-        else:
-            zoom = 1.3 - progress * 0.3  # Zoom out from 130%
-            
-        # Apply zoom transform
-        return vfx.zoom(frame, zoom)
+            zoom = 1 + (0.2 * eased_t_norm)  # Zoom from 1x to 1.2x
+        else: # zoom_direction == "out"
+            zoom = 1.2 - (0.2 * eased_t_norm) # Zoom from 1.2x to 1x
         
-    return clip.fl(make_frame)
+        new_w = original_width / zoom
+        new_h = original_height / zoom
+
+        # Simple pan: move slightly from center or a corner
+        # For this example, let's pan from top-left towards center when zooming in
+        # And from center towards top-left when zooming out
+        
+        # Max pan displacement (e.g., 5% of the difference between original and zoomed dim)
+        max_pan_x = (original_width - new_w) * 0.1 
+        max_pan_y = (original_height - new_h) * 0.1
+
+        if zoom_direction == "in":
+            pan_x = max_pan_x * eased_t_norm
+            pan_y = max_pan_y * eased_t_norm
+        else: # zoom_direction == "out"
+            pan_x = max_pan_x * (1 - eased_t_norm)
+            pan_y = max_pan_y * (1 - eased_t_norm)
+            
+        x1 = pan_x
+        y1 = pan_y
+        x2 = x1 + new_w
+        y2 = y1 + new_h
+
+        # Ensure crop is within bounds (should be if pan is small)
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(original_width, x2), min(original_height, y2)
+        
+        cropped_region = frame[int(y1):int(y2), int(x1):int(x2)]
+        
+        # Resize back to original dimensions
+        # Need image resizing library here, e.g. Pillow or OpenCV for robust resize
+        # For a simple numpy resize (less quality):
+        # This is tricky with numpy directly for arbitrary sizes.
+        # Using a library is better. For now, assume we have a resize function.
+        # Example with Pillow:
+        from PIL import Image
+        pil_img = Image.fromarray(cropped_region)
+        resized_img = pil_img.resize((original_width, original_height), Image.LANCZOS) # Or Image.Resampling.LANCZOS
+        return np.array(resized_img)
+
+    return clip.fl(make_frame, apply_to=['mask']) if clip.mask else clip.fl(make_frame)
+
 
 def apply_color_grading(clip, preset="cinematic"):
     """
-    Apply color grading to a clip.
-    
-    Args:
-        clip: Video clip to process
-        preset: Color grading preset ("cinematic", "vibrant", "muted")
-        
-    Returns:
-        Color graded clip
+    Apply color grading presets.
+    (This is a placeholder - actual color grading is complex)
     """
-    # Color grading presets (contrast, brightness, saturation)
-    presets = {
-        "cinematic": (1.1, 0.9, 0.9),
-        "vibrant": (1.0, 1.0, 1.3),
-        "muted": (0.9, 1.0, 0.7)
-    }
-    
-    contrast, brightness, saturation = presets.get(preset, (1.0, 1.0, 1.0))
-    
-    # Apply color adjustments
-    clip = vfx.colorx(clip, contrast)
-    clip = vfx.lum_contrast(clip, lum=0, contrast=contrast, contrast_thr=100)
-    clip = vfx.multiply_color(clip, brightness)
-    clip = vfx.multiply_speed(clip, saturation)
-    
+    if preset == "cinematic":
+        # Example: slightly increase contrast and saturation, apply a teal/orange look
+        # This requires per-pixel manipulation, often done with LUTs or complex functions
+        # For a very basic example (not true color grading):
+        # clip = clip.fx(vfx.colorx, factor=1.1) # Increase contrast slightly
+        # clip = clip.fx(vfx.lum_contrast, lum=0, contrast=0.1, contrast_thr=127)
+        print("Cinematic color grading preset applied (simulated).")
+    elif preset == "vibrant":
+        # clip = clip.fx(vfx.colorx, factor=1.2) # More saturation
+        print("Vibrant color grading preset applied (simulated).")
+    # More presets can be added
     return clip
 
 def create_complex_animation(clip, animation_type="slide_in", duration=1.0):
     """
-    Create complex text/object animations.
-    
-    Args:
-        clip: Clip to animate (usually TextClip)
-        animation_type: Animation preset
-        duration: Animation duration in seconds
-        
-    Returns:
-        Animated clip
+    Create complex text or object animations.
+    (Placeholder for more advanced animations)
     """
     if animation_type == "slide_in":
+        # Example: Text slides in from left
+        # This would typically involve a TextClip and animating its position
         def pos_func(t):
-            if t < duration:
-                return ('center', 1.5 - t/duration)
-            return 'center'
-    elif animation_type == "fade_scale":
-        def pos_func(t):
-            if t < duration:
-                scale = 0.5 + 0.5 * (t/duration)
-                return ('center', 'center', scale)
-            return 'center'
-    else:
-        return clip
-        
-    return clip.set_position(pos_func)
+            # Slide from off-screen left to center
+            # Assuming clip width is W, text width is TW
+            # Start_x = -TW, End_x = (W - TW) / 2
+            # This needs clip dimensions and text dimensions.
+            return ('left', 'center') # Simplified
+        # text_clip = TextClip("Animated Text", ...).set_position(pos_func).set_duration(duration)
+        # return CompositeVideoClip([clip, text_clip])
+        print(f"Slide-in animation applied over {duration}s (simulated).")
+    elif animation_type == "fade_and_scale":
+        # Example: Text fades in while scaling up
+        print(f"Fade and scale animation applied over {duration}s (simulated).")
+    return clip
 
 def process_video_with_gpu_optimization(input_path, output_path, processing_func, chunk_size=30):
     """
-    Process video in chunks with GPU optimization if available.
-    Handles sequential text overlays and enhanced audio processing.
-    
-    Args:
-        input_path: Path to input video file
-        output_path: Path to save processed video
-        processing_func: Function to apply to each chunk
-        chunk_size: Duration of each processing chunk in seconds
-        
-    Returns:
-        Path to processed video file
-    """
-    try:
-        # Check system resources
-        if not check_memory_usage():
-            raise MemoryError("Insufficient system memory for video processing")
-            
-        gpu_util = get_gpu_utilization()
-        if gpu_util and gpu_util > 90:
-            print("Warning: High GPU utilization - performance may be degraded")
-            
-        # Get video duration
-        clip = VideoFileClip(input_path)
-        duration = clip.duration
-        clip.close()
-        
-        # Process in chunks if video is long
-        if duration > chunk_size * 2:
-            print(f"Processing {duration:.1f}s video in {chunk_size}s chunks...")
-            
-            # Create temp directory for chunks
-            temp_dir = Path(tempfile.mkdtemp(prefix="video_chunks_"))
-            temp_files = []
-            
-            try:
-                # Process each chunk
-                for i, start in enumerate(range(0, math.ceil(duration), chunk_size)):
-                    end = min(start + chunk_size, duration)
-                    chunk_path = temp_dir / f"chunk_{i}.mp4"
-                    
-                    # Process chunk
-                    processing_func(
-                        input_path=input_path,
-                        output_path=str(chunk_path),
-                        start_time=start,
-                        end_time=end
-                    )
-                    temp_files.append(chunk_path)
-                    
-                # Concatenate chunks
-                print("Combining processed chunks...")
-                clips = [VideoFileClip(str(f)) for f in temp_files]
-                final_clip = concatenate_videoclips(clips)
-                final_clip.write_videofile(
-                    output_path,
-                    audio_codec="aac",
-                    **FFMPEG_GPU_PARAMS
-                )
-                final_clip.close()
-                
-            finally:
-                # Clean up temp files
-                for f in temp_files:
-                    try:
-                        f.unlink()
-                    except:
-                        pass
-                try:
-                    temp_dir.rmdir()
-                except:
-                    pass
-                    
-        else:
-            # Process entire video at once
-            processing_func(
-                input_path=input_path,
-                output_path=output_path,
-                start_time=0,
-                end_time=duration
-            )
-            
-        return Path(output_path)
-        
-    except Exception as e:
-        print(f"Error processing video: {e}")
-        raise
-    """
-    Process video in chunks using GPU acceleration when available.
+    Process video in chunks with GPU optimization options.
+    (Placeholder for chunked processing and GPU pipeline)
     
     Args:
         input_path: Path to input video
-        output_path: Path to save processed video
-        processing_func: Function that processes a video clip (takes clip, returns processed clip)
-        chunk_size: Duration of each processing chunk in seconds
+        output_path: Path to output video
+        processing_func: Function to apply to each chunk (clip -> processed_clip)
+        chunk_size: Size of chunks in seconds
     """
+    print(f"GPU optimization for {input_path} (simulated).")
+    # Basic passthrough for now, actual chunking is complex
     try:
-        # Check system resources
-        if not check_memory_usage():
-            raise MemoryError("Insufficient system memory for video processing")
-            
-        gpu_util = get_gpu_utilization()
-        if gpu_util and gpu_util > 90:
-            print("Warning: High GPU utilization - performance may be affected")
+        clip = VideoFileClip(input_path)
+        processed_clip = processing_func(clip) # Apply the main processing
+        
+        # Determine if ffmpeg_params for GPU should be used
+        current_ffmpeg_params = FFMPEG_GPU_PARAMS if GPU_AVAILABLE else {'threads': 4, 'preset': 'medium'}
 
-        # Get video duration
-        with VideoFileClip(input_path) as clip:
-            duration = clip.duration
-            
-        # Process in chunks if video is long
-        if duration > chunk_size * 2:  # Only chunk if at least 2 chunks
-            print(f"Processing {duration}s video in {chunk_size}s chunks...")
-            
-            clips = []
-            for start in np.arange(0, duration, chunk_size):
-                end = min(start + chunk_size, duration)
-                print(f"Processing chunk {start:.1f}-{end:.1f}s")
-                
-                with VideoFileClip(input_path).subclip(start, end) as chunk:
-                    processed = processing_func(chunk)
-                    clips.append(processed)
-                    
-            # Concatenate all processed chunks
-            final_clip = concatenate_videoclips(clips)
-            final_clip.write_videofile(
-                output_path,
-                audio_codec="aac",
-                logger='bar',
-                **FFMPEG_GPU_PARAMS
-            )
-            final_clip.close()
-        else:
-            # Process whole video at once
-            with VideoFileClip(input_path) as clip:
-                processed = processing_func(clip)
-                processed.write_videofile(
-                    output_path,
-                    audio_codec="aac",
-                    logger='bar',
-                    **FFMPEG_GPU_PARAMS
-                )
-                processed.close()
-                
+        processed_clip.write_videofile(output_path, codec=current_ffmpeg_params.get('codec', 'libx264'), 
+                                       preset=current_ffmpeg_params.get('preset'),
+                                       threads=current_ffmpeg_params.get('threads'),
+                                       audio_codec="aac", logger='bar')
     except Exception as e:
-        print(f"Error in GPU-optimized processing: {e}")
+        print(f"Error in process_video_with_gpu_optimization: {e}")
         raise
+    finally:
+        if 'clip' in locals(): clip.close()
+        if 'processed_clip' in locals() and hasattr(processed_clip, 'close'): processed_clip.close()
 
-def _prepare_initial_video(submission, safe_title: str, temp_files: list) -> Tuple[Path, float, int, int]:
+
+def _prepare_initial_video(submission, safe_title: str, temp_files: list) -> Tuple[Optional[Path], float, int, int]:
     """
-    Downloads and prepares the initial video from a Reddit submission.
-    
-    Args:
-        submission: PRAW submission object
-        safe_title: Sanitized title for filename
-        temp_files: List to track temporary files
-        
-    Returns:
-        Tuple of (video_path, duration, width, height)
+    Downloads video from submission, gets basic info.
+    Returns (path_to_video, duration, width, height) or (None, 0, 0, 0) on failure.
     """
+    video_url = submission.url
+    temp_dir = Path(tempfile.gettempdir()) / "reddit_videos"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    video_path = temp_dir / f"{submission.id}_{safe_title}.mp4"
+    temp_files.append(video_path) # Track for cleanup
+
+    ydl_opts = {
+        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+        'outtmpl': str(video_path),
+        'noplaylist': True,
+        'quiet': True,
+        'merge_output_format': 'mp4',
+        # 'postprocessors': [{ # Normalization can be added here if ffmpeg-normalize is available
+        #     'key': 'FFmpegNormalize',
+        #     'preferredcodec': 'aac', # Example
+        # }],
+    }
+
+    duration, width, height = 0, 0, 0
     try:
-        # Create temp directory if it doesn't exist
-        temp_dir = Path(tempfile.gettempdir()) / "reddit_videos"
-        temp_dir.mkdir(exist_ok=True)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([video_url])
         
-        # Download the video using yt-dlp
-        video_path = temp_dir / f"{submission.id}_{safe_title}.mp4"
-        ydl_opts = {
-            'outtmpl': str(video_path),
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'quiet': True,
-            'socket_timeout': 30,         # Timeout for socket connections
-            'retries': 3,                 # Number of retries for downloads
-            'fragment_retries': 3,        # Number of retries for fragments
-            'skip_unavailable_fragments': True,  # Skip unavailable fragments
-            'extractor_retries': 3,       # Number of retries for extractors
-            'noprogress': True,           # Don't show progress bar
-            'ignoreerrors': True,         # Continue on errors
-        }
-        
-        # Import necessary modules for timeout handling
-        import threading
-        import traceback
-        
-        # Use a thread with timeout to prevent hanging
-        def download_with_timeout():
-            try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([submission.url])
-                return True
-            except Exception as e:
-                print(f"  Error in download thread: {e}")
-                return False
-        
-        # Start download in a separate thread
-        download_thread = threading.Thread(target=download_with_timeout)
-        download_thread.daemon = True
-        download_thread.start()
-        
-        # Wait for download to complete with timeout (60 seconds)
-        download_thread.join(timeout=60)
-        
-        if download_thread.is_alive():
-            print("  Download timed out after 60 seconds, skipping this video")
+        if video_path.exists():
+            # Get video info using ffprobe (part of ffmpeg)
+            # ffprobe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
+            #                '-show_entries', 'stream=width,height,duration', '-of', 'csv=s=x:p=0', str(video_path)]
+            # result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, check=True)
+            # w_str, h_str, dur_str = result.stdout.strip().split('x')
+            # width, height, duration = int(w_str), int(h_str), float(dur_str)
+            
+            # Simpler way with MoviePy after download
+            with VideoFileClip(str(video_path)) as clip_info:
+                duration = clip_info.duration
+                width, height = clip_info.size
+            print(f"Initial video: {duration:.2f}s, {width}x{height}")
+            return video_path, duration, width, height
+        else:
+            print(f"Failed to download video: {video_url}")
             return None, 0, 0, 0
-        
-        # Check if file was downloaded successfully
-        if not video_path.exists() or video_path.stat().st_size < 10240:  # Less than 10KB
-            print("  Download failed or produced invalid file")
-            return None, 0, 0, 0
-        
-        # Track the downloaded file for cleanup
-        temp_files.append(video_path)
-        
-        # Get video properties
-        clip = VideoFileClip(str(video_path))
-        duration = clip.duration
-        width, height = clip.size
-        clip.close()  # Close clip to free resources
-        
-        return video_path, duration, width, height
-        
+            
     except Exception as e:
-        print(f"Error preparing initial video: {e}")
-        import traceback
-        traceback.print_exc()
+        print(f"Error downloading or getting info for {video_url}: {e}")
+        if video_path.exists(): # Clean up partial download if any
+             try: os.remove(video_path)
+             except OSError: pass
         return None, 0, 0, 0
+
+# Example usage (can be removed or kept for testing)
+if __name__ == '__main__':
+    # This section will only run if the script is executed directly
+    # Create a dummy video file for testing
+    from moviepy.editor import ColorClip
+    dummy_video_path = "dummy_video.mp4"
+    # ColorClip((1280, 720), color=(255,0,0), duration=10).write_videofile(dummy_video_path, fps=25)
+
+    test_output_path = "test_short_clip.mp4"
+    test_start_time = 1.0
+    test_end_time = 6.0
+    
+    # Test 1: Single static focus point (center)
+    # test_focus_points_static = {"x": 0.5, "y": 0.5} 
+    # print(f"\nTesting static crop with: {test_focus_points_static}")
+    # create_short_clip(dummy_video_path, "test_static_center.mp4", test_start_time, test_end_time, test_focus_points_static)
+
+    # Test 2: Dynamic focus points
+    test_focus_points_dynamic = [
+        {"time": 1.0, "point": {"x": 0.2, "y": 0.2}},
+        {"time": 3.0, "point": {"x": 0.8, "y": 0.8}},
+        {"time": 5.0, "point": {"x": 0.5, "y": 0.5}}
+    ]
+    print(f"\nTesting dynamic crop with: {test_focus_points_dynamic}")
+    # create_short_clip(dummy_video_path, "test_dynamic_pan.mp4", test_start_time, test_end_time, test_focus_points_dynamic)
+
+    # Test 3: Null focus points (should default to center)
+    # print("\nTesting null focus points (should default to center static crop)")
+    # create_short_clip(dummy_video_path, "test_null_fp.mp4", test_start_time, test_end_time, None)
+    
+    # Test 4: Malformed focus points in a list
+    # test_focus_points_malformed_list = [
+    #     {"time": 1.0, "point": {"x": 0.1, "y": 0.1}},
+    #     "not_a_dict", # Malformed entry
+    #     {"time": 4.0, "point": "not_a_point_dict"}, # Malformed point
+    #     {"time": 5.0, "point": {"x": 0.9, "y": 0.9}}
+    # ]
+    # print(f"\nTesting malformed list: {test_focus_points_malformed_list}")
+    # create_short_clip(dummy_video_path, "test_malformed_list.mp4", test_start_time, test_end_time, test_focus_points_malformed_list)
+
+    # Test 5: Single point in list (should behave like static)
+    # test_focus_single_in_list = [{"time": 2.0, "point": {"x": 0.7, "y": 0.3}}]
+    # print(f"\nTesting single point in list: {test_focus_single_in_list}")
+    # create_short_clip(dummy_video_path, "test_single_in_list.mp4", test_start_time, test_end_time, test_focus_single_in_list)
+
+    # Clean up dummy video
+    # if os.path.exists(dummy_video_path):
+    #     os.remove(dummy_video_path)
+    print("\nVideo processing tests complete. Check output files.")

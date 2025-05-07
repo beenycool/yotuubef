@@ -1,0 +1,53 @@
+name: Daily Video Processing
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Runs at 00:00 UTC every day
+    - cron: '0 1 * * *'  # Runs at 01:00 UTC every day
+    - cron: '0 2 * * *'  # Runs at 02:00 UTC every day
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  process-videos:
+    runs-on: ubuntu-latest
+    if: ${{ success() || failure() }}  # Run on both success and failure
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+        
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run video processing
+      run: |
+        python script.py CrazyFuckingVideos funny videos interestingasfuck mildlyinteresting mildlyinfuriating CasualUK BeAmazed cats Damnthatsinteresting chaoticgood
+      env:
+        # YouTube API credentials
+        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+        YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+        
+        # Reddit API credentials
+        REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+        REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+        REDDIT_USER_AGENT: ${{ secrets.REDDIT_USER_AGENT }}
+        
+        # ElevenLabs API key
+        ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+        
+        # Google AI API key
+        GOOGLE_AI_API_KEY: ${{ secrets.GOOGLE_AI_API_KEY }}
+        
+        # HuggingFace API token
+        HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }} 
