@@ -28,15 +28,53 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+
+    - name: Verify Secrets
+      run: |
+        echo "Checking required secrets..."
+        if [ -n "${{ secrets.YOUTUBE_CLIENT_SECRET_JSON }}" ]; then
+          echo "✅ YouTube credentials present"
+        else
+          echo "❌ YouTube credentials missing"
+          exit 1
+        fi
+        
+        if [ -n "${{ secrets.REDDIT_CLIENT_ID }}" ] && [ -n "${{ secrets.REDDIT_CLIENT_SECRET }}" ] && [ -n "${{ secrets.REDDIT_USER_AGENT }}" ]; then
+          echo "✅ Reddit credentials present"
+        else
+          echo "❌ Reddit credentials missing"
+          exit 1
+        fi
+        
+        if [ -n "${{ secrets.ELEVENLABS_API_KEY }}" ]; then
+          echo "✅ ElevenLabs API key present"
+        else
+          echo "❌ ElevenLabs API key missing"
+          exit 1
+        fi
+        
+        if [ -n "${{ secrets.GOOGLE_AI_API_KEY }}" ]; then
+          echo "✅ Google AI API key present"
+        else
+          echo "❌ Google AI API key missing"
+          exit 1
+        fi
+        
+        if [ -n "${{ secrets.HUGGINGFACE_TOKEN }}" ]; then
+          echo "✅ HuggingFace token present"
+        else
+          echo "❌ HuggingFace token missing"
+          exit 1
+        fi
+        
+        echo "All required secrets are present! 🎉"
         
     - name: Run video processing
       run: |
         python script.py CrazyFuckingVideos funny videos interestingasfuck mildlyinteresting mildlyinfuriating CasualUK BeAmazed cats Damnthatsinteresting chaoticgood
       env:
-        # YouTube API credentials
-        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
-        YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+        # YouTube credentials (JSON format)
+        YOUTUBE_CLIENT_SECRET_JSON: ${{ secrets.YOUTUBE_CLIENT_SECRET_JSON }}
         
         # Reddit API credentials
         REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
