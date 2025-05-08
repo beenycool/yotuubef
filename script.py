@@ -128,7 +128,7 @@ DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM" # Example ElevenLabs voice
 # Directories and Files
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
 TEMP_DIR = BASE_DIR / "temp_processing"
-MUSIC_FOLDER = BASE_DIR / "music"
+MUSIC_FOLDER = BASE_DIR / "royalty_free_music"  # Updated folder name
 WATERMARK_PATH = BASE_DIR / "watermark.png"
 DB_FILE = BASE_DIR / 'uploaded_videos.db'
 
@@ -220,6 +220,463 @@ UNSUITABLE_CONTENT_TYPES = [
     "drug abuse", "excessive profanity"
 ]
 
+# Curated subreddit whitelist - high-quality, family-friendly content
+CURATED_SUBREDDITS = [
+    "oddlysatisfying", "nextfuckinglevel", "BeAmazed", "woahdude", 
+    "NatureIsFuckingLit", "EarthPorn", "aww", "MadeMeSmile", "Eyebleach",
+    "interestingasfuck", "Damnthatsinteresting", "AnimalsBeingBros", 
+    "HumansBeingBros", "wholesomememes", "ContagiousLaughter",
+    "foodporn", "CookingVideos", "ArtisanVideos", "educationalgifs",
+    "DIY", "gardening", "science", "space", "NatureIsCool",
+    "AnimalsBeingDerps", "rarepuppers", "LifeProTips"
+]
+
+# Music Configuration
+MUSIC_CATEGORIES = {
+    "upbeat": ["energetic", "positive", "happy", "uplifting"],
+    "emotional": ["sad", "heartwarming", "touching", "sentimental"],
+    "suspenseful": ["tense", "dramatic", "action", "exciting"],
+    "relaxing": ["calm", "peaceful", "ambient", "soothing"],
+    "funny": ["quirky", "comedic", "playful", "lighthearted"],
+    "informative": ["neutral", "documentary", "educational", "background"]
+}
+
+# Create subdirectories for organized music
+for category in MUSIC_CATEGORIES:
+    (MUSIC_FOLDER / category).mkdir(parents=True, exist_ok=True)
+
+# Function to download royalty-free music (if needed)
+def download_royalty_free_music():
+    """
+    Downloads a selection of royalty-free music from trusted sources.
+    Creates categorized folders for different moods/styles.
+    """
+    # Only run if music folders are empty
+    total_music_files = sum(len(list((MUSIC_FOLDER / category).glob("*.mp3"))) for category in MUSIC_CATEGORIES)
+    
+    if total_music_files > 0:
+        print(f"Found {total_music_files} existing music files. Skipping download.")
+        return
+        
+    print("Downloading royalty-free music...")
+    
+    # URLs for trusted royalty-free music sources
+    # These are public domain or CC0 licensed music collections
+    sources = {
+        "upbeat": [
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Arps/Chad_Crouch_-_Shipping_Lanes.mp3",
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/no_curator/Tours/Enthusiast/Tours_-_01_-_Enthusiast.mp3"
+        ],
+        "emotional": [
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Drifter/Chad_Crouch_-_Drifter.mp3",
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/WFMU/Broke_For_Free/Directionless_EP/Broke_For_Free_-_01_-_Night_Owl.mp3"
+        ],
+        "suspenseful": [
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/no_curator/Kai_Engel/Satin/Kai_Engel_-_03_-_Contention.mp3",
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/Zach_Heffelfinger/Pneumatic_Tubes/Emotional_Technology/Pneumatic_Tubes_-_05_-_The_Secret_Engine.mp3"
+        ],
+        "relaxing": [
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/Music_for_Video/Blue_Dot_Sessions/Bitters/Blue_Dot_Sessions_-_Sage_the_Hunter.mp3",
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Chad_Crouch/Field_Report_Vol_I_Oaks_Bottom/Chad_Crouch_-_Egret.mp3"
+        ],
+        "funny": [
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/WFMU/Deerhoof/Deerhoof_session_WFMU_on_the_Web_2008_01_22/Deerhoof_-_01_-_Fresh_Born_Live_on_WFMU.mp3",
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/WFMU/Syna_So_Pro/Live_on_WFMUs_Busy_Doing_Nothing_with_Charlie_Oct_14_2015/Syna_So_Pro_-_01_-_Unidentifiable.mp3"
+        ],
+        "informative": [
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/no_curator/Jahzzar/Tumbling_Dishes_Like_Old-Mans_Memories/Jahzzar_-_05_-_Siesta.mp3",
+            "https://files.freemusicarchive.org/storage-freemusicarchive-org/music/ccCommunity/Kai_Engel/Sustains/Kai_Engel_-_08_-_Augmentations.mp3"
+        ]
+    }
+    
+    for category, urls in sources.items():
+        category_dir = MUSIC_FOLDER / category
+        category_dir.mkdir(parents=True, exist_ok=True)
+        
+        for i, url in enumerate(urls):
+            try:
+                # Extract filename from URL or create a numbered filename
+                filename = url.split("/")[-1]
+                if not filename.endswith(".mp3"):
+                    filename = f"{category}_{i+1}.mp3"
+                    
+                output_path = category_dir / filename
+                
+                # Download file
+                print(f"  Downloading {filename} to {category} category...")
+                
+                # Use requests if available, otherwise use urllib
+                try:
+                    import requests
+                    response = requests.get(url, timeout=30)
+                    with open(output_path, 'wb') as f:
+                        f.write(response.content)
+                except ImportError:
+                    import urllib.request
+                    urllib.request.urlretrieve(url, output_path)
+                    
+                print(f"  Downloaded {filename}")
+                
+            except Exception as e:
+                print(f"  Error downloading {url}: {e}")
+    
+    # Count downloaded files
+    total_music_files = sum(len(list((MUSIC_FOLDER / category).glob("*.mp3"))) for category in MUSIC_CATEGORIES)
+    print(f"Downloaded {total_music_files} royalty-free music files.")
+
+def select_music_for_content(analysis: Dict) -> Optional[pathlib.Path]:
+    """
+    Selects appropriate royalty-free music based on content analysis
+    
+    Args:
+        analysis: Video analysis dictionary
+        
+    Returns:
+        Path to selected music file or None
+    """
+    # Extract mood and music genres from analysis
+    mood = analysis.get('mood', 'neutral').lower()
+    music_genres = analysis.get('music_genres', [])
+    
+    # Determine best category based on mood and genres
+    target_category = "informative"  # Default category
+    
+    # Map mood to music category
+    mood_category_map = {
+        "funny": "funny",
+        "heartwarming": "emotional",
+        "informative": "informative",
+        "suspenseful": "suspenseful",
+        "action": "suspenseful",
+        "calm": "relaxing",
+        "exciting": "upbeat",
+        "sad": "emotional",
+        "shocking": "suspenseful",
+        "weird": "funny",
+        "cringe": "funny"
+    }
+    
+    if mood in mood_category_map:
+        target_category = mood_category_map[mood]
+    
+    # Check if any specified genres match our categories or tags
+    for genre in music_genres:
+        genre_lower = genre.lower()
+        
+        # Direct category match
+        if genre_lower in MUSIC_CATEGORIES:
+            target_category = genre_lower
+            break
+            
+        # Tag match
+        for category, tags in MUSIC_CATEGORIES.items():
+            if any(tag.lower() == genre_lower for tag in tags):
+                target_category = category
+                break
+    
+    # Get list of music files in the target category
+    category_dir = MUSIC_FOLDER / target_category
+    if not category_dir.exists():
+        # Fall back to main music folder
+        music_files = list(MUSIC_FOLDER.glob("*.mp3"))
+    else:
+        music_files = list(category_dir.glob("*.mp3"))
+    
+    # If no music files found in target category, try to find any music file
+    if not music_files:
+        # Search all categories
+        for category in MUSIC_CATEGORIES:
+            cat_dir = MUSIC_FOLDER / category
+            if cat_dir.exists():
+                music_files = list(cat_dir.glob("*.mp3"))
+                if music_files:
+                    break
+    
+    # If still no music files, return None
+    if not music_files:
+        print(f"  No music files found for category: {target_category}")
+        return None
+    
+    # Randomly select a music file from the appropriate category
+    selected_music = random.choice(music_files)
+    print(f"  Selected music: {selected_music.name} from {target_category} category")
+    
+    return selected_music
+
+def generate_custom_thumbnail(video_path: pathlib.Path, analysis: Dict, output_path: pathlib.Path) -> Optional[pathlib.Path]:
+    """
+    Generates a custom thumbnail for the video
+    
+    Args:
+        video_path: Path to the video file
+        analysis: Video analysis dictionary
+        output_path: Path to save the thumbnail
+        
+    Returns:
+        Path to the thumbnail file or None if generation failed
+    """
+    if not video_path.is_file():
+        return None
+        
+    try:
+        # Get thumbnail moment from analysis, or use middle of video
+        thumbnail_moment = analysis.get('thumbnail_moment', None)
+        if thumbnail_moment is None:
+            # Get video duration
+            duration, _, _ = get_video_details(video_path)
+            if duration <= 0:
+                thumbnail_moment = 0
+            else:
+                # Use a moment about 1/3 into the video for thumbnail
+                thumbnail_moment = duration / 3
+        
+        # Extract frame at specified moment
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            return None
+            
+        # Set position to thumbnail moment
+        cap.set(cv2.CAP_PROP_POS_MSEC, thumbnail_moment * 1000)
+        ret, frame = cap.read()
+        cap.release()
+        
+        if not ret:
+            return None
+        
+        # Enhance thumbnail with image processing
+        # 1. Increase contrast and saturation
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hsv[:,:,1] = hsv[:,:,1] * 1.3  # Increase saturation
+        hsv[:,:,2] = hsv[:,:,2] * 1.1  # Increase brightness slightly
+        enhanced = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+        
+        # 2. Apply sharpening
+        kernel = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+        sharpened = cv2.filter2D(enhanced, -1, kernel)
+        
+        # Save the base thumbnail
+        cv2.imwrite(str(output_path), sharpened)
+        
+        # Optional: Add text overlay using title from analysis
+        title = analysis.get('suggested_title', '')
+        if title:
+            # Create a version with text overlay using PIL
+            from PIL import Image, ImageDraw, ImageFont
+            
+            img = Image.open(output_path)
+            draw = ImageDraw.Draw(img)
+            
+            # Try to load a nice font, fall back to default
+            try:
+                # Try a few common fonts that might be available
+                font_paths = [
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
+                    "C:\\Windows\\Fonts\\Arial.ttf",  # Windows
+                    "/Library/Fonts/Arial.ttf"  # Mac
+                ]
+                
+                font = None
+                for font_path in font_paths:
+                    try:
+                        font = ImageFont.truetype(font_path, size=img.height // 12)
+                        break
+                    except:
+                        continue
+                        
+                if font is None:
+                    font = ImageFont.load_default()
+            except:
+                font = ImageFont.load_default()
+            
+            # Prepare title text (limit length)
+            if len(title) > 40:
+                title = title[:37] + "..."
+            
+            # Add semi-transparent background for text
+            text_position = (img.width // 20, img.height * 3 // 4)
+            text_size = draw.textbbox(text_position, title, font=font)
+            
+            # Create semi-transparent black rectangle behind text
+            overlay = Image.new('RGBA', img.size, (0,0,0,0))
+            overlay_draw = ImageDraw.Draw(overlay)
+            overlay_draw.rectangle(
+                [text_size[0] - 10, text_size[1] - 10, text_size[2] + 10, text_size[3] + 10],
+                fill=(0, 0, 0, 160)
+            )
+            
+            # Composite the overlay onto the main image
+            img = Image.alpha_composite(img.convert('RGBA'), overlay)
+            
+            # Draw white text with black outline for visibility
+            draw = ImageDraw.Draw(img)
+            
+            # Draw text outline by offsetting black text slightly
+            for dx, dy in [(-1,-1), (-1,1), (1,-1), (1,1)]:
+                draw.text((text_position[0]+dx, text_position[1]+dy), title, font=font, fill=(0,0,0))
+            
+            # Draw main text in white
+            draw.text(text_position, title, font=font, fill=(255,255,255))
+            
+            # Save the thumbnail with text overlay
+            img.convert('RGB').save(output_path)
+        
+        return output_path
+        
+    except Exception as e:
+        print(f"  Error generating thumbnail: {e}")
+        return None
+
+def gemini_content_safety_check(submission, video_path: Optional[pathlib.Path] = None) -> Tuple[bool, str]:
+    """
+    Uses Gemini to perform advanced content safety check
+    
+    Args:
+        submission: Reddit submission
+        video_path: Path to downloaded video if available
+        
+    Returns:
+        Tuple of (is_problematic, reason)
+    """
+    global gemini_model
+    
+    if not gemini_model:
+        print("  Warning: Gemini not available, using basic safety check")
+        return is_unsuitable_video(submission, video_path)
+    
+    # First run basic check - quick rejection
+    unsuitable, reason = is_unsuitable_video(submission, video_path)
+    if unsuitable:
+        return True, reason
+        
+    # If video is not available, we can't perform detailed check
+    if video_path is None or not video_path.is_file():
+        print("  Warning: Video file not available for Gemini safety check")
+        return False, ""
+    
+    try:
+        # Extract a few frames for image-based safety check
+        frame_paths = []
+        try:
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                print("  Warning: Could not open video for safety check")
+                return False, ""
+                
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            duration = frame_count / fps if fps > 0 else 0
+            
+            # Sample frames at strategic points (start, middle, end)
+            sample_points = [0.1, 0.5, 0.9]  # Sample at 10%, 50%, and 90% of duration
+            
+            for i, point in enumerate(sample_points):
+                frame_time = point * duration
+                frame_num = int(frame_time * fps)
+                
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+                ret, frame = cap.read()
+                
+                if ret:
+                    frame_path = TEMP_DIR / f"safety_check_frame_{i}.jpg"
+                    cv2.imwrite(str(frame_path), frame)
+                    frame_paths.append(frame_path)
+            
+            cap.release()
+            
+        except Exception as e:
+            print(f"  Warning: Error extracting frames for safety check: {e}")
+            
+        # Prepare prompt for Gemini
+        prompt = f"""Analyze this content from Reddit for safety and suitability.
+Title: "{submission.title}"
+Subreddit: r/{submission.subreddit.display_name}
+
+Your task is to determine if this content is suitable for a general audience.
+Specifically check for:
+1. Violence, gore, or disturbing imagery
+2. Sexual content or nudity
+3. Hate speech, discrimination, or offensive language
+4. Dangerous activities that could lead to harm or injury
+5. Drug use or other illegal activities
+6. Excessive profanity
+7. Content that objectifies or demeans individuals
+8. Harmful misinformation
+
+Respond with the following format:
+{{
+  "is_suitable": true/false,
+  "reason_if_unsuitable": "explanation", 
+  "concerns": ["list", "of", "concerns"],
+  "confidence": 0-100
+}}
+"""
+
+        # Prepare content for Gemini model
+        content_parts = [prompt]
+        
+        # Add frames if available
+        for frame_path in frame_paths:
+            if frame_path.is_file():
+                with open(frame_path, 'rb') as f:
+                    image_data = f.read()
+                    content_parts.append({"mime_type": "image/jpeg", "data": base64.b64encode(image_data).decode('utf-8')})
+        
+        # Use strict safety settings
+        safety_settings = [
+            {"category": c, "threshold": "BLOCK_MEDIUM_AND_ABOVE"} 
+            for c in ["HARM_CATEGORY_HARASSMENT", "HARM_CATEGORY_HATE_SPEECH", 
+                      "HARM_CATEGORY_SEXUALLY_EXPLICIT", "HARM_CATEGORY_DANGEROUS_CONTENT"]
+        ]
+        
+        # Get Gemini response
+        response = gemini_model.generate_content(
+            content_parts, 
+            generation_config=genai.types.GenerationConfig(temperature=0.2),
+            safety_settings=safety_settings
+        )
+        
+        # Clean up frame files
+        for frame_path in frame_paths:
+            cleanup_temp_files(frame_path)
+        
+        if not response.candidates or not response.text:
+            print("  Warning: No valid response from Gemini for safety check")
+            return False, ""
+            
+        # Parse JSON response
+        result_text = response.text
+        
+        # Extract JSON from response (handle various formats)
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', result_text, re.DOTALL)
+        if json_match:
+            json_text = json_match.group(1)
+        else:
+            json_start = result_text.find('{')
+            json_end = result_text.rfind('}')
+            if json_start == -1 or json_end == -1 or json_end < json_start:
+                print("  Warning: Could not find JSON in Gemini response")
+                return False, ""
+            json_text = result_text[json_start:json_end + 1]
+            
+        try:
+            result = json.loads(json_text)
+            is_suitable = result.get("is_suitable", True)
+            reason = result.get("reason_if_unsuitable", "")
+            confidence = result.get("confidence", 0)
+            
+            # Only reject if we're reasonably confident
+            if not is_suitable and confidence >= 70:
+                return True, reason
+                
+            return False, ""
+        except json.JSONDecodeError:
+            print("  Warning: Could not parse Gemini JSON response for safety check")
+            return False, ""
+            
+    except Exception as e:
+        print(f"  Error in Gemini content safety check: {e}")
+        return False, ""
+
 def is_unsuitable_video(submission, video_path: Optional[pathlib.Path] = None) -> Tuple[bool, str]:
     """
     Checks if a video is unsuitable for processing.
@@ -239,17 +696,15 @@ def is_unsuitable_video(submission, video_path: Optional[pathlib.Path] = None) -
     if contains_forbidden_words(submission.title):
         return True, "Title contains forbidden words"
         
-    # Check subreddit name for unsuitable indicators
-    unsuitable_subreddit_indicators = ['nsfw', 'porn', 'gore', 'death', 'wtf']
-    if any(indicator in submission.subreddit.display_name.lower() for indicator in unsuitable_subreddit_indicators):
-        return True, f"Unsuitable subreddit: r/{submission.subreddit.display_name}"
-    
+    # Check if subreddit is in our curated whitelist
+    if submission.subreddit.display_name.lower() not in [s.lower() for s in CURATED_SUBREDDITS]:
+        return True, f"Subreddit not in curated whitelist: r/{submission.subreddit.display_name}"
+        
     # Check submission flair for unsuitable indicators
     if submission.link_flair_text and any(word in submission.link_flair_text.lower() for word in FORBIDDEN_WORDS):
         return True, f"Unsuitable flair: {submission.link_flair_text}"
     
-    # If comments are available, check top comments for unsuitable content indicators
-    # MODIFIED: Added timeout and better error handling to prevent hanging
+    # Check comments for unsuitable content indicators (improved with timeout)
     try:
         # Add a timeout mechanism to prevent hanging
         import threading
@@ -291,6 +746,10 @@ def is_unsuitable_video(submission, video_path: Optional[pathlib.Path] = None) -
                 if any(content_type.lower() in top_comments_text.lower() for content_type in UNSUITABLE_CONTENT_TYPES):
                     return True, "Comments suggest unsuitable content"
                 
+                # Check comments for forbidden words
+                if contains_forbidden_words(top_comments_text):
+                    return True, "Comments contain forbidden words"
+                
     except Exception as e:
         print(f"  Error analyzing comments: {e}")
         # Continue processing even if comment analysis fails
@@ -313,134 +772,25 @@ def is_unsuitable_video(submission, video_path: Optional[pathlib.Path] = None) -
             
     return False, ""
 
-# YouTube Upload Parameters
-YOUTUBE_SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.force-ssl']
-YOUTUBE_API_SERVICE_NAME = 'youtube'
-YOUTUBE_API_VERSION = 'v3'
-YOUTUBE_UPLOAD_CATEGORY_ID = '24' # Entertainment Category
-YOUTUBE_UPLOAD_PRIVACY_STATUS = 'public' # Change to 'public' or 'unlisted' for release
-
-# --- Global Variables ---
-db_conn: Optional[sqlite3.Connection] = None
-db_cursor: Optional[sqlite3.Cursor] = None
-elevenlabs_client: Optional[ElevenLabs] = None
-gemini_model: Optional[genai.GenerativeModel] = None
-reddit: Optional[praw.Reddit] = None
-youtube_service: Optional[Any] = None
-
-# --- Helper Classes ---
-class UploadLimitExceededError(Exception):
-    pass
-
-FALLBACK_ANALYSIS = {
-    'fallback': True,
-    'suggested_title': 'Interesting Moment from Reddit',
-    'summary_for_description': 'An interesting clip from Reddit worth sharing.',
-    'mood': 'neutral',
-    'hook_text': 'Take a look at this',
-    'best_segment': None,
-    'key_visual_moments': [],
-    'speech_segments': [],
-    'narrative_script': [], # Add narrative script field to fallback
-    'visual_cues': [], # Add visual cues
-    'retention_tactics': [], # Add retention tactics
-    'hashtags': ['#reddit', '#shorts', '#video'],
-    'original_duration': 0.0
-}
-
-# --- Utility Functions ---
-def check_ffmpeg_install(command: str) -> bool:
-    try:
-        return shutil.which(command) is not None
-    except Exception:
-        return False
-
-def has_nvidia_gpu() -> bool:
-    if sys.platform == "win32": command = ['nvidia-smi']
-    else: command = ['nvidia-smi']
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=10)
-        return result.returncode == 0 and "NVIDIA-SMI" in result.stdout
-    except (FileNotFoundError, subprocess.TimeoutExpired, Exception):
-        return False
-
-# Enhanced GPU detection - check for specific encoders
-def check_gpu_encoder_availability() -> str:
-    """Check which GPU encoder is available on the system (NVIDIA, AMD, or Intel)"""
-    try:
-        # Check for NVIDIA encoder
-        if has_nvidia_gpu():
-            # Verify h264_nvenc encoder is available
-            cmd = ["ffmpeg", "-encoders"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
-            if "h264_nvenc" in result.stdout:
-                print("NVIDIA h264_nvenc encoder detected")
-                return "h264_nvenc"
-            elif "hevc_nvenc" in result.stdout:
-                print("NVIDIA hevc_nvenc encoder detected")
-                return "hevc_nvenc"
+# --- Modified get_reddit_submissions function ---
+def get_reddit_submissions(subreddit_name: str, limit: int) -> List[praw.models.Submission]:
+    if not reddit: return []
+    
+    # Verify subreddit is in our curated list
+    if subreddit_name.lower() not in [s.lower() for s in CURATED_SUBREDDITS]:
+        print(f"  Warning: r/{subreddit_name} is not in the curated subreddit whitelist")
+        return []
         
-        # Check for AMD encoder
-        cmd = ["ffmpeg", "-encoders"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=10)
-        if "h264_amf" in result.stdout:
-            print("AMD h264_amf encoder detected")
-            return "h264_amf"
-        
-        # Check for Intel encoder
-        if "h264_qsv" in result.stdout:
-            print("Intel h264_qsv encoder detected")
-            return "h264_qsv"
-        
-        # Fallback to CPU
-        print("No hardware encoder detected, using CPU encoding")
-        return VIDEO_CODEC_CPU
-    except Exception as e:
-        print(f"Error detecting GPU encoder: {e}")
-        return VIDEO_CODEC_CPU
-
-def cleanup_temp_files(*file_paths: Optional[pathlib.Path]):
-    for file_path in file_paths:
-        if file_path and file_path.is_file():
-            try: file_path.unlink()
-            except OSError as e: print(f"  - Warning: Error removing {file_path.name}: {e}")
-
-def contains_forbidden_words(text: str) -> bool:
-    if not text: return False
-    text_lower = text.lower()
-    return any(word in text_lower for word in FORBIDDEN_WORDS)
-
-def sanitize_filename(name: str) -> str:
-    name = re.sub(r'[\\/*?:"<>|]', "", name)
-    name = name.replace(" ", "_")
-    return name[:100]
-
-def get_video_details(video_path: pathlib.Path) -> Tuple[float, int, int]:
-    if not video_path.is_file() or not check_ffmpeg_install("ffprobe"): return 0.0, 0, 0
+    submissions = []
     try:
-        command = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height,duration,r_frame_rate:format=duration', '-of', 'json', str(video_path)]
-        result = subprocess.run(command, capture_output=True, text=True, check=True, timeout=30)
-        data = json.loads(result.stdout)
-        duration, width, height = 0.0, 0, 0
-        if 'streams' in data and data['streams']:
-            stream = data['streams'][0]
-            width = int(stream.get('width', 0)); height = int(stream.get('height', 0))
-            if 'duration' in stream and stream['duration'] != 'N/A': duration = float(stream['duration'])
-        if duration <= 0 and 'format' in data and 'duration' in data['format'] and data['format']['duration'] != 'N/A': duration = float(data['format']['duration'])
-        return duration, width, height
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, json.JSONDecodeError, Exception) as e:
-        print(f"Error getting video details for {video_path.name}: {e}")
-        return 0.0, 0, 0
-
-def has_audio_track(media_path: pathlib.Path) -> bool:
-    if not media_path.is_file() or not check_ffmpeg_install("ffprobe"): return False
-    try:
-        command = ['ffprobe', '-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', str(media_path)]
-        result = subprocess.run(command, capture_output=True, text=True, check=False, timeout=15)
-        return result.returncode == 0 and 'audio' in result.stdout.strip()
-    except (subprocess.TimeoutExpired, Exception) as e:
-        print(f"Error checking audio track in {media_path.name}: {e}")
-        return False
+        subreddit = reddit.subreddit(subreddit_name)
+        for submission in subreddit.hot(limit=limit * 2):
+            if len(submissions) >= limit: break
+            if (submission.is_video or any(submission.url.endswith(ext) for ext in ['.mp4', '.mov', '.gifv']) or any(host in submission.url for host in ['v.redd.it', 'gfycat.com', 'streamable.com'])) and not submission.over_18 and not submission.stickied:
+                submissions.append(submission)
+            time.sleep(0.1)
+        return submissions
+    except Exception as e: print(f"Error fetching from r/{subreddit_name}: {e}"); return []
 
 # --- Setup Functions ---
 def validate_environment():
@@ -492,6 +842,7 @@ def setup_api_clients():
 
 # --- YouTube Upload Function ---
 def upload_to_youtube(video_path: pathlib.Path, title: str, description: str,
+                     thumbnail_path: Optional[str] = None,
                      category_id: str = YOUTUBE_UPLOAD_CATEGORY_ID,
                      privacy_status: str = YOUTUBE_UPLOAD_PRIVACY_STATUS) -> Optional[str]:
     """
@@ -501,6 +852,7 @@ def upload_to_youtube(video_path: pathlib.Path, title: str, description: str,
         video_path: Path to the video file to upload
         title: Video title
         description: Video description
+        thumbnail_path: Path to thumbnail image (optional)
         category_id: YouTube category ID (default: Entertainment)
         privacy_status: Privacy status (public/unlisted/private)
         
@@ -528,6 +880,7 @@ def upload_to_youtube(video_path: pathlib.Path, title: str, description: str,
             resumable=True
         )
         
+        # Upload the video
         request = youtube_service.videos().insert(
             part='snippet,status',
             body=body,
@@ -540,8 +893,21 @@ def upload_to_youtube(video_path: pathlib.Path, title: str, description: str,
             if status:
                 print(f"Upload progress: {int(status.progress() * 100)}%")
         
-        print(f"Successfully uploaded video: {response['id']}")
-        return f"https://youtu.be/{response['id']}"
+        video_id = response['id']
+        print(f"Successfully uploaded video: {video_id}")
+        
+        # If thumbnail provided, upload it
+        if thumbnail_path and os.path.exists(thumbnail_path):
+            try:
+                youtube_service.thumbnails().set(
+                    videoId=video_id,
+                    media_body=MediaFileUpload(thumbnail_path)
+                ).execute()
+                print("Custom thumbnail uploaded successfully")
+            except Exception as thumb_error:
+                print(f"Error uploading thumbnail: {thumb_error}")
+        
+        return f"https://youtu.be/{video_id}"
         
     except google_api_errors.HttpError as e:
         print(f"An HTTP error occurred: {e}")
@@ -563,45 +929,6 @@ def add_upload_record(reddit_url: str, youtube_url: str):
         db_cursor.execute("INSERT INTO uploads (reddit_url, youtube_url) VALUES (?, ?)", (reddit_url, youtube_url)); db_conn.commit()
     except sqlite3.IntegrityError: print(f"Warning: Record for {reddit_url} already exists.")
     except sqlite3.Error as e: print(f"Error adding DB record for {reddit_url}: {e}")
-
-# --- Reddit & Download ---
-def get_reddit_submissions(subreddit_name: str, limit: int) -> List[praw.models.Submission]:
-    if not reddit: return []
-    submissions = []
-    try:
-        subreddit = reddit.subreddit(subreddit_name)
-        for submission in subreddit.hot(limit=limit * 2):
-            if len(submissions) >= limit: break
-            if (submission.is_video or any(submission.url.endswith(ext) for ext in ['.mp4', '.mov', '.gifv']) or any(host in submission.url for host in ['v.redd.it', 'gfycat.com', 'streamable.com'])) and not submission.over_18 and not submission.stickied:
-                submissions.append(submission)
-            time.sleep(0.1)
-        return submissions
-    except Exception as e: print(f"Error fetching from r/{subreddit_name}: {e}"); return []
-
-def download_media(url: str, output_path: pathlib.Path) -> Optional[pathlib.Path]:
-    output_path.parent.mkdir(parents=True, exist_ok=True); cleanup_temp_files(output_path)
-    ydl_opts = {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', 'outtmpl': str(output_path), 'quiet': True, 'no_warnings': True, 'ignoreerrors': True, 'noprogress': True, 'retries': 3, 'socket_timeout': 30, 'nocheckcertificate': True, 'merge_output_format': 'mp4'}
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([url])
-        if output_path.is_file() and output_path.stat().st_size > 10240:
-            return output_path
-        else:
-            base_name = output_path.stem
-            for file in output_path.parent.iterdir():
-                if file.stem.startswith(base_name) and file.is_file() and file.stat().st_size > 10240:
-                    if file != output_path:
-                        try:
-                            file.rename(output_path)
-                        except OSError:
-                            pass
-                    return output_path
-            cleanup_temp_files(output_path)
-            return None
-    except Exception as e:
-        print(f"Error downloading {url}: {e}")
-        cleanup_temp_files(output_path)
-        return None
 
 # --- AI Analysis ---
 def analyze_video_with_gemini(video_path: pathlib.Path, title: str, subreddit_name: str, style_preferences: Optional[Dict] = None) -> Dict[str, Any]:
@@ -798,106 +1125,279 @@ Return ONLY valid JSON.'''
 
 
 # --- TTS Generation ---
-def generate_tts_elevenlabs(text: str, output_path: pathlib.Path, voice_id: str = DEFAULT_VOICE_ID) -> bool:
-    """Generate TTS using ElevenLabs API (Fallback if Dia-1.6B fails)"""
+def generate_tts_elevenlabs(text: str, output_path: pathlib.Path, voice_id: str = DEFAULT_VOICE_ID, voice_settings: Optional[Dict] = None) -> bool:
+    """Generate TTS using ElevenLabs API with enhanced voice settings"""
     global elevenlabs_client
     if not elevenlabs_client or not text or not text.strip(): return False
     output_path.parent.mkdir(parents=True, exist_ok=True); cleanup_temp_files(output_path)
     try:
-        audio = elevenlabs_client.generate(text=text, voice=voice_id)
+        # Default voice settings for more natural speech
+        default_settings = {
+            "stability": 0.71,       # Slightly higher stability for consistent quality
+            "similarity_boost": 0.75, # Good balance between clarity and voice character
+            "style": 0.15,           # Small amount of style variation for interest
+            "use_speaker_boost": True # Clearer audio
+        }
+        
+        # Use provided settings or defaults
+        settings = voice_settings if voice_settings else default_settings
+        
+        # Apply voice settings
+        voice_settings_obj = {
+            "stability": settings.get("stability", 0.71),
+            "similarity_boost": settings.get("similarity_boost", 0.75),
+            "style": settings.get("style", 0.15),
+            "use_speaker_boost": settings.get("use_speaker_boost", True)
+        }
+        
+        # Generate audio with the configured settings
+        audio = elevenlabs_client.generate(
+            text=text,
+            voice=voice_id,
+            model="eleven_turbo_v2",  # Use the latest model for best quality
+            voice_settings=voice_settings_obj
+        )
+        
         save(audio, str(output_path))
         return output_path.is_file() and output_path.stat().st_size > 500
     except ApiError as e: print(f"  ElevenLabs API Error: {e}"); return False
     except Exception as e: print(f"  Error generating TTS with ElevenLabs: {e}"); return False
 
-def dia_tts(text: str, output_path: pathlib.Path) -> bool:
-    """Generate TTS using local Dia-1.6B model (Primary TTS system)"""
-    if not text or not text.strip(): return False
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    wav_path = output_path.with_suffix('.wav')
-    cleanup_temp_files(output_path, wav_path)
+def generate_tts(text: str, output_path: pathlib.Path, voice_settings: Optional[Dict] = None, voice_id: str = DEFAULT_VOICE_ID) -> bool:
+    """
+    Enhanced TTS generation with support for voice characteristics and emotion
     
-    try:
-        import torch
-        import soundfile as sf
-        from transformers import AutoProcessor, AutoModelForTextToSpeech
-        import numpy as np
+    Args:
+        text: Text to convert to speech
+        output_path: Path to save the audio file
+        voice_settings: Dictionary of voice settings to adjust characteristics
+        voice_id: ElevenLabs voice ID
         
-        print("  Generating TTS with Dia-1.6B (primary TTS model)")
-        model_name = "nari-labs/Dia-1.6B"
-        processor = AutoProcessor.from_pretrained(model_name)
-        model = AutoModelForTextToSpeech.from_pretrained(model_name)
-        
-        import logging
-        logging.getLogger("transformers").setLevel(logging.ERROR)
-        
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        print(f"  Using {device.upper()} for TTS")
-        
-        try:
-            model = model.to(device)
-        except RuntimeError:
-            print("  Warning: Couldn't move model to GPU, using CPU")
-            device = "cpu"
-            model = model.to(device)
-
-        # Create speaker embedding
-        speaker_embeddings = torch.zeros((1, model.config.speaker_embedding_dim), device=device)
-
-        # Process in smaller chunks if text is long
-        max_length = 600
-        text_chunks = [text[i:i+max_length] for i in range(0, len(text), max_length)]
-        audio_chunks = []
-
-        for chunk in text_chunks:
-            inputs = processor(text=chunk, return_tensors="pt").to(device)
-            with torch.no_grad():
-                speech = model.generate_speech(inputs["input_ids"], speaker_embeddings)
-                audio_chunks.append(speech.cpu().numpy())
-                # Clean up to prevent memory leaks
-                del speech
-                if device == "cuda":
-                    torch.cuda.empty_cache()
-
-        # Combine and save audio
-        if audio_chunks:
-            full_audio = np.concatenate(audio_chunks)
-            sf.write(str(wav_path), full_audio, model.config.sampling_rate)
-
-            # Convert to MP3 using ffmpeg
-            try:
-                subprocess.run([
-                    'ffmpeg', '-y', '-i', str(wav_path),
-                    '-acodec', 'libmp3lame', '-q:a', '2', str(output_path)
-                ], check=True, capture_output=True, timeout=30)
-            except subprocess.CalledProcessError as e:
-                print(f"  FFmpeg conversion failed: {e.stderr.decode()}")
-                return False
-
-            return output_path.is_file() and output_path.stat().st_size > 1024
-        
-        return False
-        
-    except ImportError:
-        print("  Error: Required TTS libraries (torch, soundfile, transformers) not installed")
-        return False
-    except Exception as e:
-        print(f"  TTS generation failed: {str(e)}")
-        return False
-    finally:
-        cleanup_temp_files(wav_path)
-        if 'torch' in locals() and 'device' in locals() and device == "cuda":
-            torch.cuda.empty_cache()
-
-def generate_tts(text: str, output_path: pathlib.Path, voice_id: str = DEFAULT_VOICE_ID) -> bool:
-    """Use Dia-1.6B as the primary TTS system, falling back to ElevenLabs if needed."""
-    if dia_tts(text, output_path):
+    Returns:
+        True if successful, False otherwise
+    """
+    # Process text to add SSML for better speech patterns
+    processed_text = enhance_text_for_tts(text)
+    
+    # Try using Dia model first (with enhanced text)
+    if dia_tts(processed_text, output_path):
         print("  Successfully generated TTS with Dia-1.6B model")
         return True
-    elif elevenlabs_client and generate_tts_elevenlabs(text, output_path, voice_id):
-        print("  Falling back to ElevenLabs TTS")
+    # Fall back to ElevenLabs with voice settings
+    elif elevenlabs_client and generate_tts_elevenlabs(processed_text, output_path, voice_id, voice_settings):
+        print("  Generated TTS with ElevenLabs using custom voice settings")
         return True
     return False
+
+def enhance_text_for_tts(text: str) -> str:
+    """
+    Enhances text with natural pauses and emphasis for more engaging TTS
+    
+    Args:
+        text: Original text
+        
+    Returns:
+        Enhanced text with natural speech patterns
+    """
+    if not text: 
+        return ""
+        
+    # Add natural pauses after sentences and before important conjunctions
+    text = re.sub(r'\.(\s+)', '.\n\n', text)  # Add paragraph breaks after periods
+    text = re.sub(r'([!?])(\s+)', r'\1\n', text)  # Add line breaks after ! and ?
+    
+    # Add emphasis to important words (simple heuristic)
+    emphasis_words = ["amazing", "incredible", "stunning", "important", "critical", 
+                     "fascinating", "remarkable", "extraordinary", "crucial"]
+    
+    for word in emphasis_words:
+        text = re.sub(r'\b' + word + r'\b', f" {word} ", text, flags=re.IGNORECASE)
+    
+    # Clean up any double spaces
+    text = re.sub(r'\s{2,}', ' ', text)
+    
+    return text.strip()
+
+def select_voice_for_content(analysis: Dict) -> str:
+    """
+    Selects an appropriate voice ID based on the content analysis
+    
+    Args:
+        analysis: The video analysis dictionary
+        
+    Returns:
+        The voice ID to use for TTS
+    """
+    # Get voice characteristics and content mood
+    voice_characteristics = analysis.get('tts_voice_characteristics', '').lower()
+    mood = analysis.get('mood', 'neutral').lower()
+    
+    # Default voice
+    default_voice = DEFAULT_VOICE_ID  # "21m00Tcm4TlvDq8ikWAM" - Default ElevenLabs voice
+    
+    # Define voice mappings based on characteristics and mood
+    # These IDs should be replaced with actual ElevenLabs voice IDs from your account
+    voice_mapping = {
+        # Characteristics-based mapping
+        'warm': "pNInz6obpgDQGcFmaJgB",         # Adam - warm, natural male voice
+        'conversational': "pNInz6obpgDQGcFmaJgB", # Adam 
+        'friendly': "pNInz6obpgDQGcFmaJgB",      # Adam
+        'authoritative': "ErXwobaYiN019PkySvjV", # Antoni - deeper male voice
+        'serious': "ErXwobaYiN019PkySvjV",       # Antoni
+        'professional': "ErXwobaYiN019PkySvjV",  # Antoni
+        'energetic': "yoZ06aMxZJJ28mfd3POQ",     # Josh - energetic young male
+        'upbeat': "yoZ06aMxZJJ28mfd3POQ",        # Josh
+        'enthusiastic': "yoZ06aMxZJJ28mfd3POQ",  # Josh
+        'calm': "EXAVITQu4vr4xnSDxMaL",          # Elli - calm female voice
+        'soft': "EXAVITQu4vr4xnSDxMaL",          # Elli
+        'soothing': "EXAVITQu4vr4xnSDxMaL",      # Elli
+        
+        # Mood-based mapping
+        'funny': "yoZ06aMxZJJ28mfd3POQ",        # Josh - good for humor
+        'heartwarming': "EXAVITQu4vr4xnSDxMaL",  # Elli - warm female voice
+        'informative': "ErXwobaYiN019PkySvjV",   # Antoni - good for educational
+        'suspenseful': "VR6AewLTigWG4xSOukaG",   # Sam - dramatic male voice
+        'action': "VR6AewLTigWG4xSOukaG",        # Sam
+        'exciting': "yoZ06aMxZJJ28mfd3POQ",      # Josh
+        'sad': "EXAVITQu4vr4xnSDxMaL",           # Elli
+        'shocking': "VR6AewLTigWG4xSOukaG",      # Sam
+        'weird': "t0jbNlBVZ17f02VDIeMI",         # Matilda - quirky female voice
+        'cringe': "t0jbNlBVZ17f02VDIeMI"         # Matilda
+    }
+    
+    # Try to match voice characteristics first, then mood
+    for term in voice_characteristics.split():
+        if term in voice_mapping:
+            return voice_mapping[term]
+    
+    if mood in voice_mapping:
+        return voice_mapping[mood]
+    
+    # Default to conversational voice if no matches
+    return default_voice
+
+def get_voice_settings_for_narrative(analysis: Dict) -> Dict:
+    """
+    Creates voice settings based on the narrative analysis
+    
+    Args:
+        analysis: The video analysis dictionary
+        
+    Returns:
+        Dictionary with voice settings
+    """
+    # Get narrative style and mood
+    narrative_style = analysis.get('narrative_style', '').lower()
+    mood = analysis.get('mood', 'neutral').lower()
+    
+    # Default settings for a balanced voice
+    settings = {
+        "stability": 0.71,       # Balanced stability
+        "similarity_boost": 0.75, # Default similarity
+        "style": 0.15,           # Slight style variation
+        "use_speaker_boost": True
+    }
+    
+    # Adjust settings based on narrative style
+    if 'dramatic' in narrative_style or 'suspenseful' in narrative_style:
+        settings["stability"] = 0.65       # Less stability for more variation
+        settings["similarity_boost"] = 0.70 # Slightly lower similarity
+        settings["style"] = 0.30           # More style variation for drama
+    
+    elif 'educational' in narrative_style or 'informative' in narrative_style:
+        settings["stability"] = 0.75       # Higher stability for clarity
+        settings["similarity_boost"] = 0.80 # Higher similarity for consistency
+        settings["style"] = 0.10           # Less style variation for clear information
+    
+    elif 'humorous' in narrative_style or 'funny' in mood:
+        settings["stability"] = 0.60       # Lower stability for expressiveness
+        settings["similarity_boost"] = 0.65 # Lower similarity for character
+        settings["style"] = 0.40           # More style for humor
+    
+    elif 'calm' in narrative_style or 'heartwarming' in mood:
+        settings["stability"] = 0.80       # Higher stability for smooth delivery
+        settings["similarity_boost"] = 0.75 # Balanced similarity
+        settings["style"] = 0.20           # Moderate style for warmth
+    
+    # Return the customized settings
+    return settings
+
+def generate_narrative_audio(narrative_script: List[Dict], analysis: Dict, temp_dir: pathlib.Path, temp_files_list: List[pathlib.Path]) -> List[Dict]:
+    """
+    Generates audio files for the narrative script with appropriate voice and settings
+    
+    Args:
+        narrative_script: List of narrative segments
+        analysis: Video analysis dictionary
+        temp_dir: Directory for temporary files
+        temp_files_list: List to track temporary files
+        
+    Returns:
+        List of dictionaries with audio clip information
+    """
+    if not narrative_script:
+        return []
+        
+    # Select appropriate voice based on content
+    voice_id = select_voice_for_content(analysis)
+    
+    # Get voice settings based on narrative style
+    voice_settings = get_voice_settings_for_narrative(analysis)
+    
+    print(f"  Generating narrative audio using voice settings: {voice_settings}")
+    
+    audio_clips_info = []
+    
+    for i, segment in enumerate(narrative_script):
+        segment_text = segment.get('narrative_text', '')
+        if not segment_text:
+            continue
+            
+        # Adjust voice settings based on segment tone if specified
+        segment_settings = voice_settings.copy()
+        if 'tone' in segment:
+            tone = segment['tone'].lower()
+            if 'excited' in tone or 'energetic' in tone:
+                segment_settings["stability"] = 0.60
+                segment_settings["style"] = 0.40
+            elif 'serious' in tone or 'dramatic' in tone:
+                segment_settings["stability"] = 0.75
+                segment_settings["style"] = 0.25
+            elif 'thoughtful' in tone or 'reflective' in tone:
+                segment_settings["stability"] = 0.85
+                segment_settings["style"] = 0.15
+        
+        # Generate TTS for this segment
+        segment_file = temp_dir / f"narrative_{i}.mp3"
+        temp_files_list.append(segment_file)
+        
+        if generate_tts(segment_text, segment_file, segment_settings, voice_id):
+            # Get the actual duration of the generated audio
+            audio_duration = get_audio_duration(segment_file)
+            
+            audio_clips_info.append({
+                "file_path": segment_file,
+                "timestamp": segment.get('timestamp', 0),
+                "duration": audio_duration or segment.get('duration', 5.0),
+                "original_text": segment_text
+            })
+    
+    return audio_clips_info
+
+def get_audio_duration(audio_path: pathlib.Path) -> Optional[float]:
+    """Get the duration of an audio file in seconds"""
+    if not audio_path.is_file():
+        return None
+        
+    try:
+        cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', 
+               '-of', 'default=noprint_wrappers=1:nokey=1', str(audio_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        duration = float(result.stdout.strip())
+        return duration
+    except Exception as e:
+        print(f"  Error getting audio duration: {e}")
+        return None
 
 # --- Video Processing Functions ---
 def trim_video(input_path: pathlib.Path, start_time: float, end_time: float, output_path: pathlib.Path) -> Optional[pathlib.Path]:
@@ -962,7 +1462,8 @@ def process_video_with_gpu_optimization(processing_path: pathlib.Path,
                                       original_audio_is_key: bool, 
                                       final_path: pathlib.Path,
                                       temp_files_list: List[pathlib.Path],
-                                      visual_cues: Optional[List[Dict]] = None) -> bool:
+                                      visual_cues: Optional[List[Dict]] = None,
+                                      analysis: Optional[Dict] = None) -> bool:
     """
     Process video with effects using GPU acceleration where possible.
     Now handles dynamic narrative overlays, TTS audio mixing, and targeted visual effects based on AI analysis.
@@ -1461,19 +1962,56 @@ def main():
     parser.add_argument('subreddits', nargs='+', help="Subreddits to fetch videos from")
     parser.add_argument('--max_videos', type=int, default=5, help="Maximum number of videos to process per subreddit")
     parser.add_argument('--skip_upload', action='store_true', help="Skip uploading to YouTube")
+    parser.add_argument('--list_curated', action='store_true', help="List curated subreddits and exit")
+    parser.add_argument('--download_music', action='store_true', help="Download royalty-free music and exit")
     args = parser.parse_args()
+    
+    # Add option to list curated subreddits
+    if args.list_curated:
+        print("Curated Subreddit Whitelist:")
+        for subreddit in sorted(CURATED_SUBREDDITS):
+            print(f"  - r/{subreddit}")
+        sys.exit(0)
+        
+    # Add option to download music only
+    if args.download_music:
+        print("Downloading royalty-free music...")
+        download_royalty_free_music()
+        sys.exit(0)
     
     try:
         validate_environment()
         setup_directories()
         setup_database()
         setup_api_clients()
+        
+        # Check for royalty-free music and download if missing
+        if not any(MUSIC_FOLDER.glob("**/*.mp3")):
+            print("No royalty-free music found. Downloading now...")
+            download_royalty_free_music()
+            
     except Exception as e:
         print(f"Setup failed: {e}")
         sys.exit(1)
         
     print(f"Processing subreddits: {', '.join(args.subreddits)}")
     
+    # Validate subreddits against whitelist
+    invalid_subreddits = [s for s in args.subreddits if s.lower() not in [cs.lower() for cs in CURATED_SUBREDDITS]]
+    if invalid_subreddits:
+        print(f"\nWARNING: The following subreddits are not in the curated whitelist and will be skipped:")
+        for sub in invalid_subreddits:
+            print(f"  - r/{sub}")
+        
+        # Filter to only whitelist subreddits
+        valid_subreddits = [s for s in args.subreddits if s.lower() in [cs.lower() for cs in CURATED_SUBREDDITS]]
+        if not valid_subreddits:
+            print("No valid subreddits to process. Use --list_curated to see available options.")
+            sys.exit(1)
+        
+        args.subreddits = valid_subreddits
+        print(f"\nProceeding with valid subreddits: {', '.join(args.subreddits)}")
+        
     # Process each subreddit
     videos_processed = 0
     for subreddit_name in args.subreddits:
@@ -1508,11 +2046,11 @@ def main():
                 print("\n\nKeyboard interrupt received. Cleaning up...")
                 try:
                     # Clean temp files
-                    if os.path.exists("temp_processing"):
-                        shutil.rmtree("temp_processing")
+                    for file_path in temp_files_list:
+                        cleanup_temp_files(file_path)
                     # Close database connections
-                    if 'processed_urls' in locals():
-                        processed_urls.close()
+                    if db_conn:
+                        close_database()
                     # Exit with status 1 to indicate interrupted
                     sys.exit(1)
                 except Exception as e:
@@ -1532,20 +2070,21 @@ def main():
                 
                 print(f"  Initial video: {duration:.2f}s, {width}x{height}")
                 
-                # Check for unsuitable content
-                unsuitable, reason = is_unsuitable_video(submission, initial_video)
+                # Enhanced content safety check using Gemini
+                print("  Performing Gemini content safety check...")
+                unsuitable, reason = gemini_content_safety_check(submission, initial_video)
                 if unsuitable:
-                    print(f"  Skipping video due to unsuitable content: {reason}")
+                    print(f"  Skipping video due to content safety: {reason}")
                     continue
                 
-                # AI Analysis
-                print("  Analyzing video with AI...")
+                # AI Analysis with enhanced narrative capabilities
+                print("  Analyzing video with Gemini for transformative narrative...")
                 analysis = analyze_video_with_gemini(initial_video, submission.title, subreddit_name)
                 
                 # Extract analysis data
                 best_segment = analysis.get('best_segment')
                 key_focus_points = analysis.get('key_focus_points', [])
-                narrative_overlays = analysis.get('narrative_text_overlays', [])
+                text_overlays = analysis.get('text_overlays', [])
                 narrative_script = analysis.get('narrative_script', [])
                 visual_cues = analysis.get('visual_cues', [])
                 original_audio_is_key = analysis.get('original_audio_is_key', False)
@@ -1555,10 +2094,16 @@ def main():
                 end_time = duration
                 
                 if best_segment and isinstance(best_segment, dict):
-                    start_time = float(best_segment.get('start_time', 0))
-                    end_time = float(best_segment.get('end_time', duration))
+                    segment_start = best_segment.get('start', 0)
+                    segment_end = best_segment.get('end', duration)
+                    
+                    # Use float values if available
+                    start_time = float(segment_start) if isinstance(segment_start, (int, float)) else 0
+                    end_time = float(segment_end) if isinstance(segment_end, (int, float)) else duration
+                    
                     # Ensure end_time doesn't exceed available duration
                     end_time = min(end_time, duration)
+                    
                     # Clip duration based on segment, max TARGET_VIDEO_DURATION_SECONDS
                     clip_duration = min(end_time - start_time, TARGET_VIDEO_DURATION_SECONDS)
                     end_time = start_time + clip_duration
@@ -1569,7 +2114,7 @@ def main():
                 # Filter focus points to be within the selected time range
                 relevant_focus_points = [
                     fp for fp in key_focus_points
-                    if start_time <= fp.get("time", -1) <= end_time
+                    if start_time <= float(fp.get("time", -1)) <= end_time
                 ]
                 if not relevant_focus_points: # Ensure at least one point
                     relevant_focus_points = [{"time": start_time, "point": {"x": 0.5, "y": 0.5}}]
@@ -1577,7 +2122,7 @@ def main():
                 # Also adjust visual cues to be relative to the trimmed segment
                 adjusted_visual_cues = []
                 for cue in visual_cues:
-                    cue_time = cue.get('time', 0) - start_time
+                    cue_time = float(cue.get('time', 0)) - start_time
                     if 0 <= cue_time < (end_time - start_time):
                         adjusted_cue = cue.copy()
                         adjusted_cue['time'] = cue_time
@@ -1607,35 +2152,47 @@ def main():
                 
                 # Adjust overlay timestamps relative to the cropped clip's start time
                 adjusted_overlays = []
-                for overlay in narrative_overlays:
-                    ts = overlay.get('timestamp', 0) - start_time
+                for overlay in text_overlays:
+                    # Handle different key names in the overlay dict
+                    ts_key = 'timestamp' if 'timestamp' in overlay else 'time'
+                    ts = float(overlay.get(ts_key, 0)) - start_time
+                    
                     if 0 <= ts < (end_time - start_time):
-                        overlay['timestamp'] = max(0, ts)
-                        adjusted_overlays.append(overlay)
+                        overlay_copy = overlay.copy()
+                        overlay_copy['timestamp'] = max(0, ts)
+                        adjusted_overlays.append(overlay_copy)
                 
                 adjusted_script = []
                 for item in narrative_script:
-                    ts = item.get('timestamp', 0) - start_time
+                    ts = float(item.get('timestamp', 0)) - start_time
                     if 0 <= ts < (end_time - start_time):
-                        item['timestamp'] = max(0, ts)
-                        adjusted_script.append(item)
+                        script_item = item.copy()
+                        script_item['timestamp'] = max(0, ts)
+                        adjusted_script.append(script_item)
                 
                 # Use the cropped video path as our processing path
                 processing_path = cropped_video_path
                 
+                # Generate thumbnail
+                thumbnail_path = TEMP_DIR / f"{submission.id}_{safe_title}_thumbnail.jpg"
+                temp_files_list.append(thumbnail_path)
+                print("  Generating custom thumbnail...")
+                generate_custom_thumbnail(processing_path, analysis, thumbnail_path)
+                
                 # Process video with effects (using the cropped video)
-                print("  Applying overlays and final effects...")
+                print("  Applying narrative, overlays and final effects...")
                 final_path = TEMP_DIR / f"{submission.id}_{safe_title}_final.mp4"
                 temp_files_list.append(final_path)
 
                 success = process_video_with_gpu_optimization(
-                    processing_path,  # This is the 9x16 cropped video
-                    adjusted_overlays,  # Use adjusted timestamps
-                    adjusted_script,    # Use adjusted timestamps
-                    original_audio_is_key,  # Pass the audio importance flag
-                    final_path,
-                    temp_files_list,
-                    adjusted_visual_cues  # Pass the adjusted visual cues
+                    processing_path,         # The 9:16 cropped video
+                    adjusted_overlays,       # Adjusted text overlays
+                    adjusted_script,         # Adjusted narrative script
+                    original_audio_is_key,   # Audio flag
+                    final_path,              # Output path
+                    temp_files_list,         # Temp files list
+                    adjusted_visual_cues,    # Adjusted visual cues
+                    analysis                 # Full analysis for advanced features
                 )
                 
                 if not success or not final_path.is_file():
@@ -1646,42 +2203,55 @@ def main():
                 if args.skip_upload:
                     print("  Skipping upload as requested")
                     print(f"  Final video saved at: {final_path}")
+                    
+                    # If skipping upload, keep files instead of deleting
+                    output_dir = BASE_DIR / "output_videos"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    
+                    # Copy final video to output directory
+                    final_output_path = output_dir / f"{submission.id}_{safe_title}_final.mp4"
+                    shutil.copy2(final_path, final_output_path)
+                    
+                    # Copy thumbnail if exists
+                    if thumbnail_path.is_file():
+                        thumbnail_output_path = output_dir / f"{submission.id}_{safe_title}_thumbnail.jpg"
+                        shutil.copy2(thumbnail_path, thumbnail_output_path)
+                        
+                    print(f"  Files copied to output directory: {output_dir}")
                     continue
                 
                 # Upload to YouTube
                 try:
                     print("  Uploading to YouTube...")
                     
-                    # Prepare upload metadata with more engaging but authentic format
+                    # Prepare upload metadata with enhanced narrative approach
                     suggested_title = analysis.get('suggested_title', '')
+                    narrative_style = analysis.get('narrative_style', '').capitalize()
+                    
                     if not suggested_title or contains_forbidden_words(suggested_title):
-                        # Create fallback title with subtle engagement
-                        title = f"Interesting Moment from Reddit"
+                        # Create fallback title
+                        title = f"My Take: Reddit Highlights"
                     else:
-                        # Format title for engagement without being over-the-top
-                        mood = analysis.get('mood', 'neutral')
-                        mood_emoji = {
-                            'funny': '😂', 'heartwarming': '❤️', 'informative': '📚',
-                            'suspenseful': '👀', 'action': '🔥', 'calm': '✨',
-                            'exciting': '💯', 'sad': '💭', 'shocking': '😯',
-                            'weird': '🤔', 'cringe': '😬', 'neutral': ''
-                        }.get(mood.lower(), '')
-                        
-                        # Add a single emoji prefix if appropriate for the content
-                        if mood_emoji and not any(emoji in suggested_title for emoji in '😂❤️📚👀🔥✨💯💭😯🤔😬'):
-                            title = f"{mood_emoji} {suggested_title}"
+                        # Format title to highlight transformative nature
+                        if narrative_style:
+                            title = f"{narrative_style} Take: {suggested_title}"
                         else:
-                            title = suggested_title
+                            title = f"My Analysis: {suggested_title}"
                     
                     # Limit title length
                     title = title[:70]
                     
-                    # For description: Create interest without clickbait
-                    summary = analysis.get('summary_for_description', 'Check out this Reddit video.')
+                    # Enhanced description with narrative summary
+                    summary = analysis.get('summary_for_description', 'A unique perspective on this Reddit content.')
+                    narrative_angle = analysis.get('narrative_unique_angle', '')
                     
-                    # More authentic description
+                    # Create a description that emphasizes original commentary
                     description = f"{summary}\n\n"
-                    description += "If you enjoyed this, consider subscribing for more content.\n\n"
+                    
+                    if narrative_angle:
+                        description += f"My unique take: {narrative_angle}\n\n"
+                        
+                    description += "If you enjoyed this perspective, consider subscribing for more original commentary.\n\n"
                     
                     # Add hashtags strategically
                     tags = analysis.get('hashtags', [])
@@ -1690,37 +2260,26 @@ def main():
                     if f"r/{subreddit_name}" not in tags:
                         tags.append(f"r/{subreddit_name}")
                     
-                    # Add general tags if needed
-                    if len(tags) < 5:
-                        tags.extend(['reddit', 'shorts', 'video', 'trending'])
+                    # Add tags for narrative style
+                    if narrative_style and narrative_style.lower() not in [t.lower() for t in tags]:
+                        tags.append(narrative_style.lower())
                     
-                    # Add relevant tags based on mood, but less aggressively
-                    mood_tags = {
-                        'funny': ['humor', 'comedy'],
-                        'heartwarming': ['wholesome', 'inspiring'],
-                        'suspenseful': ['unexpected', 'surprising'],
-                        'action': ['exciting', 'intense']
-                    }
-                    
-                    # Get tags for the detected mood (just add 1-2)
-                    mood = analysis.get('mood', 'neutral').lower()
-                    if mood in mood_tags:
-                        for tag in mood_tags[mood][:2]:  # Only use the first couple
-                            if tag not in tags:
-                                tags.append(tag)
-                    
-                    # Add hashtags to description (fewer)
+                    # Add hashtags to description (limited number)
                     hashtag_str = " ".join(["#" + tag.strip("#") for tag in tags[:6]])
                     description += f"\n{hashtag_str}\n\n"
                     
                     # Add source attribution
-                    description += f"Source: https://reddit.com{submission.permalink}"
+                    description += f"Original content source: https://reddit.com{submission.permalink}\n"
+                    description += "This video features substantial transformative commentary and analysis."
                     
                     # Filter out any forbidden words
                     title = ' '.join(word for word in title.split() if not contains_forbidden_words(word))
                     
+                    # Upload with custom thumbnail if available
+                    thumbnail_file = str(thumbnail_path) if thumbnail_path.is_file() else None
+                    
                     # Upload
-                    youtube_url = upload_to_youtube(final_path, title, description)
+                    youtube_url = upload_to_youtube(final_path, title, description, thumbnail_file)
                     
                     if youtube_url:
                         print(f"  Uploaded to YouTube: {youtube_url}")
