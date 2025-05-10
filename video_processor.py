@@ -8,7 +8,26 @@ import tempfile
 import yt_dlp
 from pathlib import Path
 import subprocess
-import psutil
+
+# Check for PyTorch CUDA availability
+try:
+    import torch
+    TORCH_AVAILABLE = True
+    CUDA_AVAILABLE = torch.cuda.is_available()
+    if CUDA_AVAILABLE:
+        torch.cuda.set_device(0)  # Use the first GPU
+        print(f"PyTorch CUDA is available: {torch.cuda.get_device_name(0)}")
+except ImportError:
+    TORCH_AVAILABLE = False
+    CUDA_AVAILABLE = False
+    print("PyTorch not available")
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("Warning: psutil module not available. Memory usage checks will be disabled.")
 try:
     from pynvml import nvmlInit, nvmlDeviceGetCount, nvmlDeviceGetHandleByIndex, nvmlDeviceGetMemoryInfo
     NVML_AVAILABLE = True
@@ -173,37 +192,51 @@ FFMPEG_GPU_PARAMS = {
     'threads': 4
 }
 
-# Try NVIDIA first
-try:
-    subprocess.check_output(['nvidia-smi'])
+# First check if PyTorch already detected CUDA
+if CUDA_AVAILABLE:
     GPU_AVAILABLE = True
     FFMPEG_GPU_PARAMS = {
         'codec': 'h264_nvenc',
         'preset': 'fast',
         'threads': 0
     }
-except:
-    # Try AMD
+    print("Using NVIDIA GPU detected via PyTorch CUDA")
+else:
+    # Try NVIDIA first
     try:
-        subprocess.check_output(['rocminfo'])
+        subprocess.check_output(['nvidia-smi'])
         GPU_AVAILABLE = True
         FFMPEG_GPU_PARAMS = {
-            'codec': 'h264_amf',
+            'codec': 'h264_nvenc',
             'preset': 'fast',
             'threads': 0
         }
+        print("Using NVIDIA GPU detected via nvidia-smi")
     except:
-        # Try Intel
+        # Try AMD
         try:
-            subprocess.check_output(['vainfo'])
+            subprocess.check_output(['rocminfo'])
             GPU_AVAILABLE = True
             FFMPEG_GPU_PARAMS = {
-                'codec': 'h264_qsv',
+                'codec': 'h264_amf',
                 'preset': 'fast',
                 'threads': 0
             }
+            print("Using AMD GPU detected via rocminfo")
         except:
-            GPU_AVAILABLE = False
+            # Try Intel
+            try:
+                subprocess.check_output(['vainfo'])
+                GPU_AVAILABLE = True
+                FFMPEG_GPU_PARAMS = {
+                    'codec': 'h264_qsv',
+                    'preset': 'fast',
+                    'threads': 0
+                }
+                print("Using Intel GPU detected via vainfo")
+            except:
+                GPU_AVAILABLE = False
+                print("No GPU detected, using CPU encoding")
 
 # Memory management settings
 MAX_MEMORY_USAGE = 0.8  # Max 80% of available memory
@@ -215,8 +248,16 @@ TimestampedFocusPoint = Dict[str, Union[float, FocusPoint]]  # {"time": 1.5, "po
 
 def check_memory_usage():
     """Check if memory usage is within safe limits"""
-    mem = psutil.virtual_memory()
-    return mem.percent < (MAX_MEMORY_USAGE * 100)
+    if not PSUTIL_AVAILABLE:
+        # If psutil is not available, always return True to bypass memory check
+        return True
+        
+    try:
+        mem = psutil.virtual_memory()
+        return mem.percent < (MAX_MEMORY_USAGE * 100)
+    except Exception as e:
+        print(f"Error checking memory usage: {e}. Bypassing check.")
+        return True
 
 def get_gpu_utilization():
     """Get GPU utilization percentage if available"""
@@ -731,36 +772,113 @@ def create_complex_animation(clip, animation_type="slide_in", duration=1.0):
         print(f"Fade and scale animation applied over {duration}s (simulated).")
     return clip
 
-def process_video_with_gpu_optimization(input_path, output_path, processing_func, chunk_size=30):
+def process_video_with_gpu_optimization(input_path, output_path, processing_func, chunk_size=30, watermark_path=None, loudness_lufs=None):
     """
     Process video in chunks with GPU optimization options.
-    (Placeholder for chunked processing and GPU pipeline)
-    
+    Adds watermark if provided, and normalizes audio loudness if possible.
     Args:
         input_path: Path to input video
         output_path: Path to output video
         processing_func: Function to apply to each chunk (clip -> processed_clip)
         chunk_size: Size of chunks in seconds
+        watermark_path: Path to watermark image (optional)
+        loudness_lufs: Target LUFS for normalization (optional)
     """
+    import gc
+    from moviepy.editor import ImageClip, CompositeVideoClip
+    import shutil
+    import subprocess
+    import os
     print(f"GPU optimization for {input_path} (simulated).")
-    # Basic passthrough for now, actual chunking is complex
     try:
         clip = VideoFileClip(input_path)
         processed_clip = processing_func(clip) # Apply the main processing
-        
-        # Determine if ffmpeg_params for GPU should be used
+        clips_to_composite = [processed_clip]
+        # --- Watermark logic ---
+        if watermark_path and os.path.isfile(str(watermark_path)):
+            try:
+                watermark_clip = (
+                    ImageClip(str(watermark_path))
+                    .set_duration(processed_clip.duration)
+                    .resize(height=int(processed_clip.h * 0.05))
+                    .margin(right=10, bottom=10, opacity=0)
+                    .set_pos(("right", "bottom"))
+                )
+                clips_to_composite.append(watermark_clip)
+                print("Added watermark.")
+            except Exception as e_wm:
+                print(f"Could not add watermark: {e_wm}")
+        # Composite if watermark was added
+        if len(clips_to_composite) > 1:
+            final_video = CompositeVideoClip(clips_to_composite, size=processed_clip.size)
+        else:
+            final_video = processed_clip
+        # --- Write video (single-pass, high quality) ---
         current_ffmpeg_params = FFMPEG_GPU_PARAMS if GPU_AVAILABLE else {'threads': 4, 'preset': 'medium'}
-
-        processed_clip.write_videofile(output_path, codec=current_ffmpeg_params.get('codec', 'libx264'), 
-                                       preset=current_ffmpeg_params.get('preset'),
-                                       threads=current_ffmpeg_params.get('threads'),
-                                       audio_codec="aac", logger='bar')
+        final_video.write_videofile(
+            output_path,
+            codec=current_ffmpeg_params.get('codec', 'libx264'),
+            preset=current_ffmpeg_params.get('preset'),
+            threads=current_ffmpeg_params.get('threads'),
+            audio_codec="aac", logger='bar'
+        )
+        # --- Resource cleanup before normalization ---
+        final_video.close()
+        if processed_clip is not final_video:
+            processed_clip.close()
+        if 'clip' in locals() and clip:
+            clip.close()
+        gc.collect()
+        # --- Loudness normalization ---
+        if loudness_lufs is not None:
+            try:
+                from script import check_ffmpeg_install, AUDIO_BITRATE
+            except ImportError:
+                def check_ffmpeg_install(tool_name):
+                    import subprocess
+                    try:
+                        subprocess.run([tool_name, "-version"], capture_output=True, check=True)
+                        return True
+                    except Exception:
+                        return False
+                AUDIO_BITRATE = '192k'
+            if check_ffmpeg_install("ffmpeg-normalize"):
+                normalized_path_str = str(pathlib.Path(output_path).with_suffix(".normalized.mp4"))
+                cmd_normalize = [
+                    "ffmpeg-normalize", str(output_path),
+                    "-o", normalized_path_str,
+                    "-ar", "48000",
+                    "-c:a", "aac",
+                    "-b:a", AUDIO_BITRATE,
+                    "-l", str(loudness_lufs),
+                    "-f"
+                ]
+                try:
+                    print(f"Normalizing audio for {output_path} to {loudness_lufs} LUFS...")
+                    subprocess.run(cmd_normalize, check=True, capture_output=True)
+                    shutil.move(normalized_path_str, str(output_path))
+                    print(f"Audio normalized successfully: {output_path}")
+                except subprocess.CalledProcessError as e_norm:
+                    print(f"ffmpeg-normalize failed: {e_norm.stderr.decode() if e_norm.stderr else e_norm}")
+                except Exception as e_norm_mv:
+                    print(f"Error moving normalized file: {e_norm_mv}")
+            else:
+                print("ffmpeg-normalize not found. Skipping loudness normalization.")
     except Exception as e:
         print(f"Error in process_video_with_gpu_optimization: {e}")
         raise
     finally:
-        if 'clip' in locals(): clip.close()
-        if 'processed_clip' in locals() and hasattr(processed_clip, 'close'): processed_clip.close()
+        # Ensure all clips are closed to release resources
+        if 'clip' in locals():
+            try: clip.close()
+            except: pass
+        if 'processed_clip' in locals() and hasattr(processed_clip, 'close'):
+            try: processed_clip.close()
+            except: pass
+        if 'final_video' in locals() and hasattr(final_video, 'close'):
+            try: final_video.close()
+            except: pass
+        gc.collect()
 
 
 def _prepare_initial_video(submission, safe_title: str, temp_files: list) -> Tuple[Optional[Path], float, int, int]:

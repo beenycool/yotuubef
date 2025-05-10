@@ -198,3 +198,43 @@ token.json
 
 # OAuth tokens
 *token*
+
+# Sensitive credentials
+youtube_token.json
+credentials.json
+.env
+client_secret*.json
+
+# Database
+*.db
+*.sqlite3
+
+# Environment
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Temporary and output files
+temp_processing/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
