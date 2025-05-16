@@ -1,4 +1,4 @@
-from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip, CompositeAudioClip
+from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip, CompositeAudioClip, ColorClip, ImageClip, AudioFileClip
 import moviepy.video.fx.all as vfx
 import math
 import numpy as np
@@ -8,6 +8,17 @@ import tempfile
 import yt_dlp
 from pathlib import Path
 import subprocess
+import gc
+import logging
+import psutil
+import pathlib
+from PIL import Image
+import shutil
+
+# Constants
+TARGET_RESOLUTION = (1080, 1920)  # Width, Height for vertical video
+TEMP_DIR = Path(tempfile.gettempdir()) / "video_processing"
+TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Check for PyTorch CUDA availability
 try:
@@ -276,126 +287,92 @@ def get_gpu_utilization():
     except:
         return None
 
-def create_short_clip(video_path, output_path, start_time, end_time, focus_points, text_overlays=None):
-    """
-    Creates a short video clip, cropped to 9:16 aspect ratio centered
-    around the provided focus_point(s).
-    
-    Args:
-        video_path: Path to the input video file
-        output_path: Path to save the output video
-        start_time: Start time of the clip in seconds
-        end_time: End time of the clip in seconds
-        focus_points: Either a single focus point {"x": 0.7, "y": 0.3} or
-                     a list of timestamped focus points for dynamic panning
-                     [{"time": 1.5, "point": {"x": 0.7, "y": 0.3}}, ...]
-    """
+def create_short_clip(video_path: str, output_path: str, start_time: float, end_time: float, focus_points: List[Dict]) -> bool:
+    """Creates a short clip from the video with proper formatting."""
     try:
-        # Check memory before processing
-        if not check_memory_usage():
-            raise MemoryError("System memory usage too high for safe video processing")
-            
-        # Check GPU utilization if available
-        gpu_util = get_gpu_utilization()
-        if gpu_util and gpu_util > 90:
-            print("Warning: High GPU utilization detected - performance may be degraded")
-            
-        # Process in chunks if video is longer than 2 minutes
-        clip_duration = end_time - start_time
-        if clip_duration > 120:
-            print(f"Processing long video ({clip_duration}s) in chunks...")
-            # Chunk processing logic would go here
-            # For now we'll proceed with original approach
-            # but with memory monitoring
-            
-        clip = VideoFileClip(video_path).subclip(start_time, end_time)
-        original_width, original_height = clip.size
-        target_aspect_ratio = 9 / 16
-        clip_duration = clip.duration
-
-        # Determine target dimensions for 9:16 crop
-        if original_width / original_height > target_aspect_ratio:
-            # Original is wider than 9:16 (e.g., 16:9) - crop sides
-            new_height = original_height
-            new_width = math.ceil(new_height * target_aspect_ratio) # Use ceil to avoid rounding issues
-        else:
-            # Original is taller than or equal to 9:16 - crop top/bottom
-            new_width = original_width
-            new_height = math.ceil(new_width / target_aspect_ratio) # Use ceil
+        # Force garbage collection before starting
+        gc.collect()
         
-        # Normalize focus points to a list of timestamped points
-        timestamped_focus_points = normalize_focus_points(focus_points, start_time, clip_duration)
+        # Calculate memory requirements
+        file_size = os.path.getsize(video_path)
+        system_memory = psutil.virtual_memory()
+        required_memory = file_size * 3  # Rough estimate for processing overhead
         
-        if not timestamped_focus_points: # Should be handled by normalize_focus_points, but as a safeguard
-             print("Warning: No valid focus points after normalization. Defaulting to static center crop.")
-             cropped_clip = apply_static_crop(clip, {"x": 0.5, "y": 0.5}, new_width, new_height, original_width, original_height)
-        elif len(timestamped_focus_points) == 1:
-            # Static crop with a single focus point
-            print("Using static crop with single focus point")
-            focus_point = timestamped_focus_points[0]["point"]
-            cropped_clip = apply_static_crop(clip, focus_point, new_width, new_height, original_width, original_height)
-        else:
-            # Dynamic panning between multiple focus points
-            print(f"Using dynamic panning with {len(timestamped_focus_points)} focus points")
-            cropped_clip = apply_dynamic_panning(clip, timestamped_focus_points, new_width, new_height, original_width, original_height)
-
-
-        # Resize to standard short resolution (1080x1920)
-        target_height = 1920
-        target_width = 1080
-        final_clip = cropped_clip.resize(height=target_height)
-
-        # Add text overlays with fade animations if provided
-        if text_overlays:
-            clips_to_composite = [final_clip]
-            for overlay in text_overlays:
-                style = TEXT_STYLES.get(overlay.get("style", "caption"), {})
-                txt_clip = TextClip(
-                    overlay["text"],
-                    fontsize=style.get("fontsize", 30),
-                    color=style.get("color", "white"),
-                    font=style.get("font", "Arial"),
-                    stroke_color=style.get("stroke_color", None),
-                    stroke_width=style.get("stroke_width", 0),
-                    align=style.get("align", "center")
-                ).set_position(overlay.get("position", "center"))
-                
-                # Apply fade in/out if specified
-                if overlay.get("fade_in", 0) > 0:
-                    txt_clip = txt_clip.crossfadein(overlay["fade_in"])
-                if overlay.get("fade_out", 0) > 0:
-                    txt_clip = txt_clip.crossfadeout(overlay["fade_out"])
-                
-                # Set duration and start time
-                txt_clip = txt_clip.set_start(overlay.get("start_time", 0))
-                txt_clip = txt_clip.set_duration(overlay.get("duration", final_clip.duration))
-                
-                clips_to_composite.append(txt_clip)
+        if required_memory > system_memory.available:
+            logging.error(f"Insufficient memory available. Need ~{required_memory/(1024*1024*1024):.1f}GB, have {system_memory.available/(1024*1024*1024):.1f}GB free")
+            return False
             
-            final_clip = CompositeVideoClip(clips_to_composite)
-
-
-        print(f"Writing final clip to: {output_path}")
-        print(f"Using {'GPU' if GPU_AVAILABLE else 'CPU'} acceleration")
-        final_clip.write_videofile(
-            output_path,
-            audio_codec="aac",
-            logger='bar',
-            **FFMPEG_GPU_PARAMS
-        )
-
+        with VideoFileClip(video_path) as video:
+            # Extract the segment
+            video = video.subclip(start_time, end_time)
+            
+            # Get dimensions for vertical format
+            target_width = 1080  # Width for vertical video
+            target_height = 1920  # Height for vertical video
+            
+            # Calculate crop dimensions
+            source_ar = video.w / video.h
+            target_ar = target_width / target_height
+            
+            if source_ar > target_ar:  # Source is wider
+                crop_width = int(video.h * target_ar)
+                crop_height = video.h
+            else:  # Source is taller
+                crop_width = video.w
+                crop_height = int(video.w / target_ar)
+            
+            # Center crop by default
+            x_center = video.w / 2
+            y_center = video.h / 2
+            
+            # Apply focus points if available
+            if focus_points:
+                # Get the focus point for current time
+                current_point = focus_points[0]  # Default to first point
+                for point in focus_points:
+                    if point['time'] <= video.duration:
+                        current_point = point
+                    else:
+                        break
+                
+                # Extract x,y ratios from point
+                x_ratio = current_point['point'].get('x_ratio', 0.5)
+                y_ratio = current_point['point'].get('y_ratio', 0.5)
+                
+                # Calculate center points based on ratios
+                x_center = video.w * x_ratio
+                y_center = video.h * y_ratio
+            
+            # Ensure crop region stays within video bounds
+            x1 = max(0, min(video.w - crop_width, x_center - crop_width/2))
+            y1 = max(0, min(video.h - crop_height, y_center - crop_height/2))
+            
+            # Crop and resize
+            video = video.crop(x1=x1, y1=y1, width=crop_width, height=crop_height)
+            video = video.resize((target_width, target_height))
+            
+            # Write the output file
+            video.write_videofile(
+                output_path,
+                codec='libx264',
+                audio_codec='aac',
+                temp_audiofile='temp-audio.m4a',
+                remove_temp=True,
+                audio=True,
+                threads=4,  # Limit threads to reduce memory usage
+                preset='medium',  # Use a faster preset to reduce memory usage
+                ffmpeg_params=['-crf', '23']  # Balanced quality/size
+            )
+            
+            # Force cleanup
+            video.close()
+            gc.collect()
+            
+            return True
+            
     except Exception as e:
-        print(f"Error processing video {video_path}: {e}")
-        # Optionally re-raise the exception or handle it as needed
-        raise
-    finally:
-        # Ensure clips are closed to release resources
-        if 'clip' in locals() and clip:
-            clip.close()
-        if 'cropped_clip' in locals() and cropped_clip:
-            cropped_clip.close()
-        if 'final_clip' in locals() and final_clip:
-            final_clip.close()
+        logging.error(f"Error processing video {video_path}: {str(e)}")
+        return False
 
 def normalize_focus_points(focus_points, start_time: float, clip_duration: float) -> List[Dict]:
     """
@@ -784,16 +761,12 @@ def process_video_with_gpu_optimization(input_path, output_path, processing_func
         watermark_path: Path to watermark image (optional)
         loudness_lufs: Target LUFS for normalization (optional)
     """
-    import gc
-    from moviepy.editor import ImageClip, CompositeVideoClip
-    import shutil
-    import subprocess
-    import os
     print(f"GPU optimization for {input_path} (simulated).")
     try:
-        clip = VideoFileClip(input_path)
+        clip = VideoFileClip(str(input_path))
         processed_clip = processing_func(clip) # Apply the main processing
         clips_to_composite = [processed_clip]
+        
         # --- Watermark logic ---
         if watermark_path and os.path.isfile(str(watermark_path)):
             try:
@@ -808,20 +781,24 @@ def process_video_with_gpu_optimization(input_path, output_path, processing_func
                 print("Added watermark.")
             except Exception as e_wm:
                 print(f"Could not add watermark: {e_wm}")
+                
         # Composite if watermark was added
         if len(clips_to_composite) > 1:
             final_video = CompositeVideoClip(clips_to_composite, size=processed_clip.size)
         else:
             final_video = processed_clip
+            
         # --- Write video (single-pass, high quality) ---
         current_ffmpeg_params = FFMPEG_GPU_PARAMS if GPU_AVAILABLE else {'threads': 4, 'preset': 'medium'}
         final_video.write_videofile(
-            output_path,
+            str(output_path),
             codec=current_ffmpeg_params.get('codec', 'libx264'),
-            preset=current_ffmpeg_params.get('preset'),
-            threads=current_ffmpeg_params.get('threads'),
-            audio_codec="aac", logger='bar'
+            preset=current_ffmpeg_params.get('preset', 'medium'),
+            threads=current_ffmpeg_params.get('threads', 4),
+            audio_codec="aac",
+            logger='bar'
         )
+        
         # --- Resource cleanup before normalization ---
         final_video.close()
         if processed_clip is not final_video:
@@ -829,19 +806,18 @@ def process_video_with_gpu_optimization(input_path, output_path, processing_func
         if 'clip' in locals() and clip:
             clip.close()
         gc.collect()
+        
         # --- Loudness normalization ---
         if loudness_lufs is not None:
-            try:
-                from script import check_ffmpeg_install, AUDIO_BITRATE
-            except ImportError:
-                def check_ffmpeg_install(tool_name):
-                    import subprocess
-                    try:
-                        subprocess.run([tool_name, "-version"], capture_output=True, check=True)
-                        return True
-                    except Exception:
-                        return False
-                AUDIO_BITRATE = '192k'
+            AUDIO_BITRATE = '192k'  # Default audio bitrate
+            
+            def check_ffmpeg_install(tool_name):
+                try:
+                    subprocess.run([tool_name, "-version"], capture_output=True, check=True)
+                    return True
+                except Exception:
+                    return False
+                    
             if check_ffmpeg_install("ffmpeg-normalize"):
                 normalized_path_str = str(pathlib.Path(output_path).with_suffix(".normalized.mp4"))
                 cmd_normalize = [
@@ -864,9 +840,11 @@ def process_video_with_gpu_optimization(input_path, output_path, processing_func
                     print(f"Error moving normalized file: {e_norm_mv}")
             else:
                 print("ffmpeg-normalize not found. Skipping loudness normalization.")
+                
     except Exception as e:
         print(f"Error in process_video_with_gpu_optimization: {e}")
         raise
+        
     finally:
         # Ensure all clips are closed to release resources
         if 'clip' in locals():
