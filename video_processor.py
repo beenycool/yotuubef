@@ -1,4 +1,4 @@
-from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip, CompositeAudioClip, ColorClip, ImageClip, AudioFileClip
+from moviepy.editor import VideoFileClip, CompositeVideoClip, TextClip, CompositeAudioClip, ColorClip, ImageClip, AudioFileClip, concatenate_videoclips
 import moviepy.video.fx.all as vfx
 import math
 import numpy as np
@@ -783,7 +783,7 @@ def process_video_with_gpu_optimization(input_path, output_path, processing_func
                 print(f"Could not add watermark: {e_wm}")
                 
         # Composite if watermark was added
-        if len(clips_to_composite) > 1:
+        if len(clips_to_composite > 1):
             final_video = CompositeVideoClip(clips_to_composite, size=processed_clip.size)
         else:
             final_video = processed_clip
@@ -857,6 +857,34 @@ def process_video_with_gpu_optimization(input_path, output_path, processing_func
             try: final_video.close()
             except: pass
         gc.collect()
+
+
+def mute_sections(clip, mute_ranges):
+    """
+    Mutes specific time ranges of a video clip.
+    mute_ranges should be a list of [start, end] times.
+    """
+    if not mute_ranges:
+        return clip
+
+    # Create a new audio array with muted sections
+    audio = clip.audio
+    # Build a list of (start, end, volume) tuples
+    intervals = []
+    last_end = 0
+    for start, end in sorted(mute_ranges):
+        if start > last_end:
+            intervals.append((last_end, start, 1.0))  # normal volume
+        intervals.append((start, end, 0.0))  # muted
+        last_end = end
+    if last_end < clip.duration:
+        intervals.append((last_end, clip.duration, 1.0))
+
+    # Create subclips for each interval and set volume
+    audio_segments = [audio.subclip(start, end).volumex(vol) for start, end, vol in intervals if end > start]
+    from moviepy.audio.AudioClip import concatenate_audioclips
+    new_audio = concatenate_audioclips(audio_segments)
+    return clip.set_audio(new_audio)
 
 
 def _prepare_initial_video(submission, safe_title: str, temp_files: list) -> Tuple[Optional[Path], float, int, int]:

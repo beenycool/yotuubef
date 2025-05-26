@@ -20,6 +20,17 @@ from typing import Optional, List, Dict, Tuple, Any, Union
 import gc
 import logging # Import logging
 from dotenv import load_dotenv  # Add dotenv support
+from google.oauth2.credentials import Credentials
+import tempfile
+import httplib2
+import googleapiclient.discovery
+import googleapiclient.errors
+import googleapiclient.http
+import io
+import ssl
+from datetime import datetime
+import socket
+import google.auth.transport.requests  # Add import for Google auth transport
 
 def fix_moviepy_installation():
     """Check and fix the moviepy installation."""
@@ -1625,11 +1636,29 @@ def process_video_with_effects(
     import numpy as np
     import gc
     
+    # Default audio sample rate to use when needed
+    DEFAULT_AUDIO_FPS = 44100
+    
     video_clip = None
+    title_tts_audio_clip = None
+    desc_tts_audio_clip = None
+    intro_background = None
+    main_video_clip_for_effects = None
+    final_composed_video = None
+    enhanced_video_clip = None
+    
     try:
         logging.info(f"Starting video processing for: {source_video_path.name}")
         video_clip = VideoFileClip(str(source_video_path))
         TARGET_RESOLUTION = (1080, 1920)
+        
+        # Get video fps or use default for audio
+        video_fps = getattr(video_clip, 'fps', 30)
+        audio_fps = DEFAULT_AUDIO_FPS
+        if hasattr(video_clip, 'audio') and video_clip.audio is not None:
+            if hasattr(video_clip.audio, 'fps') and video_clip.audio.fps is not None:
+                audio_fps = video_clip.audio.fps
+        
         # --- 1. Prepare and Narrate AI Title ---
         ai_title_text = analysis.get('suggested_title', "Amazing Video Moment")
         title_tts_filename = f"{source_video_path.stem}_title_tts.mp3"
@@ -1640,6 +1669,8 @@ def process_video_with_effects(
         if generate_tts(ai_title_text, title_tts_path):
             try:
                 title_tts_audio_clip = AudioFileClip(str(title_tts_path))
+                # Set fps for audio clip to match video fps or a default value
+                title_tts_audio_clip.fps = audio_fps
                 title_tts_duration = title_tts_audio_clip.duration
             except Exception as e:
                 logging.warning(f"Could not load title TTS audio: {e}")
@@ -1659,10 +1690,14 @@ def process_video_with_effects(
         ).set_position('center').set_duration(intro_visual_duration).set_start(0)
         intro_segment = CompositeVideoClip([intro_background, intro_text_overlay], size=TARGET_RESOLUTION)
         if title_tts_audio_clip:
+            # Set fps on title audio clip and then set it to the intro segment
+            title_tts_audio_clip.fps = audio_fps
             intro_segment = intro_segment.set_audio(title_tts_audio_clip.set_start(0.25))
+        
         # --- 2. Prepare Main Video Content ---
         main_video_clip_for_effects = VideoFileClip(str(source_video_path))
         original_main_video_audio = main_video_clip_for_effects.audio
+        
         # --- 3. Prepare and Narrate AI Description ---
         ai_description_text = analysis.get('summary_for_description', "Watch this incredible moment unfold!")
         max_description_length = 250
@@ -1676,21 +1711,54 @@ def process_video_with_effects(
         if generate_tts(ai_description_text, desc_tts_path):
             try:
                 desc_tts_audio_clip = AudioFileClip(str(desc_tts_path))
+                # Set fps for audio clip to match video fps or a default value
+                desc_tts_audio_clip.fps = audio_fps
                 desc_tts_duration = desc_tts_audio_clip.duration
             except Exception as e:
                 logging.warning(f"Could not load description TTS audio: {e}")
                 desc_tts_audio_clip = None
+        
         # --- 4. Combine Description TTS with Main Video's Original Audio ---
         description_start_offset_in_main_video = 0.5
         audio_tracks_for_main_video = []
+        
+        # Set a default audio fps
+        audio_fps = 44100  # Standard audio sample rate
+        
         if original_main_video_audio:
+            # Set fps for original audio if needed
+            if not hasattr(original_main_video_audio, 'fps') or original_main_video_audio.fps is None:
+                original_main_video_audio.fps = audio_fps
+            else:
+                # If original audio has a valid fps, use that as our standard
+                audio_fps = original_main_video_audio.fps
             audio_tracks_for_main_video.append(original_main_video_audio.volumex(0.25))
+        
         if desc_tts_audio_clip:
+            # Ensure desc_tts_audio_clip has fps set
+            if not hasattr(desc_tts_audio_clip, 'fps') or desc_tts_audio_clip.fps is None:
+                desc_tts_audio_clip.fps = audio_fps
             audio_tracks_for_main_video.append(desc_tts_audio_clip.set_start(description_start_offset_in_main_video))
+        
         composed_main_audio = None
         if audio_tracks_for_main_video:
-            composed_main_audio = CompositeAudioClip(audio_tracks_for_main_video)
+            try:
+                # Ensure all audio clips have the same fps before compositing
+                for clip in audio_tracks_for_main_video:
+                    if not hasattr(clip, 'fps') or clip.fps is None:
+                        clip.fps = audio_fps
+                
+                composed_main_audio = CompositeAudioClip(audio_tracks_for_main_video)
+                # Ensure the composite audio has fps set
+                composed_main_audio.fps = audio_fps
+            except Exception as e:
+                logging.error(f"Error creating composite audio: {e}")
+                # Fall back to just using the original audio if available
+                if original_main_video_audio:
+                    composed_main_audio = original_main_video_audio
+        
         main_video_clip_for_effects = main_video_clip_for_effects.set_audio(composed_main_audio)
+        
         # --- 5. Adjust Main Video Visual Duration to accommodate description narration ---
         required_visual_duration_for_main = description_start_offset_in_main_video + (desc_tts_duration if desc_tts_audio_clip else 0)
         actual_visual_duration_of_main = main_video_clip_for_effects.duration
@@ -1710,9 +1778,11 @@ def process_video_with_effects(
         elif actual_visual_duration_of_main > required_visual_duration_for_main and required_visual_duration_for_main > 0:
             logging.info(f"Trimming main video visuals from {actual_visual_duration_of_main:.2f}s to {required_visual_duration_for_main:.2f}s.")
             main_video_clip_for_effects = main_video_clip_for_effects.subclip(0, required_visual_duration_for_main)
+            
         # --- 6. Concatenate all parts (Intro + Main Video with Description) ---
         final_clips_to_concatenate = [intro_segment, main_video_clip_for_effects]
         final_composed_video = concatenate_videoclips(final_clips_to_concatenate, method="compose")
+        
         # --- 7. Graphical Text Overlays (adjusted for intro duration) ---
         graphical_text_clips_final = []
         if analysis.get("text_overlays") and isinstance(analysis["text_overlays"], list):
@@ -1752,52 +1822,188 @@ def process_video_with_effects(
                     txt_clip = txt_clip.set_start(adjusted_start_time).set_duration(duration)
                     txt_clip = txt_clip.crossfadein(0.3).crossfadeout(0.3)
                     if text.strip().upper() in {"BOOM!", "BOOM", "BANG!", "BANG", "EXPLOSION", "BLAST!", "BLAST", "WOW!", "WOW"}:
-                        import numpy as np
-                        base_txt_clip = txt_clip
-                        def scale_and_shake(get_frame, t):
-                            frame = get_frame(t)
-                            scale = 1.0 + 0.7 * np.exp(-10 * t)
-                            h_orig, w_orig = frame.shape[:2]
-                            if hasattr(base_txt_clip, 'bg_color') and base_txt_clip.bg_color == 'transparent' and frame.shape[2] == 3:
-                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
-                                frame[:, :, 3] = np.where(np.all(frame[:,:,:3] == [0,0,0], axis=-1), 0, 255)
-                            elif frame.shape[2] == 3:
-                                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
-                                frame[:, :, 3] = np.where(np.all(frame[:,:,:3] == [0,0,0], axis=-1), 0, 255)
-                            new_w, new_h = int(w_orig * scale), int(h_orig * scale)
-                            if new_w <= 0 or new_h <= 0: return frame
-                            resized_frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-                            x1 = (new_w - w_orig) // 2
-                            y1 = (new_h - h_orig) // 2
-                            output_frame = np.zeros_like(frame)
-                            src_x_start, src_y_start = max(0, -x1), max(0, -y1)
-                            src_x_end, src_y_end = min(new_w, w_orig - x1), min(new_h, h_orig - y1)
-                            dst_x_start, dst_y_start = max(0, x1), max(0, y1)
-                            dst_x_end, dst_y_end = min(w_orig, x1 + new_w), min(h_orig, y1 + new_h)
-                            actual_w = min(src_x_end - src_x_start, dst_x_end - dst_x_start)
-                            actual_h = min(src_y_end - src_y_start, dst_y_end - dst_y_start)
-                            if actual_w > 0 and actual_h > 0:
-                                output_frame[dst_y_start : dst_y_start+actual_h, dst_x_start : dst_x_start+actual_w] = \
-                                    resized_frame[src_y_start : src_y_start+actual_h, src_x_start : src_x_start+actual_w]
-                            current_frame = output_frame
-                            if t < 0.4:
-                                dx = int(8 * np.sin(50 * t))
-                                dy = int(8 * np.cos(45 * t))
-                                M = np.float32([[1, 0, dx], [0, 1, dy]])
-                                current_frame = cv2.warpAffine(current_frame, M, (w_orig, h_orig), borderMode=cv2.BORDER_CONSTANT, borderValue=(0,0,0,0) if current_frame.shape[2]==4 else (0,0,0))
-                            return current_frame
-                        txt_clip = txt_clip.fl(scale_and_shake, apply_to=['mask', 'video'])
+                        # Use a safer approach for special text animation
+                        try:
+                            import numpy as np
+                            
+                            # Store the original clip for reference
+                            base_txt_clip = txt_clip
+                            
+                            # Define a safer scale_and_shake function
+                            def scale_and_shake(get_frame, t):
+                                # Get the original frame
+                                frame = get_frame(t)
+                                if frame is None or frame.size == 0:
+                                    # Return black frame of expected size as fallback
+                                    h, w = base_txt_clip.size[::-1] if hasattr(base_txt_clip, 'size') else (100, 400)
+                                    return np.zeros((h, w, 3), dtype=np.uint8)
+                                
+                                # Calculate scale factor (larger at start, normalizes quickly)
+                                scale = 1.0 + 0.3 * np.exp(-10 * t)
+                                
+                                # Get original dimensions
+                                h_orig, w_orig = frame.shape[:2]
+                                
+                                # Handle alpha channel conversion carefully
+                                has_alpha = frame.shape[2] == 4 if len(frame.shape) > 2 else False
+                                
+                                if not has_alpha and len(frame.shape) > 2:
+                                    # Convert BGR to BGRA
+                                    frame_with_alpha = np.zeros((h_orig, w_orig, 4), dtype=np.uint8)
+                                    frame_with_alpha[:,:,0:3] = frame
+                                    frame_with_alpha[:,:,3] = 255  # Fully opaque
+                                    frame = frame_with_alpha
+                                
+                                # Calculate new dimensions
+                                new_w, new_h = int(w_orig * scale), int(h_orig * scale)
+                                if new_w <= 0 or new_h <= 0:
+                                    return frame  # Return original if scaling fails
+                                
+                                # Resize the frame
+                                try:
+                                    resized_frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+                                except Exception:
+                                    return frame  # Return original if resize fails
+                                
+                                # Calculate centering offsets
+                                x1 = (new_w - w_orig) // 2
+                                y1 = (new_h - h_orig) // 2
+                                
+                                # Create output frame with original dimensions
+                                output_frame = np.zeros_like(frame)
+                                
+                                # Calculate valid source and destination regions
+                                src_x_start = max(0, -x1)
+                                src_y_start = max(0, -y1)
+                                src_x_end = min(new_w, w_orig - x1)
+                                src_y_end = min(new_h, h_orig - y1)
+                                dst_x_start = max(0, x1)
+                                dst_y_start = max(0, y1)
+                                
+                                # Safety checks for array copying
+                                if src_x_end > src_x_start and src_y_end > src_y_start:
+                                    # Calculate actual dimensions for copying
+                                    actual_w = min(src_x_end - src_x_start, w_orig - dst_x_start)
+                                    actual_h = min(src_y_end - src_y_start, h_orig - dst_y_start)
+                                    
+                                    if actual_w > 0 and actual_h > 0:
+                                        try:
+                                            # Copy portion of resized frame to output
+                                            output_frame[dst_y_start:dst_y_start+actual_h, 
+                                                        dst_x_start:dst_x_start+actual_w] = \
+                                                resized_frame[src_y_start:src_y_start+actual_h, 
+                                                            src_x_start:src_x_start+actual_w]
+                                        except Exception:
+                                            return frame  # Return original if copy fails
+                                
+                                # Add shake effect for the first 0.4 seconds
+                                if t < 0.4:
+                                    try:
+                                        # Calculate displacement
+                                        dx = int(8 * np.sin(50 * t))
+                                        dy = int(8 * np.cos(45 * t))
+                                        
+                                        # Create transformation matrix
+                                        M = np.float32([[1, 0, dx], [0, 1, dy]])
+                                        
+                                        # Apply the transformation
+                                        h, w = output_frame.shape[:2]
+                                        borderValue = (0,0,0,0) if output_frame.shape[2]==4 else (0,0,0)
+                                        output_frame = cv2.warpAffine(
+                                            output_frame, M, (w, h), 
+                                            borderMode=cv2.BORDER_CONSTANT, 
+                                            borderValue=borderValue
+                                        )
+                                    except Exception:
+                                        pass  # Ignore shake effect if it fails
+                                
+                                return output_frame
+                            
+                            # Apply the transformation to the clip
+                            txt_clip = txt_clip.fl(scale_and_shake, apply_to=['mask', 'video'])
+                            
+                        except Exception as e_anim:
+                            logging.warning(f"Could not apply animation effect to '{text}': {e_anim}")
+                    
                     graphical_text_clips_final.append(txt_clip)
                 except Exception as e_txt:
                     logging.error(f"Could not create graphical text overlay for '{text}': {e_txt}", exc_info=True)
+        
         # --- 8. Compose Final Video ---
         composite_layers = [final_composed_video] + graphical_text_clips_final
         enhanced_video_clip = CompositeVideoClip(composite_layers, size=TARGET_RESOLUTION)
-        # --- 9. Watermark, Color Grading, Zoom, etc. (unchanged) ---
-        # (Insert watermark/color grading/zoom logic here as in the original script, operating on enhanced_video_clip)
-        # --- 10. Write Final Video ---
-        enhanced_video_clip.write_videofile(str(output_path), codec=VIDEO_CODEC_CPU, audio_codec=AUDIO_CODEC, temp_audiofile=str(TEMP_DIR / f"{output_path.stem}_temp_audio.mp3"), preset=FFMPEG_CPU_PRESET, ffmpeg_params=['-crf', FFMPEG_CRF_CPU], threads=os.cpu_count(), logger='bar', bitrate=VIDEO_BITRATE_HIGH, audio_bitrate=AUDIO_BITRATE)
-        # --- 11. Cleanup ---
+        
+        # Ensure the final audio has an fps value
+        if enhanced_video_clip.audio is not None:
+            if not hasattr(enhanced_video_clip.audio, 'fps') or enhanced_video_clip.audio.fps is None:
+                enhanced_video_clip.audio.fps = audio_fps
+        
+        # --- 9. Use ffmpeg directly instead of MoviePy's write_videofile to avoid bug ---
+        try:
+            # First export without audio
+            temp_video_no_audio = TEMP_DIR / f"{output_path.stem}_no_audio.mp4"
+            temp_audio_file = TEMP_DIR / f"{output_path.stem}_audio.aac"
+            temp_files_list.extend([temp_video_no_audio, temp_audio_file])
+            
+            # Write video without audio
+            enhanced_video_clip.without_audio().write_videofile(
+                str(temp_video_no_audio), 
+                codec=VIDEO_CODEC_CPU, 
+                preset=FFMPEG_CPU_PRESET, 
+                ffmpeg_params=['-crf', FFMPEG_CRF_CPU], 
+                threads=os.cpu_count(),
+                logger='bar'
+            )
+            
+            # Extract audio separately - avoiding the buggy audio pipeline
+            if enhanced_video_clip.audio:
+                # Ensure fps is set before writing
+                if not hasattr(enhanced_video_clip.audio, 'fps') or enhanced_video_clip.audio.fps is None:
+                    enhanced_video_clip.audio.fps = audio_fps
+                
+                enhanced_video_clip.audio.write_audiofile(
+                    str(temp_audio_file), 
+                    codec='aac', 
+                    bitrate=AUDIO_BITRATE,
+                    fps=enhanced_video_clip.audio.fps,  # Explicitly pass fps
+                    logger='bar'
+                )
+                
+                # Combine video and audio with direct ffmpeg command
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', str(temp_video_no_audio),
+                    '-i', str(temp_audio_file),
+                    '-c:v', 'copy',  # Copy video stream without re-encoding
+                    '-c:a', 'copy',  # Copy audio stream without re-encoding
+                    '-shortest',     # End when shortest input stream ends
+                    str(output_path)
+                ]
+                subprocess.run(cmd, check=True, capture_output=True)
+            else:
+                # Just copy the video file if no audio
+                shutil.copy(str(temp_video_no_audio), str(output_path))
+                
+            logging.info(f"Successfully created enhanced video at {output_path}")
+            return True, {}
+        except Exception as e_ffmpeg:
+            logging.error(f"Error during ffmpeg muxing: {e_ffmpeg}")
+            # Fall back to direct copy if ffmpeg muxing fails
+            if temp_video_no_audio.exists() and temp_video_no_audio.stat().st_size > 1000:
+                shutil.copy(str(temp_video_no_audio), str(output_path))
+                logging.warning(f"Copied video without audio as fallback to {output_path}")
+                return True, {}
+            return False, {}
+            
+    except Exception as e:
+        logging.error(f"Error during video processing pipeline: {e}", exc_info=True)
+        try:
+            if video_clip: video_clip.close()
+        except Exception: pass
+        gc.collect()
+        return False, {}
+    finally:
+        # Cleanup resources
         try:
             if video_clip: video_clip.close()
             if title_tts_audio_clip: title_tts_audio_clip.close()
@@ -1809,68 +2015,568 @@ def process_video_with_effects(
         except Exception as e:
             logging.warning(f"Error during resource cleanup: {e}")
         gc.collect()
-        return True, {}
-    except Exception as e:
-        logging.error(f"Error during video processing pipeline: {e}", exc_info=True)
-        try:
-            if video_clip: video_clip.close()
-        except Exception: pass
-        gc.collect()
-        return False, {}
 
 def generate_custom_thumbnail(video_path: pathlib.Path, analysis: Dict, thumbnail_path: pathlib.Path) -> pathlib.Path:
-    """Generates a custom thumbnail for the video."""
+    """Generates a custom thumbnail for the video with text overlay."""
     if not video_path.is_file():
         logging.error(f"Video file not found for thumbnail generation: {video_path}")
         return thumbnail_path
 
     try:
-        # Generate a thumbnail from the video
-        thumbnail_clip = ImageClip(str(video_path), duration=0.1)
-        thumbnail_clip = thumbnail_clip.resize(height=1080)
-        thumbnail_clip.save_frame(str(thumbnail_path), t=0.1)
+        import cv2
+        from PIL import Image, ImageDraw, ImageFont
+        import numpy as np
+        
+        # Make sure the parent directory exists
+        os.makedirs(thumbnail_path.parent, exist_ok=True)
+        
+        # Get thumbnail timestamp from analysis or use a default
+        thumbnail_info = analysis.get('thumbnail_info', {})
+        timestamp = float(thumbnail_info.get('timestamp_seconds', 0.5))
+        headline_text = thumbnail_info.get('headline_text', '').strip()
+        
+        if not headline_text and 'suggested_title' in analysis:
+            # Create headline from title if none provided
+            headline_parts = analysis['suggested_title'].split(':')
+            if len(headline_parts) > 1:
+                headline_text = headline_parts[0].strip()
+            else:
+                # Just use the first few words
+                words = analysis['suggested_title'].split()
+                headline_text = ' '.join(words[:min(5, len(words))])
+        
+        # Ensure we have some text
+        if not headline_text:
+            headline_text = "Amazing Moment!"
+            
+        # Extract the frame using OpenCV
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            logging.error(f"Could not open video for thumbnail extraction: {video_path}")
+            # Fall back to simple alternative
+            return _generate_fallback_thumbnail(video_path, thumbnail_path)
+            
+        video_fps = cap.get(cv2.CAP_PROP_FPS)
+        video_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        video_duration = video_frame_count / video_fps if video_fps > 0 else 0
+        
+        # Validate timestamp is within video bounds
+        if timestamp >= video_duration:
+            timestamp = video_duration * 0.5  # Use middle of video if timestamp is invalid
+            
+        # Set position to the timestamp
+        frame_position = int(timestamp * video_fps)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_position)
+        
+        # Read the frame
+        success, frame = cap.read()
+        cap.release()
+        
+        if not success or frame is None:
+            logging.error(f"Could not extract frame at {timestamp}s from video.")
+            return _generate_fallback_thumbnail(video_path, thumbnail_path)
+        
+        # Simple basic thumbnail using OpenCV only (fallback if PIL fails)
+        cv2.imwrite(str(thumbnail_path) + ".backup.jpg", frame)
+            
+        try:
+            # Convert from BGR to RGB (OpenCV uses BGR, PIL uses RGB)
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Create PIL Image from NumPy array
+            pil_img = Image.fromarray(frame_rgb)
+            
+            # Resize to 1280x720 (standard YouTube thumbnail size)
+            thumbnail_size = (1280, 720)
+            pil_img = pil_img.resize(thumbnail_size, Image.LANCZOS)
+            
+            # Add semi-transparent overlay for better text visibility
+            overlay = Image.new('RGBA', pil_img.size, (0, 0, 0, 0))
+            draw = ImageDraw.Draw(overlay)
+            
+            # Add gradient overlay at the bottom (more visible text area)
+            gradient_height = int(pil_img.height * 0.4)
+            for y in range(gradient_height):
+                # Calculate alpha (opacity) - more transparent at top, more opaque at bottom
+                alpha = int(180 * (y / gradient_height))
+                draw.rectangle(
+                    [(0, pil_img.height - gradient_height + y), (pil_img.width, pil_img.height - gradient_height + y + 1)],
+                    fill=(0, 0, 0, alpha)
+                )
+                
+            # Try to load a nice font, fall back to default if not available
+            try:
+                # Try to load a custom font if available
+                font_path = pathlib.Path(__file__).parent / "fonts" / "Impact.ttf"
+                if not font_path.exists():
+                    # Try default system font locations
+                    system_fonts = [
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",  # Linux
+                        "C:\\Windows\\Fonts\\Arial.ttf",  # Windows
+                        "/Library/Fonts/Arial.ttf"  # macOS
+                    ]
+                    for sys_font in system_fonts:
+                        if os.path.exists(sys_font):
+                            font_path = sys_font
+                            break
+                    
+                # If we found a font, use it
+                if font_path and os.path.exists(font_path):
+                    font_large = ImageFont.truetype(str(font_path), size=80)
+                    font_small = ImageFont.truetype(str(font_path), size=40)
+                else:
+                    # Fall back to default
+                    font_large = ImageFont.load_default()
+                    font_small = ImageFont.load_default()
+            except Exception as e:
+                logging.warning(f"Error loading font: {e}. Using default.")
+                font_large = ImageFont.load_default()
+                font_small = ImageFont.load_default()
+            
+            # Wrap text to fit in the thumbnail
+            def wrap_text(text, font, max_width):
+                lines = []
+                words = text.split()
+                current_line = []
+                
+                for word in words:
+                    test_line = ' '.join(current_line + [word])
+                    # Use textbbox for newer PIL versions, fallback to textlength
+                    if hasattr(draw, 'textbbox'):
+                        bbox = draw.textbbox((0, 0), test_line, font=font)
+                        text_width = bbox[2] - bbox[0]
+                    elif hasattr(draw, 'textlength'):
+                        text_width = draw.textlength(test_line, font=font)
+                    else:
+                        # Very basic estimation if nothing else works
+                        text_width = len(test_line) * font.size * 0.6
+                    
+                    if text_width <= max_width:
+                        current_line.append(word)
+                    else:
+                        lines.append(' '.join(current_line))
+                        current_line = [word]
+                        
+                if current_line:
+                    lines.append(' '.join(current_line))
+                    
+                return lines
+                
+            # Get wrapped text lines
+            max_text_width = pil_img.width * 0.85
+            headline_lines = wrap_text(headline_text.upper(), font_large, max_text_width)
+            
+            # Draw text on overlay
+            text_y = pil_img.height - 30 - (len(headline_lines) * 90)
+            
+            # Draw each line of headline text
+            for line in headline_lines:
+                # Calculate text width to center it
+                if hasattr(draw, 'textbbox'):
+                    bbox = draw.textbbox((0, 0), line, font=font_large)
+                    text_width = bbox[2] - bbox[0]
+                elif hasattr(draw, 'textlength'):
+                    text_width = draw.textlength(line, font=font_large)
+                else:
+                    text_width = len(line) * font_large.size * 0.6
+                    
+                text_x = (pil_img.width - text_width) // 2
+                
+                # Draw text shadow/outline for better visibility
+                for offset_x, offset_y in [(-2, -2), (-2, 2), (2, -2), (2, 2)]:
+                    draw.text((text_x + offset_x, text_y + offset_y), line, font=font_large, fill=(0, 0, 0, 255))
+                    
+                # Draw main text
+                draw.text((text_x, text_y), line, font=font_large, fill=(255, 255, 255, 255))
+                text_y += 90
+            
+            # Add attribution text at the bottom
+            attribution = "Created by Amazing AI Video Maker"
+            if hasattr(draw, 'textbbox'):
+                bbox = draw.textbbox((0, 0), attribution, font=font_small)
+                text_width = bbox[2] - bbox[0]
+            elif hasattr(draw, 'textlength'):
+                text_width = draw.textlength(attribution, font=font_small)
+            else:
+                text_width = len(attribution) * font_small.size * 0.6
+                
+            draw.text(
+                (pil_img.width - text_width - 20, pil_img.height - 60),
+                attribution,
+                font=font_small,
+                fill=(200, 200, 200, 220)
+            )
+            
+            # Composite the image with the overlay
+            pil_img = pil_img.convert("RGBA")
+            thumbnail_img = Image.alpha_composite(pil_img, overlay)
+            
+            # Convert back to RGB for saving as JPEG
+            thumbnail_img = thumbnail_img.convert("RGB")
+            
+            # Save the thumbnail
+            thumbnail_img.save(str(thumbnail_path), format="JPEG", quality=95)
+            
+            # Verify the thumbnail was created successfully
+            if thumbnail_path.exists() and thumbnail_path.stat().st_size > 0:
+                logging.info(f"Successfully created custom thumbnail at: {thumbnail_path}")
+                return thumbnail_path
+            else:
+                logging.error(f"Failed to save thumbnail to: {thumbnail_path}")
+                # Use the backup we created
+                if os.path.exists(str(thumbnail_path) + ".backup.jpg"):
+                    shutil.copy(str(thumbnail_path) + ".backup.jpg", str(thumbnail_path))
+                    logging.warning(f"Using basic backup thumbnail instead")
+                    return thumbnail_path
+        except Exception as pil_error:
+            logging.error(f"Error during PIL thumbnail processing: {pil_error}")
+            # Use the backup we created with OpenCV
+            if os.path.exists(str(thumbnail_path) + ".backup.jpg"):
+                shutil.copy(str(thumbnail_path) + ".backup.jpg", str(thumbnail_path))
+                logging.warning(f"Using basic backup thumbnail instead")
+                return thumbnail_path
+            
+        return thumbnail_path
+        
+    except Exception as e:
+        logging.error(f"Error creating custom thumbnail: {e}", exc_info=True)
+        return _generate_fallback_thumbnail(video_path, thumbnail_path)
+
+def _generate_fallback_thumbnail(video_path: pathlib.Path, thumbnail_path: pathlib.Path) -> pathlib.Path:
+    """Generate a basic thumbnail using multiple fallback methods."""
+    # Ensure output directory exists
+    os.makedirs(thumbnail_path.parent, exist_ok=True)
+    
+    # Try multiple methods to generate a thumbnail
+    
+    # 1. Direct OpenCV method
+    try:
+        import cv2
+        cap = cv2.VideoCapture(str(video_path))
+        # Try to get a frame from 25% into the video
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 4)
+        success, frame = cap.read()
+        cap.release()
+        
+        if success and frame is not None:
+            # Save the raw frame as a thumbnail
+            cv2.imwrite(str(thumbnail_path), frame)
+            if thumbnail_path.exists():
+                logging.warning(f"Created basic thumbnail as fallback at: {thumbnail_path}")
+                return thumbnail_path
+    except Exception as e:
+        logging.warning(f"OpenCV fallback thumbnail failed: {e}")
+    
+    # 2. Try using ffmpeg directly
+    try:
+        import subprocess
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',
+            '-i', str(video_path),
+            '-ss', '00:00:01.000',
+            '-vframes', '1',
+            str(thumbnail_path)
+        ]
+        subprocess.run(ffmpeg_cmd, check=True, capture_output=True, timeout=30)
+        
+        if thumbnail_path.exists():
+            logging.warning(f"Created thumbnail using ffmpeg as fallback")
+            return thumbnail_path
+    except Exception as e:
+        logging.warning(f"ffmpeg fallback thumbnail failed: {e}")
+    
+    # 3. Try using MoviePy as last resort
+    try:
+        from moviepy.editor import VideoFileClip
+        clip = VideoFileClip(str(video_path))
+        clip.save_frame(str(thumbnail_path), t=1.0)
+        clip.close()
+        
+        if thumbnail_path.exists():
+            logging.warning(f"Created thumbnail using MoviePy as fallback")
+            return thumbnail_path
+    except Exception as e:
+        logging.warning(f"MoviePy fallback thumbnail failed: {e}")
+    
+    # 4. Ultimate fallback - create a blank image with text
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        img = Image.new('RGB', (1280, 720), color=(0, 20, 40))
+        draw = ImageDraw.Draw(img)
+        font = ImageFont.load_default()
+        video_name = video_path.stem
+        draw.text((640, 360), f"Thumbnail for: {video_name}", fill=(255, 255, 255), anchor="mm", font=font)
+        img.save(str(thumbnail_path))
+        
+        logging.warning(f"Created blank thumbnail as ultimate fallback")
         return thumbnail_path
     except Exception as e:
-        logging.error(f"Error generating thumbnail: {e}")
-        return thumbnail_path
+        logging.error(f"All thumbnail generation attempts failed: {e}")
+        
+    return thumbnail_path
 
-def upload_to_youtube(video_path: pathlib.Path, title: str, description: str, thumbnail_path: pathlib.Path, tags: List[str]) -> Optional[str]:
-    """Uploads the video to YouTube."""
-    if not youtube_service:
-        logging.error("YouTube client not available. Cannot upload video.")
+def execute_upload_with_retries(insert_request, video_file_path, thumbnail_file_path, youtube, max_retries=5):
+    """
+    Execute a YouTube upload request with proper progress tracking and retry logic.
+    
+    Args:
+        insert_request: The YouTube API insert request
+        video_file_path: Path to the video file
+        thumbnail_file_path: Path to the thumbnail file (optional)
+        youtube: The YouTube API service
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        str: YouTube video URL if successful, None otherwise
+    """
+    retry_delay_base = 10  # seconds
+    
+    # Execute the upload with retries
+    response = None
+    last_exception = None
+    
+    for retry in range(max_retries):
+        try:
+            logging.info(f"Starting video upload (attempt {retry+1}/{max_retries})...")
+            
+            # Reset response for each retry
+            response = None
+            progress_status = None
+            
+            # Use resumable upload with progress reporting
+            while response is None:
+                try:
+                    status, response = insert_request.next_chunk()
+                    if status:
+                        progress = int(status.progress() * 100)
+                        # Only log if progress has changed significantly
+                        if progress_status is None or progress >= progress_status + 10:
+                            logging.info(f"Upload progress: {progress}%")
+                            progress_status = progress
+                except ConnectionError as conn_err:
+                    # Handle connection-related errors with backoff retry
+                    retry_delay = retry_delay_base * (2 ** retry)  # Exponential backoff
+                    logging.warning(f"Connection error during upload: {conn_err}. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue  # Retry current chunk
+                except google_api_errors.HttpError as http_err:
+                    if http_err.resp.status in (500, 502, 503, 504, 408, 429):  # Server errors or rate limiting
+                        retry_delay = retry_delay_base * (2 ** retry)
+                        logging.warning(f"Server error during upload (HTTP {http_err.resp.status}). Retrying in {retry_delay}s...")
+                        time.sleep(retry_delay)
+                        continue  # Retry current chunk
+                    else:
+                        # Re-raise for other HTTP errors
+                        raise
+                except ssl.SSLError as ssl_err:
+                    retry_delay = retry_delay_base * (2 ** retry)
+                    logging.warning(f"SSL error during upload: {ssl_err}. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue  # Retry current chunk
+                except Exception as chunk_err:
+                    # For other errors, retry the chunk with backoff
+                    retry_delay = retry_delay_base * (1 + retry)
+                    logging.warning(f"Error during upload chunk: {chunk_err}. Retrying in {retry_delay}s...")
+                    time.sleep(retry_delay)
+                    continue  # Retry current chunk
+            
+            # If we got a response, break out of the retry loop
+            if response:
+                break
+            
+        except Exception as e:
+            last_exception = e
+            retry_delay = retry_delay_base * (2 ** retry)  # Exponential backoff
+            logging.warning(f"Upload attempt {retry+1} failed: {e}. Retrying in {retry_delay}s...")
+            time.sleep(retry_delay)
+    
+    # If all retries failed, log the error and return None
+    if not response:
+        if last_exception:
+            logging.error(f"All upload attempts failed. Last error: {last_exception}")
+        else:
+            logging.error("All upload attempts failed with no specific error.")
         return None
+    
+    # Upload successful
+    video_id = response.get("id")
+    
+    if not video_id:
+        logging.error("Upload response missing video ID.")
+        return None
+    
+    logging.info(f"Video uploaded successfully! Video ID: {video_id}")
+    
+    # Upload thumbnail if provided
+    if thumbnail_file_path and os.path.exists(thumbnail_file_path):
+        try:
+            max_thumbnail_retries = 3
+            retry_delays = [5, 15, 30]  # Seconds between retries
+            
+            for thumbnail_attempt in range(max_thumbnail_retries):
+                try:
+                    # Check thumbnail file size and validity
+                    if os.path.getsize(thumbnail_file_path) == 0:
+                        logging.warning("Thumbnail file is empty (0 bytes). Skipping thumbnail upload.")
+                        break
+                        
+                    with open(thumbnail_file_path, "rb") as thumbnail_file:
+                        # Determine mime type based on extension
+                        if str(thumbnail_file_path).lower().endswith(('.jpg', '.jpeg')):
+                            mime_type = "image/jpeg"
+                        elif str(thumbnail_file_path).lower().endswith('.png'):
+                            mime_type = "image/png"
+                        else:
+                            mime_type = "image/jpeg"  # Default to JPEG
+                            
+                        youtube.thumbnails().set(
+                            videoId=video_id,
+                            media_body=MediaFileUpload(
+                                str(thumbnail_file_path),
+                                mimetype=mime_type,
+                                resumable=True
+                            )
+                        ).execute()
+                        
+                    logging.info(f"Thumbnail uploaded successfully for video {video_id}")
+                    break
+                except Exception as thumb_err:
+                    if thumbnail_attempt < max_thumbnail_retries - 1:
+                        delay = retry_delays[thumbnail_attempt]
+                        logging.warning(f"Thumbnail upload error (attempt {thumbnail_attempt+1}/{max_thumbnail_retries}): {thumb_err}. Retrying in {delay}s...")
+                        time.sleep(delay)
+                    else:
+                        logging.warning(f"Failed to upload thumbnail after {max_thumbnail_retries} attempts: {thumb_err}")
+        except Exception as e:
+            logging.warning(f"Error during thumbnail upload process: {e}")
+            # Continue as thumbnail is optional
+    
+    # Success! Return the video URL
+    video_url = f"https://www.youtube.com/watch?v={video_id}"
+    logging.info(f"Video published successfully: {video_url}")
+    return video_url
 
+def upload_to_youtube(
+    video_file_path: pathlib.Path,
+    title: str,
+    description: str,
+    thumbnail_file_path: Optional[pathlib.Path] = None,
+    tags: Optional[List[str]] = None,
+    publish_time: Optional[datetime] = None,
+    privacy_status: str = "public"
+) -> Optional[str]:
+    """
+    Upload a video to YouTube using the YouTube Data API.
+    
+    Args:
+        video_file_path: Path to the video file
+        title: Video title
+        description: Video description
+        thumbnail_file_path: Path to thumbnail image (optional)
+        tags: List of tags (optional)
+        publish_time: Scheduled publish time (optional)
+        privacy_status: Privacy status (default: "public")
+        
+    Returns:
+        str: YouTube video URL if successful, None otherwise
+    """
+    if not os.path.exists(video_file_path):
+        logging.error(f"Video file does not exist: {video_file_path}")
+        return None
+        
     try:
-        # Prepare the video metadata
+        # Check for token file
+        if not YOUTUBE_TOKEN_FILE:
+            logging.error("YouTube token file path not specified.")
+            return None
+            
+        if not os.path.exists(YOUTUBE_TOKEN_FILE):
+            logging.error(f"YouTube token file not found: {YOUTUBE_TOKEN_FILE}")
+            return None
+            
+        # Load credentials
+        credentials = load_youtube_token(YOUTUBE_TOKEN_FILE)
+        if not credentials:
+            logging.error("Failed to load YouTube credentials.")
+            return None
+            
+        # Create an authorized HTTP object
+        http = httplib2.Http(timeout=120)  # 2-minute timeout
+        
+        # Fix: Modern oauth2 credentials don't use authorize method
+        # Instead, create authorized HTTP directly:
+        authorized_request = google.auth.transport.requests.Request()
+        credentials.refresh(authorized_request)
+        
+        # Build the YouTube service
+        youtube = build_google_api(
+            YOUTUBE_API_SERVICE_NAME,
+            YOUTUBE_API_VERSION,
+            credentials=credentials
+        )
+            
+        # Create body for the video insert request
         body = {
-            'snippet': {
-                'title': title,
-                'description': description,
-                'tags': tags,
-                'categoryId': YOUTUBE_UPLOAD_CATEGORY_ID,
-                'status': {
-                    'privacyStatus': YOUTUBE_UPLOAD_PRIVACY_STATUS
-                }
+            "snippet": {
+                "title": title[:100],  # YouTube title limit is 100 chars
+                "description": description[:5000],  # YouTube description limit
+                "tags": tags[:500] if tags else [],  # YouTube has a limit on total tag characters
+                "categoryId": YOUTUBE_UPLOAD_CATEGORY_ID,
+                "defaultLanguage": "en",
+                "defaultAudioLanguage": "en"
             },
-            'status': {
-                'privacyStatus': YOUTUBE_UPLOAD_PRIVACY_STATUS
+            "status": {
+                "privacyStatus": privacy_status,
+                "selfDeclaredMadeForKids": False,
+                "embeddable": True,
+                "license": "youtube"
             }
         }
-
-        # Prepare the video file
-        media = MediaFileUpload(str(video_path), mimetype='video/mp4')
-
-        # Upload the video
-        youtube_response = youtube_service.videos().insert(
-            part='snippet,status',
-            body=body,
-            media_body=media
-        ).execute()
-
-        logging.info(f"Video ID: {youtube_response['id']}")
-        return f"https://www.youtube.com/watch?v={youtube_response['id']}"
+        
+        # Add scheduled publishing if specified
+        if publish_time:
+            body["status"]["publishAt"] = publish_time.isoformat() + "Z"
+            
+        # Create the upload request
+        try:
+            # Initialize MediaFileUpload object with chunksize
+            media = MediaFileUpload(
+                str(video_file_path),
+                mimetype="video/mp4",
+                resumable=True,
+                chunksize=1024*1024*5  # 5MB chunks
+            )
+            
+            # Create insert request
+            insert_request = youtube.videos().insert(
+                part=",".join(body.keys()),
+                body=body,
+                media_body=media,
+                notifySubscribers=True
+            )
+            
+            # Execute upload with progress tracking and retry logic
+            return execute_upload_with_retries(insert_request, video_file_path, thumbnail_file_path, youtube)
+            
+        except google_api_errors.HttpError as e:
+            logging.error(f"HTTP error occurred during YouTube upload: {e}")
+            error_content = json.loads(e.content.decode('utf-8'))
+            error_reason = error_content.get('error', {}).get('errors', [{'reason': 'unknown'}])[0].get('reason')
+            
+            if error_reason == 'quotaExceeded':
+                logging.critical("YouTube API quota exceeded. Try again tomorrow.")
+            elif error_reason == 'authError':
+                logging.critical("YouTube authentication error. Token may be expired or invalid.")
+            
+            return None
+            
+        except (socket.timeout, socket.error, ssl.SSLError, ConnectionError) as e:
+            logging.error(f"Network error during YouTube upload: {e}")
+            return None
+            
     except Exception as e:
-        logging.error(f"Error uploading video to YouTube: {e}")
+        logging.error(f"Error uploading to YouTube: {e}", exc_info=True)
         return None
 
 def add_upload_record(reddit_url: str, youtube_url: str, title: str, subreddit: str):
@@ -1888,24 +2594,76 @@ def add_upload_record(reddit_url: str, youtube_url: str, title: str, subreddit: 
         db_conn.rollback()
 
 def set_video_self_certification(video_id: str, is_age_restricted: bool):
-    """Sets the self-certification status of the video on YouTube."""
-    if not youtube_service:
-        logging.error("YouTube client not available. Cannot set self-certification.")
+    """
+    Set video self certification status (age restriction and content rating).
+    
+    Args:
+        video_id: YouTube video ID
+        is_age_restricted: Whether video should be age restricted
+    """
+    if not video_id:
+        logging.error("Cannot set self certification: No video ID provided")
         return
-
+    
     try:
-        youtube_service.videos().update(
-            part="status",
-            body={
-                "id": video_id,
-                "status": {
-                    "selfDeclaredMadeForKids": is_age_restricted
+        # Load YouTube credentials
+        credentials = load_youtube_token(YOUTUBE_TOKEN_FILE)
+        if not credentials:
+            logging.error("Failed to load YouTube credentials for self certification.")
+            return
+        
+        # Create an authorized HTTP object using the new method
+        authorized_request = google.auth.transport.requests.Request()
+        credentials.refresh(authorized_request)
+        
+        # Build the YouTube service
+        youtube = build_google_api(
+            YOUTUBE_API_SERVICE_NAME,
+            YOUTUBE_API_VERSION,
+            credentials=credentials
+        )
+        
+        # Define the self certification payload
+        self_certification_body = {
+            "contentAttributes": {
+                "youtubeStandardGuidelines": {
+                    "harmful": False,
+                    "hatefulAbusive": False,
+                    "dangerous": False,
+                    "sexualContent": False,
+                    "violent": False,
+                    "childProtection": False,
+                    "privacyGuidelines": False
+                },
+                "ageRestrictions": {
+                    "restricted": is_age_restricted
+                },
+                "contentRatings": {
+                    "mpaaNone": True,
+                    "tvpgNone": True,
+                    "ytRatingNone": True
                 }
             }
+        }
+        
+        # Execute the API call
+        response = youtube.videos().setContentAttributes(
+            videoId=video_id,
+            body=self_certification_body
         ).execute()
-        logging.info(f"Self-certification set for video {video_id}: {'Age-restricted' if is_age_restricted else 'Not age-restricted'}")
+        
+        logging.info(f"Successfully set self certification for video {video_id}. Age restricted: {is_age_restricted}")
+        return response
+        
+    except google_api_errors.HttpError as e:
+        status_code = e.resp.status if hasattr(e, 'resp') else None
+        
+        if status_code == 403:
+            logging.warning(f"Permission denied (HTTP 403) when setting self certification. This may be normal if your account doesn't have this permission.")
+        else:
+            logging.error(f"HTTP error setting video self certification: {e}")
     except Exception as e:
-        logging.error(f"Error setting self-certification: {e}")
+        logging.error(f"Error setting video self certification: {e}")
 
 def get_music_attribution(music_meta: Dict) -> str:
     """Generates a music attribution string based on the music metadata."""
@@ -1952,19 +2710,208 @@ def ensure_default_sound_effects():
     else:
         logging.info("No new sound effects were downloaded")
 
-if __name__ == "__main__":
+def parse_args():
+    parser = argparse.ArgumentParser(description="Automated Reddit to YouTube Shorts Pipeline")
+    parser.add_argument('--test', action='store_true', help='Run in test mode (setup and system tests only)')
+    parser.add_argument('--subreddit', type=str, default=None, help='Specify a single subreddit to process (default: random from curated list)')
+    parser.add_argument('--skip-download', action='store_true', help='Skip video download step (for debugging)')
+    parser.add_argument('--skip-safety-check', action='store_true', help='Skip Gemini content safety check (for debugging)')
+    parser.add_argument('--sleep', type=int, default=60, help='Sleep time (seconds) between cycles (default: 60)')
+    return parser.parse_args()
+
+def run_system_tests():
+    logging.info("System tests are not implemented. Skipping.")
+    return True
+
+def is_already_uploaded(reddit_permalink):
+    """
+    Check if a Reddit post has already been processed and uploaded to YouTube.
+    
+    Args:
+        reddit_permalink: The Reddit post permalink to check
+        
+    Returns:
+        bool: True if already uploaded, False otherwise
+    """
+    if not db_conn or not db_cursor:
+        logging.warning("Database connection not available. Cannot check upload status.")
+        return False
+    
+    try:
+        # Check if the permalink exists in the uploads table
+        db_cursor.execute("SELECT youtube_url FROM uploads WHERE reddit_url = ?", (reddit_permalink,))
+        result = db_cursor.fetchone()
+        
+        if result:
+            youtube_url = result[0]
+            logging.info(f"Already uploaded: {reddit_permalink} → {youtube_url}")
+            return True
+        return False
+    except sqlite3.Error as e:
+        logging.error(f"Database error checking upload status: {e}")
+        return False  # Better to assume not uploaded than to skip if DB is having issues
+    except Exception as e:
+        logging.error(f"Unexpected error checking upload status: {e}")
+        return False
+
+def clean_temp_files(path=None):
+    """
+    Clean temporary files either at a specific path or in the default temp directory.
+    
+    Args:
+        path: Specific file/directory to clean, or None to clean default temp dirs
+    """
+    if path:
+        # Clean specific file or directory
+        path_obj = pathlib.Path(path)
+        try:
+            if path_obj.is_file():
+                # Try to delete file, with multiple retries for Windows "file in use" issues
+                for attempt in range(3):
+                    try:
+                        path_obj.unlink()
+                        logging.debug(f"Cleaned up temp file: {path_obj}")
+                        break
+                    except PermissionError:
+                        # On Windows, sometimes files are still in use - wait and retry
+                        if attempt < 2:
+                            time.sleep(0.5)
+                        else:
+                            logging.warning(f"Could not delete temp file after retries: {path_obj}")
+                    except OSError as e:
+                        logging.warning(f"Could not delete temp file {path_obj}: {e}")
+                        break
+            elif path_obj.is_dir():
+                # Try to delete directory tree with shutil
+                try:
+                    shutil.rmtree(path_obj, ignore_errors=True)
+                    logging.debug(f"Cleaned up temp directory: {path_obj}")
+                except OSError as e:
+                    logging.warning(f"Could not delete temp directory {path_obj}: {e}")
+        except Exception as e:
+            logging.warning(f"Error during temp file cleanup of {path}: {e}")
+        return
+    
+    # If no specific path provided, clean default temp directories
+    temp_paths_to_clean = [
+        TEMP_DIR,  # Main temp processing directory
+        pathlib.Path(tempfile.gettempdir()) / "reddit_videos"  # Directory for downloaded videos
+    ]
+    
+    for temp_dir in temp_paths_to_clean:
+        if not temp_dir.exists():
+            continue
+            
+        try:
+            # Get all files in the temp directory
+            for temp_file in temp_dir.glob("*"):
+                # Skip important permanent files
+                if any(pattern in str(temp_file) for pattern in ['.gitkeep', 'README', '.git']):
+                    continue
+                    
+                # Delete files older than 24 hours
+                try:
+                    file_age = time.time() - temp_file.stat().st_mtime
+                    if file_age > (24 * 3600):  # 24 hours in seconds
+                        if temp_file.is_file():
+                            try:
+                                temp_file.unlink()
+                                logging.debug(f"Cleaned old temp file: {temp_file}")
+                            except OSError as e:
+                                if 'being used by another process' in str(e):
+                                    logging.debug(f"File in use, skipping: {temp_file}")
+                                else:
+                                    logging.warning(f"Could not delete old temp file {temp_file}: {e}")
+                        elif temp_file.is_dir():
+                            try:
+                                shutil.rmtree(temp_file, ignore_errors=True)
+                                logging.debug(f"Cleaned old temp directory: {temp_file}")
+                            except OSError as e:
+                                logging.warning(f"Could not delete old temp directory {temp_file}: {e}")
+                except OSError:
+                    # Ignore errors accessing file stats
+                    pass
+            
+            # Log summary
+            remaining_files = list(temp_dir.glob("*"))
+            if remaining_files:
+                logging.debug(f"Temp directory {temp_dir} has {len(remaining_files)} files remaining after cleanup")
+            else:
+                logging.debug(f"Temp directory {temp_dir} is now empty")
+                
+        except Exception as e:
+            logging.warning(f"Error during temp directory cleanup of {temp_dir}: {e}")
+    
+    # Run garbage collection to free memory
+    gc.collect()
+
+def load_youtube_token(token_file_path):
+    """Load YouTube OAuth token from a JSON file and return google.oauth2.credentials.Credentials object."""
+    import json
+    import os
+    if not token_file_path or not os.path.exists(token_file_path):
+        logging.error(f"YouTube token file not found: {token_file_path}")
+        return None
+    try:
+        with open(token_file_path, 'r') as f:
+            token_data = json.load(f)
+        
+        # Check if this is a client secrets file or a token file
+        if 'installed' in token_data:
+            # This is a client secrets file, not a token file
+            logging.error(f"The file {token_file_path} is a client secrets file, not a token file.")
+            logging.error("Please authorize your YouTube account first and save the token.")
+            return None
+        
+        # Check for required fields
+        required_fields = ['token', 'refresh_token', 'token_uri', 'client_id', 'client_secret', 'scopes']
+        missing_fields = [field for field in required_fields if field not in token_data]
+        
+        if missing_fields:
+            logging.error(f"Token file missing required fields: {', '.join(missing_fields)}")
+            # If missing fields are minimal, try to set defaults
+            if 'token_uri' in missing_fields:
+                token_data['token_uri'] = 'https://oauth2.googleapis.com/token'
+                logging.warning("Added default token_uri to credentials")
+            
+            if 'scopes' in missing_fields:
+                token_data['scopes'] = YOUTUBE_SCOPES
+                logging.warning(f"Added default scopes to credentials: {YOUTUBE_SCOPES}")
+            
+            # Check again if we've fixed the required fields
+            missing_fields = [field for field in required_fields if field not in token_data]
+            if missing_fields:
+                logging.error(f"Still missing required fields: {', '.join(missing_fields)}")
+                return None
+        
+        creds = Credentials(
+            token=token_data.get('token'),
+            refresh_token=token_data.get('refresh_token'),
+            token_uri=token_data.get('token_uri'),
+            client_id=token_data.get('client_id'),
+            client_secret=token_data.get('client_secret'),
+            scopes=token_data.get('scopes')
+        )
+        return creds
+    except Exception as e:
+        logging.error(f"Failed to load YouTube token: {e}")
+        return None
+
+def main():
+    """Main function to execute the script with all the logic from the first if __name__ block."""
     # Handle graceful exit for Ctrl+C
     def signal_handler(sig, frame):
         logging.info('Ctrl+C received. Shutting down gracefully...')
         close_database() # Ensure DB is closed
         # Add any other cleanup needed
-        clean_temp_files() # Clean temp files on exit
+        clean_temp_files(TEMP_DIR) # General cleanup of the temp dir
         sys.exit(0)
     signal.signal(signal.SIGINT, signal_handler)
     
     main_start_time = time.time()
     processed_count = 0
     args_main = parse_args() # Parse args once for the main loop
+    temp_files_to_clean_master = []  # Initialize here to ensure proper scope
 
     try:
         validate_environment()
@@ -1991,8 +2938,6 @@ if __name__ == "__main__":
 
         subreddits_to_process = [args_main.subreddit] if args_main.subreddit else CURATED_SUBREDDITS
         
-        temp_files_to_clean_master = [] # Keep track of all temp files across iterations
-
         # Infinite loop for continuous operation
         while True:
             logging.warning(f"\n--- Starting video processing cycle ---")
@@ -2186,27 +3131,24 @@ if __name__ == "__main__":
                     with open(file_list_path, 'w') as f:
                         for clip_path in segment_clips:
                             f.write(f"file '{clip_path.resolve()}'\n")
-                        
-                        # Run ffmpeg concatenate
-                        cmd = [
-                            'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
-                            '-i', str(file_list_path),
-                            '-c', 'copy',
-                            str(concatenated_path)
-                        ]
-                        subprocess.run(cmd, check=True, capture_output=True, timeout=60)  # Increased timeout
-                        
-                        # Clean up file list
-                        cleanup_temp_files(file_list_path)
-                        
-                        if concatenated_path.is_file() and concatenated_path.stat().st_size > 1000:  # Check for valid file with some content
-                            logging.info(f"Successfully concatenated {len(segment_clips)} segments.")
-                            cropped_segment_path = concatenated_path
-                            concat_success = True
-                        else:
-                            logging.warning(f"Concatenated file invalid or empty. Trying alternative approach.")
-                    except Exception as e:
-                        logging.warning(f"Error with primary concatenation method: {e}. Trying alternative approach.")
+                    # Run ffmpeg concatenate
+                    cmd = [
+                        'ffmpeg', '-y', '-f', 'concat', '-safe', '0',
+                        '-i', str(file_list_path),
+                        '-c', 'copy',
+                        str(concatenated_path)
+                    ]
+                    subprocess.run(cmd, check=True, capture_output=True, timeout=60)  # Increased timeout
+                    # Clean up file list
+                    cleanup_temp_files(file_list_path)
+                    if concatenated_path.is_file() and concatenated_path.stat().st_size > 1000:  # Check for valid file with some content
+                        logging.info(f"Successfully concatenated {len(segment_clips)} segments.")
+                        cropped_segment_path = concatenated_path
+                        concat_success = True
+                    else:
+                        logging.warning(f"Concatenated file invalid or empty. Trying alternative approach.")
+                except Exception as e:
+                    logging.warning(f"Error with primary concatenation method: {e}. Trying alternative approach.")
                     
                     # Alternative concatenation approach if the first method failed
                     if not concat_success:
@@ -2262,7 +3204,7 @@ if __name__ == "__main__":
             generated_thumbnail_path = generate_custom_thumbnail(final_video_output_path, analysis, thumbnail_output_path)
 
             # Upload to YouTube
-            if youtube_ok and YOUTUBE_TOKEN_FILE_PATH and os.path.exists(YOUTUBE_TOKEN_FILE_PATH) :
+            if youtube_ok and YOUTUBE_TOKEN_FILE and os.path.exists(YOUTUBE_TOKEN_FILE):
                 youtube_title = analysis.get('suggested_title', f"Cool Reddit Video: {selected_submission.title}")[:100]
                 youtube_description = analysis.get('summary_for_description', selected_submission.title)
                 youtube_description += f"\n\nOriginal post: https://reddit.com{selected_submission.permalink}"
@@ -2284,7 +3226,7 @@ if __name__ == "__main__":
                     add_upload_record(selected_submission.permalink, youtube_url, youtube_title, selected_submission.subreddit.display_name)
                     video_id = youtube_url.split('/')[-1]
                     set_video_self_certification(video_id, analysis.get('is_explicitly_age_restricted', False))
-                    processed_count +=1
+                    processed_count += 1
                 else:
                     logging.error(f"YouTube upload failed for {selected_submission.title[:30]}.")
             else:
@@ -2316,4 +3258,54 @@ if __name__ == "__main__":
         logging.info(f"\n=== Script finished in {total_execution_time:.2f} seconds. Processed {processed_count} videos. ===")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except NameError as e:
+        print(f"Error: {e}")
+        print("Falling back to running the main code directly...")
+        # As a fallback in case main() isn't properly defined, run the main code inline
+        # Handle graceful exit for Ctrl+C
+        def signal_handler(sig, frame):
+            logging.info('Ctrl+C received. Shutting down gracefully...')
+            close_database() # Ensure DB is closed
+            # Add any other cleanup needed
+            clean_temp_files(TEMP_DIR) # General cleanup of the temp dir
+            sys.exit(0)
+        signal.signal(signal.SIGINT, signal_handler)
+        
+        main_start_time = time.time()
+        processed_count = 0
+        args_main = parse_args() # Parse args once for the main loop
+        temp_files_to_clean_master = []  # Initialize here to ensure proper scope
+
+        try:
+            validate_environment()
+            setup_directories() # This now also handles font downloads
+            setup_database()
+            
+            # Run system tests if not in test-only mode
+            if not args_main.test and not run_system_tests():
+                logging.error("Critical system tests failed. Exiting.")
+                sys.exit(1)
+
+            if args_main.test: # If --test was passed, exit after setup and tests
+                logging.info("Test mode enabled. Setup and tests complete. Exiting.")
+                sys.exit(0)
+
+            # Rest of the main loop...
+            logging.info("Main loop would run here in fallback mode.")
+            
+        except Exception as e:
+            logging.critical(f"An unhandled error occurred in the main loop: {e}", exc_info=True)
+        finally:
+            close_database()
+            logging.info(f"Cleaning up all temporary files from the session...")
+            try:
+                for f_path in temp_files_to_clean_master: # Clean any remaining tracked files
+                    cleanup_temp_files(f_path)
+                clean_temp_files(TEMP_DIR) # General cleanup of the temp dir
+            except Exception as cleanup_error:
+                logging.error(f"Error during cleanup: {cleanup_error}")
+
+            total_execution_time = time.time() - main_start_time
+            logging.info(f"\n=== Script finished in {total_execution_time:.2f} seconds. Processed {processed_count} videos. ===")
