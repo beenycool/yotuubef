@@ -890,7 +890,7 @@ def mute_sections(clip, mute_ranges):
 
 def _prepare_initial_video(submission, safe_title: str, temp_files: list) -> Tuple[Optional[Path], float, int, int]:
     """
-    Downloads video from submission, gets basic info.
+    Downloads video from submission with enhanced Reddit downloader, gets basic info.
     Returns (path_to_video, duration, width, height) or (None, 0, 0, 0) on failure.
     """
     video_url = submission.url
@@ -899,47 +899,100 @@ def _prepare_initial_video(submission, safe_title: str, temp_files: list) -> Tup
     video_path = temp_dir / f"{submission.id}_{safe_title}.mp4"
     temp_files.append(video_path) # Track for cleanup
 
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': str(video_path),
-        'noplaylist': True,
-        'quiet': True,
-        'merge_output_format': 'mp4',
-        # 'postprocessors': [{ # Normalization can be added here if ffmpeg-normalize is available
-        #     'key': 'FFmpegNormalize',
-        #     'preferredcodec': 'aac', # Example
-        # }],
-    }
+    # Enhanced download with anti-blocking measures
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    ]
 
     duration, width, height = 0, 0, 0
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.download([video_url])
-        
-        if video_path.exists():
-            # Get video info using ffprobe (part of ffmpeg)
-            # ffprobe_cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
-            #                '-show_entries', 'stream=width,height,duration', '-of', 'csv=s=x:p=0', str(video_path)]
-            # result = subprocess.run(ffprobe_cmd, capture_output=True, text=True, check=True)
-            # w_str, h_str, dur_str = result.stdout.strip().split('x')
-            # width, height, duration = int(w_str), int(h_str), float(dur_str)
+    
+    for attempt, user_agent in enumerate(user_agents):
+        try:
+            logging.info(f"Attempting Reddit download (attempt {attempt + 1}) for: {submission.title[:30]}...")
             
-            # Simpler way with MoviePy after download
-            with VideoFileClip(str(video_path)) as clip_info:
-                duration = clip_info.duration
-                width, height = clip_info.size
-            print(f"Initial video: {duration:.2f}s, {width}x{height}")
-            return video_path, duration, width, height
-        else:
-            print(f"Failed to download video: {video_url}")
-            return None, 0, 0, 0
+            ydl_opts = {
+                'format': 'best[height<=1080]/best',
+                'outtmpl': str(video_path),
+                'noplaylist': True,
+                'quiet': False,
+                'merge_output_format': 'mp4',
+                'http_headers': {
+                    'User-Agent': user_agent,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+                'retries': 3,
+                'fragment_retries': 3,
+                'skip_unavailable_fragments': True,
+                'keepvideo': False,
+            }
+
+            # Add delay between attempts
+            if attempt > 0:
+                import random
+                import time
+                delay = random.uniform(2, 5)
+                logging.info(f"Waiting {delay:.1f} seconds before retry...")
+                time.sleep(delay)
             
-    except Exception as e:
-        print(f"Error downloading or getting info for {video_url}: {e}")
-        if video_path.exists(): # Clean up partial download if any
-             try: os.remove(video_path)
-             except OSError: pass
-        return None, 0, 0, 0
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
+            
+            if video_path.exists() and video_path.stat().st_size > 1000:  # At least 1KB
+                # Get video info using MoviePy after successful download
+                try:
+                    with VideoFileClip(str(video_path)) as clip_info:
+                        duration = clip_info.duration
+                        width, height = clip_info.size
+                    logging.info(f"Successfully downloaded: {duration:.2f}s, {width}x{height}")
+                    return video_path, duration, width, height
+                except Exception as info_error:
+                    logging.error(f"Error getting video info: {info_error}")
+                    # Clean up invalid file
+                    if video_path.exists():
+                        try:
+                            os.remove(video_path)
+                        except OSError:
+                            pass
+                    continue
+            else:
+                logging.warning(f"Download completed but file is invalid or too small")
+                if video_path.exists():
+                    try:
+                        os.remove(video_path)
+                    except OSError:
+                        pass
+                continue
+                
+        except Exception as e:
+            logging.warning(f"Download attempt {attempt + 1} failed: {str(e)}")
+            if video_path.exists():
+                try:
+                    os.remove(video_path)
+                except OSError:
+                    pass
+            
+            # If this is a 403 error, try next user agent
+            if "403" in str(e) or "Blocked" in str(e):
+                logging.warning("403/Blocked error detected, trying next user agent...")
+                continue
+            
+            # For other errors, wait a bit longer before next attempt
+            if attempt < len(user_agents) - 1:
+                import random
+                import time
+                delay = random.uniform(3, 8)
+                logging.info(f"Waiting {delay:.1f} seconds before next attempt...")
+                time.sleep(delay)
+    
+    logging.error(f"All download attempts failed for: {video_url}")
+    return None, 0, 0, 0
 
 def create_seamless_loop(clip, crossfade_duration=0.5):
     """

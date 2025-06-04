@@ -2905,13 +2905,49 @@ def clean_temp_files(path=None):
     # Run garbage collection to free memory
     gc.collect()
 
+def create_youtube_token_from_env():
+    """Create YouTube token file from environment variables (for Colab)"""
+    try:
+        # Check if we have token data in YOUTUBE_TOKEN_JSON
+        token_json = os.environ.get('YOUTUBE_TOKEN_JSON')
+        if token_json:
+            logging.info("Found YOUTUBE_TOKEN_JSON in environment, creating token file...")
+            token_data = json.loads(token_json)
+            
+            # Ensure directory exists
+            token_file = os.environ.get('YOUTUBE_TOKEN_FILE', 'youtube_token.json')
+            token_path = pathlib.Path(token_file)
+            token_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Write token file
+            with open(token_path, 'w') as f:
+                json.dump(token_data, f, indent=2)
+            
+            logging.info(f"YouTube token file created: {token_path}")
+            return str(token_path)
+            
+    except Exception as e:
+        logging.error(f"Error creating token file from environment: {e}")
+    
+    return None
+
 def load_youtube_token(token_file_path):
     """Load YouTube OAuth token from a JSON file and return google.oauth2.credentials.Credentials object."""
     import json
     import os
+    
+    # First try to create token from environment if file doesn't exist
     if not token_file_path or not os.path.exists(token_file_path):
-        logging.error(f"YouTube token file not found: {token_file_path}")
-        return None
+        logging.warning(f"YouTube token file not found: {token_file_path}")
+        
+        # Try to create from environment
+        created_token_file = create_youtube_token_from_env()
+        if created_token_file:
+            token_file_path = created_token_file
+        else:
+            logging.error(f"YouTube token file '{token_file_path}' not found. Run auth script.")
+            return None
+    
     try:
         with open(token_file_path, 'r') as f:
             token_data = json.load(f)
@@ -2952,10 +2988,116 @@ def load_youtube_token(token_file_path):
             client_secret=token_data.get('client_secret'),
             scopes=token_data.get('scopes')
         )
+        
+        # Refresh token if expired
+        if creds.expired and creds.refresh_token:
+            logging.info("Token expired, attempting to refresh...")
+            try:
+                creds.refresh(google.auth.transport.requests.Request())
+                logging.info("Token refreshed successfully")
+                
+                # Save refreshed token back to file
+                refreshed_data = {
+                    'token': creds.token,
+                    'refresh_token': creds.refresh_token,
+                    'token_uri': creds.token_uri,
+                    'client_id': creds.client_id,
+                    'client_secret': creds.client_secret,
+                    'scopes': creds.scopes
+                }
+                if creds.expiry:
+                    refreshed_data['expiry'] = creds.expiry.isoformat()
+                
+                with open(token_file_path, 'w') as f:
+                    json.dump(refreshed_data, f, indent=2)
+                logging.info("Refreshed token saved")
+                
+            except Exception as refresh_error:
+                logging.error(f"Failed to refresh token: {refresh_error}")
+                return None
+        
         return creds
     except Exception as e:
         logging.error(f"Failed to load YouTube token: {e}")
         return None
+
+def enhanced_reddit_download(submission_url: str, output_path: pathlib.Path, user_agents: List[str] = None) -> bool:
+    """Enhanced Reddit video downloader with 403 error mitigation"""
+    if user_agents is None:
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebLib/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        ]
+    
+    for attempt, user_agent in enumerate(user_agents):
+        try:
+            logging.info(f"Attempting Reddit download (attempt {attempt + 1}) with user agent: {user_agent[:50]}...")
+            
+            # Configure yt-dlp with rotating user agent and other options
+            ydl_opts = {
+                'format': 'best[height<=1080]/best',
+                'outtmpl': str(output_path),
+                'no_warnings': False,
+                'ignoreerrors': False,
+                'extract_flat': False,
+                'writesubtitles': False,
+                'writeautomaticsub': False,
+                'http_headers': {
+                    'User-Agent': user_agent,
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.5',
+                    'Accept-Encoding': 'gzip, deflate',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                },
+                'retries': 3,
+                'fragment_retries': 3,
+                'skip_unavailable_fragments': True,
+                'keepvideo': False,
+                'noplaylist': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Add delay between attempts
+                if attempt > 0:
+                    delay = random.uniform(2, 5)
+                    logging.info(f"Waiting {delay:.1f} seconds before retry...")
+                    time.sleep(delay)
+                
+                ydl.download([submission_url])
+                
+                # Check if file was created successfully
+                if output_path.exists() and output_path.stat().st_size > 1000:  # At least 1KB
+                    logging.info(f"Successfully downloaded: {output_path}")
+                    return True
+                else:
+                    logging.warning(f"Download completed but file is invalid or too small")
+                    if output_path.exists():
+                        output_path.unlink()  # Remove invalid file
+                        
+        except Exception as e:
+            logging.warning(f"Download attempt {attempt + 1} failed: {str(e)}")
+            if output_path.exists():
+                try:
+                    output_path.unlink()  # Clean up partial download
+                except:
+                    pass
+            
+            # If this is a 403 error, try next user agent
+            if "403" in str(e) or "Blocked" in str(e):
+                logging.warning("403/Blocked error detected, trying next user agent...")
+                continue
+            
+            # For other errors, wait a bit longer
+            if attempt < len(user_agents) - 1:
+                delay = random.uniform(3, 8)
+                logging.info(f"Waiting {delay:.1f} seconds before next attempt...")
+                time.sleep(delay)
+    
+    logging.error(f"All download attempts failed for: {submission_url}")
+    return False
 
 def main():
     """Main function to execute the script with all the logic from the first if __name__ block."""
