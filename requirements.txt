@@ -1,0 +1,24 @@
+# requirements.txt
+praw
+yt-dlp
+google-api-python-client
+google-auth-oauthlib
+google-generativeai>=0.3.1
+elevenlabs
+moviepy
+Pillow
+opencv-python-headless
+numpy
+torch
+transformers
+accelerate
+huggingface_hub
+soundfile
+ffmpeg-normalize
+psutil
+pynvml; sys_platform == 'linux' and platform_machine == 'x86_64'
+ffmpeg-python
+python-dotenv>=1.0.0
+requests
+# Add specific versions if needed, e.g., moviepy==1.0.3
+jupyter
