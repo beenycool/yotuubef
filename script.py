@@ -346,6 +346,17 @@ FORBIDDEN_WORDS = [
     "dangerous activities glorification", "suicide promotion", "self-harm"
 ] # Reduced list - removed less serious items
 
+UNSUITABLE_CONTENT_TYPES = [
+    "violence", "violent", "gore", "blood", "death", "killing", "murder", "weapon", "gun", "knife",
+    "drug", "drugs", "cocaine", "heroin", "marijuana", "weed", "smoking", "alcohol", "drunk",
+    "gambling", "casino", "bet", "betting", "political", "politics", "election", "trump", "biden",
+    "religion", "religious", "god", "jesus", "muslim", "christian", "church", "mosque",
+    "suicide", "depression", "self-harm", "cutting", "mental health crisis",
+    "accident", "crash", "injury", "hospital", "medical emergency",
+    "conspiracy", "fake news", "misinformation", "hoax",
+    "adult content", "mature content", "18+", "nsfw", "not safe for work"
+]
+
 CURATED_SUBREDDITS = [
     "oddlysatisfying", "nextfuckinglevel", "BeAmazed", "woahdude", "MadeMeSmile", "Eyebleach",
     "interestingasfuck", "Damnthatsinteresting", "AnimalsBeingBros", "HumansBeingBros",
