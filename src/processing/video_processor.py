@@ -664,7 +664,7 @@ class TemporaryFileManager:
 
 
 class VideoProcessor:
-    """Main video processing orchestrator with enhanced error handling"""
+    """Main video processing orchestrator with enhanced error handling and modular design"""
     
     def __init__(self):
         self.config = get_config()
@@ -695,40 +695,230 @@ class VideoProcessor:
             try:
                 self.logger.info(f"Starting video processing: {video_path}")
                 
-                # Validate input parameters
-                if not self._validate_inputs(video_path, output_path, analysis):
-                    return False
-                
-                # Load and prepare video
-                video_clip = self._load_and_prepare_video(video_path, resource_manager)
+                # Stage 1: Input Validation and Preparation
+                video_clip = self._load_source_clip(video_path, output_path, analysis, resource_manager)
                 if not video_clip:
                     return False
                 
-                # Apply visual effects with individual error handling
-                video_clip = self._apply_visual_effects(video_clip, analysis, resource_manager)
+                # Stage 2: Audio Synthesis and Composition
+                composite_audio = self._synthesize_audio(video_clip.audio, analysis, background_music_path, resource_manager, temp_manager)
                 
-                # Add text overlays with error handling
-                video_clip = self._add_text_overlays(video_clip, analysis)
+                # Stage 3: Visual Effects and Composition
+                final_visuals = self._compose_visuals(video_clip, analysis, resource_manager)
                 
-                # Process audio with fallback handling
-                video_clip = self._process_audio(video_clip, analysis, background_music_path, resource_manager, temp_manager)
-                
-                # Apply duration constraints
-                video_clip = self._apply_duration_constraints(video_clip)
-                
-                # Write final video with retry logic
-                success = self._write_video_with_retry(video_clip, output_path, temp_manager)
+                # Stage 4: Combine and Render
+                final_clip = final_visuals.set_audio(composite_audio) if composite_audio else final_visuals
+                success = self._render_video(final_clip, output_path, temp_manager)
                 
                 if success:
                     self.logger.info(f"Video processing completed: {output_path}")
                 else:
-                    self.logger.error("Failed to write final video")
+                    self.logger.error("Failed to render final video")
                 
                 return success
                 
             except Exception as e:
                 self.logger.error(f"Critical error in video processing: {e}", exc_info=True)
                 return False
+            finally:
+                self._cleanup()
+    
+    def _load_source_clip(self,
+                          video_path: Path,
+                          output_path: Path,
+                          analysis: VideoAnalysis,
+                          resource_manager: ResourceManager) -> Optional[VideoFileClip]:
+        """
+        Stage 1: Validate inputs and load source video clip
+        
+        Args:
+            video_path: Input video path
+            output_path: Output video path
+            analysis: AI analysis results
+            resource_manager: Resource manager for cleanup
+        
+        Returns:
+            Loaded and prepared video clip or None if failed
+        """
+        try:
+            # Validate input parameters
+            if not self._validate_inputs(video_path, output_path, analysis):
+                return None
+            
+            # Load and prepare video
+            video_clip = self._load_and_prepare_video(video_path, resource_manager)
+            if not video_clip:
+                self.logger.error("Failed to load source video")
+                return None
+            
+            self.logger.info(f"Successfully loaded source clip: {video_clip.duration:.2f}s")
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Error in source clip loading: {e}")
+            return None
+    
+    def _synthesize_audio(self,
+                          source_audio: AudioFileClip,
+                          analysis: VideoAnalysis,
+                          background_music_path: Optional[Path],
+                          resource_manager: ResourceManager,
+                          temp_manager: TemporaryFileManager) -> Optional[AudioFileClip]:
+        """
+        Stage 2: Synthesize complete audio track with TTS, music, and ducking
+        
+        Args:
+            source_audio: Original video audio
+            analysis: AI analysis with audio requirements
+            background_music_path: Optional background music file
+            resource_manager: Resource manager for cleanup
+            temp_manager: Temporary file manager
+        
+        Returns:
+            Composite audio clip or None if failed
+        """
+        try:
+            self.logger.info("Starting audio synthesis")
+            
+            # Process TTS narration if needed
+            narrative_clips = []
+            if analysis.narrative_script_segments and not analysis.original_audio_is_key:
+                try:
+                    narrative_clips = self._process_tts_segments(analysis.narrative_script_segments)
+                    self.logger.info(f"Generated {len(narrative_clips)} TTS segments")
+                except Exception as e:
+                    self.logger.warning(f"TTS processing failed, continuing without narration: {e}")
+            
+            # Add background music if available
+            music_clip = None
+            if background_music_path and background_music_path.exists():
+                try:
+                    music_clip = self._add_background_music(
+                        background_music_path,
+                        source_audio.duration if source_audio else 60,
+                        analysis.narrative_script_segments
+                    )
+                    if music_clip:
+                        resource_manager.register_clip(music_clip)
+                        self.logger.info("Added background music with ducking")
+                except Exception as e:
+                    self.logger.warning(f"Background music processing failed: {e}")
+            
+            # Composite all audio elements
+            audio_elements = []
+            
+            # Add original audio if it's important
+            if analysis.original_audio_is_key and source_audio:
+                audio_elements.append(source_audio)
+                self.logger.info("Preserved original audio")
+            
+            # Add background music
+            if music_clip:
+                audio_elements.append(music_clip)
+            
+            # Add TTS narration
+            if narrative_clips:
+                audio_elements.extend(narrative_clips)
+                for clip in narrative_clips:
+                    resource_manager.register_clip(clip)
+            
+            # Create composite audio
+            if len(audio_elements) > 1:
+                composite_audio = CompositeAudioClip(audio_elements)
+                resource_manager.register_clip(composite_audio)
+                self.logger.info(f"Created composite audio with {len(audio_elements)} elements")
+                return composite_audio
+            elif audio_elements:
+                self.logger.info("Using single audio element")
+                return audio_elements[0]
+            else:
+                self.logger.warning("No audio elements available, using silent audio")
+                return None
+            
+        except Exception as e:
+            self.logger.error(f"Error in audio synthesis: {e}")
+            # Return original audio as fallback
+            return source_audio if source_audio else None
+    
+    def _compose_visuals(self,
+                         source_clip: VideoFileClip,
+                         analysis: VideoAnalysis,
+                         resource_manager: ResourceManager) -> VideoFileClip:
+        """
+        Stage 3: Compose all visual effects, overlays, and enhancements
+        
+        Args:
+            source_clip: Source video clip
+            analysis: AI analysis with visual requirements
+            resource_manager: Resource manager for cleanup
+        
+        Returns:
+            Final composited video with all visual effects
+        """
+        try:
+            self.logger.info("Starting visual composition")
+            video_clip = source_clip
+            
+            # Apply visual effects with graceful error handling
+            video_clip = self._apply_visual_effects(video_clip, analysis, resource_manager)
+            
+            # Add text overlays with error handling
+            video_clip = self._add_text_overlays(video_clip, analysis)
+            
+            # Apply duration constraints
+            video_clip = self._apply_duration_constraints(video_clip)
+            
+            self.logger.info("Visual composition completed")
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Error in visual composition: {e}")
+            # Return source clip as fallback
+            return source_clip
+    
+    def _render_video(self,
+                      final_clip: VideoFileClip,
+                      output_path: Path,
+                      temp_manager: TemporaryFileManager) -> bool:
+        """
+        Stage 4: Render final video to file with retry logic
+        
+        Args:
+            final_clip: Final composited video clip
+            output_path: Output file path
+            temp_manager: Temporary file manager
+        
+        Returns:
+            True if rendering successful, False otherwise
+        """
+        try:
+            self.logger.info(f"Starting video render to: {output_path}")
+            return self._write_video_with_retry(final_clip, output_path, temp_manager)
+            
+        except Exception as e:
+            self.logger.error(f"Error in video rendering: {e}")
+            return False
+    
+    def _process_tts_segments(self, segments: List[NarrativeSegment]) -> List[AudioFileClip]:
+        """
+        Process TTS narrative segments with enhanced error handling
+        
+        Args:
+            segments: List of narrative segments to process
+        
+        Returns:
+            List of generated audio clips
+        """
+        return self.audio_processor.process_narrative_segments(segments)
+    
+    def _cleanup(self):
+        """Perform final cleanup operations"""
+        try:
+            # Force garbage collection
+            gc.collect()
+            self.logger.debug("Performed final cleanup")
+        except Exception as e:
+            self.logger.warning(f"Error during cleanup: {e}")
     
     def _validate_inputs(self, video_path: Path, output_path: Path, analysis: VideoAnalysis) -> bool:
         """Validate input parameters"""

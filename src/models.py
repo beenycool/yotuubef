@@ -4,7 +4,7 @@ Replaces dataclasses with validated models for AI analysis results.
 """
 
 from typing import Dict, List, Optional, Union, Any
-from pydantic import BaseModel, Field, validator, root_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from enum import Enum
 
 
@@ -56,14 +56,14 @@ class VisualCue(BaseModel):
     intensity: float = Field(default=1.0, ge=0.1, le=2.0, description="Effect intensity (0.1-2.0)")
     duration: float = Field(default=1.0, ge=0.1, le=10.0, description="Effect duration in seconds (0.1-10.0)")
 
-    @validator('timestamp_seconds')
+    @field_validator('timestamp_seconds')
+    @classmethod
     def validate_timestamp(cls, v):
         if v < 0:
             raise ValueError('Timestamp must be non-negative')
         return v
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class TextOverlay(BaseModel):
@@ -74,14 +74,14 @@ class TextOverlay(BaseModel):
     position: PositionType = Field(default=PositionType.CENTER, description="Text position on screen")
     style: TextStyle = Field(default=TextStyle.DEFAULT, description="Text style")
 
-    @validator('text')
+    @field_validator('text')
+    @classmethod
     def validate_text_content(cls, v):
         if not v.strip():
             raise ValueError('Text content cannot be empty or whitespace only')
         return v.strip()
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class NarrativeSegment(BaseModel):
@@ -92,14 +92,14 @@ class NarrativeSegment(BaseModel):
     emotion: EmotionType = Field(default=EmotionType.NEUTRAL, description="Emotion for TTS")
     pacing: PacingType = Field(default=PacingType.NORMAL, description="Pacing for TTS")
 
-    @validator('text')
+    @field_validator('text')
+    @classmethod
     def validate_narrative_text(cls, v):
         if not v.strip():
             raise ValueError('Narrative text cannot be empty')
         return v.strip()
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class FocusPoint(BaseModel):
@@ -117,9 +117,10 @@ class SpeedEffect(BaseModel):
     speed_factor: float = Field(..., ge=0.1, le=5.0, description="Speed multiplier (0.1-5.0)")
     effect_type: str = Field(default="speed_change", description="Type of speed effect")
 
-    @validator('end_seconds')
-    def validate_time_range(cls, v, values):
-        if 'start_seconds' in values and v <= values['start_seconds']:
+    @field_validator('end_seconds')
+    @classmethod
+    def validate_time_range(cls, v, info):
+        if hasattr(info, 'data') and 'start_seconds' in info.data and v <= info.data['start_seconds']:
             raise ValueError('End time must be greater than start time')
         return v
 
@@ -137,9 +138,10 @@ class VideoSegment(BaseModel):
     end_seconds: float = Field(..., ge=0, description="End time in seconds")
     reason: str = Field(..., min_length=1, description="Reason for this segment selection")
 
-    @validator('end_seconds')
-    def validate_segment_range(cls, v, values):
-        if 'start_seconds' in values and v <= values['start_seconds']:
+    @field_validator('end_seconds')
+    @classmethod
+    def validate_segment_range(cls, v, info):
+        if hasattr(info, 'data') and 'start_seconds' in info.data and v <= info.data['start_seconds']:
             raise ValueError('End time must be greater than start time')
         return v
 
@@ -182,13 +184,13 @@ class VideoAnalysis(BaseModel):
     
     # Hook content
     hook_text: str = Field(..., min_length=1, max_length=200, description="Hook text (1-200 characters)")
-    hook_variations: List[str] = Field(..., min_items=1, max_items=10, description="Alternative hooks (1-10 items)")
+    hook_variations: List[str] = Field(..., min_length=1, max_length=10, description="Alternative hooks (1-10 items)")
     visual_hook_moment: HookMoment = Field(..., description="Most engaging visual moment")
     audio_hook: AudioHook = Field(..., description="Audio hook configuration")
     
     # Video segments
     best_segment: VideoSegment = Field(..., description="Best video segment")
-    segments: List[VideoSegment] = Field(..., min_items=1, description="All video segments")
+    segments: List[VideoSegment] = Field(..., min_length=1, description="All video segments")
     
     # Enhancement elements
     key_focus_points: List[FocusPoint] = Field(default_factory=list, description="Key focus points in video")
@@ -198,9 +200,9 @@ class VideoAnalysis(BaseModel):
     speed_effects: List[SpeedEffect] = Field(default_factory=list, description="Speed effects to apply")
     
     # Audio and effects
-    music_genres: List[str] = Field(..., min_items=1, description="Suitable music genres")
+    music_genres: List[str] = Field(..., min_length=1, description="Suitable music genres")
     sound_effects: List[SoundEffect] = Field(default_factory=list, description="Sound effects to add")
-    hashtags: List[str] = Field(..., min_items=1, max_items=30, description="Relevant hashtags (1-30 items)")
+    hashtags: List[str] = Field(..., min_length=1, max_length=30, description="Relevant hashtags (1-30 items)")
     original_duration: float = Field(default=0.0, ge=0, description="Original video duration")
     tts_pacing: PacingType = Field(default=PacingType.NORMAL, description="TTS pacing")
     emotional_keywords: List[str] = Field(default_factory=list, description="Emotional keywords")
@@ -214,7 +216,8 @@ class VideoAnalysis(BaseModel):
     is_explicitly_age_restricted: bool = Field(default=False, description="Whether content is age-restricted")
     fallback: bool = Field(default=False, description="Whether this is fallback analysis")
 
-    @validator('hook_variations')
+    @field_validator('hook_variations')
+    @classmethod
     def validate_hook_variations(cls, v):
         # Ensure all hook variations are non-empty and unique
         cleaned = [hook.strip() for hook in v if hook.strip()]
@@ -222,7 +225,8 @@ class VideoAnalysis(BaseModel):
             raise ValueError('Hook variations must be unique')
         return cleaned
 
-    @validator('hashtags')
+    @field_validator('hashtags')
+    @classmethod
     def validate_hashtags(cls, v):
         # Ensure hashtags start with # and are properly formatted
         validated = []
@@ -232,37 +236,40 @@ class VideoAnalysis(BaseModel):
                 continue
             if not tag.startswith('#'):
                 tag = f'#{tag}'
-            # Remove any spaces and special characters except underscore
-            tag = ''.join(c for c in tag if c.isalnum() or c in ['#', '_'])
-            if len(tag) > 1:  # Must have content after #
-                validated.append(tag)
+            
+            # Split by # and process each part separately to handle cases like "#special!@#"
+            parts = tag.split('#')
+            if len(parts) >= 2:  # Should have at least ['', 'content'] after split
+                # Take the first non-empty part after #
+                content = parts[1] if len(parts) > 1 else ''
+                # Remove spaces and special characters except underscore
+                clean_content = ''.join(c for c in content if c.isalnum() or c == '_')
+                if clean_content:  # Must have content after cleaning
+                    validated.append(f'#{clean_content}')
         
         if not validated:
             raise ValueError('At least one valid hashtag is required')
         return validated
 
-    @root_validator
-    def validate_analysis_consistency(cls, values):
+    @model_validator(mode='after')
+    def validate_analysis_consistency(self):
         """Validate consistency across the entire analysis"""
         
         # Ensure visual cues don't exceed reasonable bounds
-        visual_cues = values.get('visual_cues', [])
-        if len(visual_cues) > 20:
+        if len(self.visual_cues) > 20:
             raise ValueError('Too many visual cues (maximum 20)')
         
         # Ensure text overlays don't overlap too much
-        text_overlays = values.get('text_overlays', [])
-        if len(text_overlays) > 15:
+        if len(self.text_overlays) > 15:
             raise ValueError('Too many text overlays (maximum 15)')
         
         # Validate that segments make sense
-        segments = values.get('segments', [])
-        if segments:
-            total_duration = max([seg.end_seconds for seg in segments])
+        if self.segments:
+            total_duration = max([seg.end_seconds for seg in self.segments])
             if total_duration > 300:  # 5 minutes max
                 raise ValueError('Total video duration seems unreasonable (>5 minutes)')
         
-        return values
+        return self
 
     def get_fallback_defaults(self) -> Dict[str, Any]:
         """Get fallback default values for missing or invalid data"""
@@ -280,7 +287,8 @@ class VideoAnalysis(BaseModel):
             'fallback': True
         }
 
-    class Config:
-        use_enum_values = True
-        validate_assignment = True
-        extra = "forbid"  # Don't allow extra fields
+    model_config = ConfigDict(
+        use_enum_values=True,
+        validate_assignment=True,
+        extra="forbid"  # Don't allow extra fields
+    )

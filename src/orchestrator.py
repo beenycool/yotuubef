@@ -17,6 +17,13 @@ from src.integrations.youtube_client import YouTubeClient, VideoMetadata
 from src.integrations.ai_client import GeminiClient, VideoAnalysis
 from src.processing.video_processor import VideoProcessor
 from src.database.db_manager import DatabaseManager
+from src.utils import (
+    select_and_validate_segments,
+    validate_file_paths,
+    get_safe_filename,
+    calculate_video_metrics,
+    validate_analysis_completeness
+)
 
 
 class ProcessingError(Exception):
@@ -214,6 +221,35 @@ class VideoGenerationOrchestrator:
             self.db_manager.record_processing_step(
                 upload_id, "ai_analysis", "completed", step_start, datetime.now(),
                 metadata={"fallback_used": analysis.fallback}
+            )
+            
+            # Step 2.5: Validate Analysis and Segments
+            step_start = datetime.now()
+            
+            # Check analysis completeness
+            is_complete, missing_items = validate_analysis_completeness(analysis)
+            if not is_complete:
+                self.logger.warning(f"Analysis incomplete, missing: {missing_items}")
+            
+            # Calculate video metrics for resource planning
+            video_metrics = calculate_video_metrics(analysis)
+            self.logger.info(f"Video complexity score: {video_metrics['complexity_score']} "
+                           f"(priority: {video_metrics['processing_priority']})")
+            
+            # Validate and select video segments
+            valid_segments = select_and_validate_segments(analysis, self.config.model_dump())
+            if not valid_segments:
+                raise ProcessingError("No valid video segments could be determined")
+            
+            self.logger.info(f"Selected {len(valid_segments)} valid segments for processing")
+            
+            self.db_manager.record_processing_step(
+                upload_id, "segment_validation", "completed", step_start, datetime.now(),
+                metadata={
+                    "segments_found": len(valid_segments),
+                    "complexity_score": video_metrics['complexity_score'],
+                    "analysis_complete": is_complete
+                }
             )
             
             # Step 3: Video Processing
