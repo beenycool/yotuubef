@@ -1,77 +1,322 @@
-# Video Processing Configuration
+# YouTube Video Generation System Configuration
+# Centralized configuration for all system components
+
+# Video Processing Settings
 video:
-  target_duration: 60
-  target_resolution: [1080, 1920]
+  target_duration: 59  # seconds, slightly under 60 for YouTube Shorts
+  target_resolution: [1080, 1920]  # width x height for vertical video
+  target_aspect_ratio: 0.5625  # 9:16 aspect ratio
+  target_fps: 30
   max_retries: 3
-  default_crop: [0.25, 0.25, 0.75, 0.75]
+  default_crop: [0.25, 0.25, 0.75, 0.75]  # default crop area [x1, y1, x2, y2]
+  
+  # Audio settings
+  audio_codec: 'aac'
+  audio_bitrate: '192k'
+  loudness_target_lufs: -14.0
+  default_audio_fps: 44100
+  
+  # Video encoding
+  video_codec_cpu: 'libx264'
+  video_codec_gpu: 'h264_nvenc'
+  ffmpeg_cpu_preset: 'medium'
+  ffmpeg_gpu_preset: 'p5'
+  ffmpeg_crf_cpu: '23'
+  ffmpeg_cq_gpu: '23'
+  video_bitrate_high: '10M'
+  
+  # Processing optimization
+  chunk_size: 30  # seconds for chunked processing
+  max_memory_usage: 0.8  # 80% of available system memory
 
+# Text Overlay and Subtitles
 text_overlay:
-  font: Impact
-  font_size_ratio: 0.08
-  stroke_width: 3
-  position: [0.5, 0.85]
+  # Graphical text overlays (AI-generated emphasis text)
+  graphical_font: 'Montserrat-Bold.ttf'
+  graphical_font_size_ratio: 0.056  # ratio to video height
+  graphical_text_color: 'white'
+  graphical_stroke_color: 'black'
+  graphical_stroke_width: 2
+  graphical_bg_color: 'rgba(0,0,0,0.5)'
+  
+  # Subtitle settings
+  subtitle_font: 'Montserrat-Regular.ttf'
+  subtitle_font_size_ratio: 0.04
+  subtitle_text_color: 'white'
+  subtitle_stroke_color: 'black'
+  subtitle_stroke_width: 1
+  subtitle_position: ['center', 0.92]  # center horizontally, 92% from top
+  subtitle_bg_color: 'rgba(0,0,0,0.4)'
+  
+  # Font size profiles for different text lengths
+  font_size_ratio_profiles:
+    short: 0.06   # for text under 10 characters
+    medium: 0.045 # for text 10-30 characters
+    long: 0.035   # for text over 30 characters
+  
+  # Animation settings
+  fade_in: 0.2
+  fade_out: 0.2
+  animation: 'fade'  # fade, none
 
+# Video Effects and Enhancements
 effects:
   shake_intensity: 0.02
   max_zoom: 1.1
   stabilization_threshold: 5.0
   color_grade_intensity: 0.7
-processing:
-  temp_dir: /content/temp
+  subtle_zoom_enabled: true
+  color_grade_enabled: true
+  
+  # Seamless looping configuration
+  enable_seamless_looping: true
+  loop_crossfade_duration: 0.3
+  loop_compatibility_threshold: 0.3
+  loop_sample_duration: 0.5
+  loop_target_duration: null  # null for auto-detect
+  enable_audio_crossfade: true
+  loop_extend_mode: 'middle_repeat'  # middle_repeat, slow_motion, boomerang, none
+  loop_trim_from_center: true
 
+# Audio Processing
+audio:
+  original_audio_mix_volume: 0.15
+  background_music_enabled: true
+  background_music_volume: 0.06
+  background_music_narrative_volume_factor: 0.2  # ducking factor during TTS
+  
+  # Music categories for mood matching
+  music_categories:
+    upbeat: ['energetic', 'positive', 'happy', 'uplifting']
+    emotional: ['sad', 'heartwarming', 'touching', 'sentimental']
+    suspenseful: ['tense', 'dramatic', 'action', 'exciting']
+    relaxing: ['calm', 'peaceful', 'ambient', 'soothing']
+    funny: ['quirky', 'comedic', 'playful', 'lighthearted']
+    informative: ['neutral', 'documentary', 'educational', 'background']
+
+# API Configuration
 apis:
+  # Rate limiting and timeouts
+  api_delay_seconds: 2
+  
+  # Gemini AI settings
   gemini:
+    model_id: 'gemini-2.0-flash'
     max_frames: 20
     timeout: 30
-    safety_threshold: medium
+    safety_threshold: 'medium'
+  
+  # ElevenLabs TTS settings
   elevenlabs:
     timeout: 20
-    default_voice: 21m00Tcm4TlvDq8ikWAM
+    default_voice: '21m00Tcm4TlvDq8ikWAM'
+  
+  # YouTube API settings
+  youtube:
+    api_service_name: 'youtube'
+    api_version: 'v3'
+    upload_category_id: '24'  # Entertainment
+    upload_privacy_status: 'public'  # public, private, unlisted
+    self_certification: true
+    scopes:
+      - 'https://www.googleapis.com/auth/youtube.upload'
+      - 'https://www.googleapis.com/auth/youtube.force-ssl'
+      - 'https://www.googleapis.com/auth/youtubepartner'
 
-subreddits:
-  - CrazyFuckingVideos
-  - funny
-  - videos
-  - interestingasfuck
-  - mildlyinteresting
-  - mildlyinfuriating
-  - CasualUK
-  - BeAmazed
-  - cats
-  - Damnthatsinteresting
-  - chaoticgood
+# Content Curation and Filtering
+content:
+  max_reddit_posts_to_fetch: 10
+  
+  # Curated subreddits for safe, monetizable content
+  curated_subreddits:
+    - 'oddlysatisfying'
+    - 'nextfuckinglevel'
+    - 'BeAmazed'
+    - 'woahdude'
+    - 'MadeMeSmile'
+    - 'Eyebleach'
+    - 'interestingasfuck'
+    - 'Damnthatsinteresting'
+    - 'AnimalsBeingBros'
+    - 'HumansBeingBros'
+    - 'wholesomememes'
+    - 'ContagiousLaughter'
+    - 'foodporn'
+    - 'CookingVideos'
+    - 'ArtisanVideos'
+    - 'educationalgifs'
+    - 'DIY'
+    - 'gardening'
+    - 'science'
+    - 'space'
+    - 'NatureIsCool'
+    - 'aww'
+    - 'AnimalsBeingDerps'
+    - 'rarepuppers'
+    - 'LifeProTips'
+    - 'GetMotivated'
+    - 'toptalent'
+    - 'BetterEveryLoop'
+    - 'childrenfallingover'
+    - 'instantregret'
+    - 'wholesomegifs'
+    - 'Unexpected'
+    - 'nevertellmetheodds'
+    - 'whatcouldgoright'
+    - 'holdmymilk'
+    - 'maybemaybemaybe'
+    - 'mildlyinteresting'
+  
+  # Content filtering
+  forbidden_words:
+    - 'fuck'
+    - 'fucking'
+    - 'fucked'
+    - 'fuckin'
+    - 'shit'
+    - 'shitty'
+    - 'shitting'
+    - 'wtf'
+    - 'stfu'
+    - 'omfg'
+    - 'porn'
+    - 'pornographic'
+    - 'nsfw'
+    - 'xxx'
+    - 'sex'
+    - 'sexual'
+    - 'nude'
+    - 'naked'
+    - 'racist'
+    - 'racism'
+    - 'nazi'
+    - 'sexist'
+  
+  unsuitable_content_types:
+    - 'violence'
+    - 'violent'
+    - 'gore'
+    - 'blood'
+    - 'death'
+    - 'killing'
+    - 'murder'
+    - 'weapon'
+    - 'gun'
+    - 'knife'
+    - 'drug'
+    - 'drugs'
+    - 'cocaine'
+    - 'heroin'
+    - 'marijuana'
+    - 'weed'
+    - 'smoking'
+    - 'alcohol'
+    - 'drunk'
+    - 'gambling'
+    - 'casino'
+    - 'bet'
+    - 'betting'
+    - 'political'
+    - 'politics'
+    - 'election'
+    - 'trump'
+    - 'biden'
+    - 'religion'
+    - 'religious'
+    - 'god'
+    - 'jesus'
+    - 'muslim'
+    - 'christian'
+    - 'church'
+    - 'mosque'
+    - 'suicide'
+    - 'depression'
+    - 'self-harm'
+    - 'cutting'
+    - 'mental health crisis'
+    - 'accident'
+    - 'crash'
+    - 'injury'
+    - 'hospital'
+    - 'medical emergency'
+    - 'conspiracy'
+    - 'fake news'
+    - 'misinformation'
+    - 'hoax'
+    - 'adult content'
+    - 'mature content'
+    - '18+'
+    - 'nsfw'
+    - 'not safe for work'
+  
+  # YouTube monetization-friendly tags
+  monetization_tags:
+    - 'family friendly'
+    - 'educational'
+    - 'informative'
+    - 'wholesome'
+    - 'positive'
+    - 'interesting'
+    - 'amazing'
+    - 'satisfying'
+    - 'relaxing'
+    - 'shorts'
+    - 'shortvideo'
 
+# Fallback Settings
 fallbacks:
   enable_basic_effects: true
-  default_mood: exciting
-  default_hashtags: ['#viral', '#shorts', '#reddit']
+  default_mood: 'exciting'
+  default_hashtags:
+    - '#viral'
+    - '#shorts'
+    - '#reddit'
+  
+  # Default analysis when AI is unavailable
+  default_analysis:
+    suggested_title: 'Amazing Reddit Video'
+    summary_for_description: 'Check out this incredible content from Reddit!'
+    mood: 'exciting'
+    has_clear_narrative: false
+    original_audio_is_key: true
+    hook_text: 'Watch this amazing moment!'
+    music_genres:
+      - 'upbeat'
+    emotional_keywords:
+      - 'interesting'
+      - 'engaging'
 
-subtitles:
-  font_size_ratio_profiles:
-    short: 0.06
-    medium: 0.045
-    long: 0.035
-  font: Montserrat-Regular.ttf
-  font_per_language:
-    en: Montserrat-Regular.ttf
-    th: NotoSansThai-Regular.ttf
-  text_color: 'white'
-  stroke_color: 'black'
-  stroke_width: 1
-  bg_style: box  # box, outline, dynamic
-  bg_opacity: 0.4
-  position: bottom_center  # bottom_center, top_center, custom
-  y_offset: 0.92  # relative vertical offset (0.92 = bottom 8%)
-  fade_in: 0.2
-  fade_out: 0.2
-  animation: fade  # fade, none
+# Processing Directories
+processing:
+  temp_dir: 'temp_processing'
+  enable_cleanup: true
+  cleanup_after_upload: true
+  keep_successful_videos: false  # set to true to keep processed videos after upload
+  max_temp_files: 50  # maximum temporary files before cleanup
 
-looping:
-  enable: true
-  crossfade_duration: 0.3
-  compatibility_threshold: 0.3
-  extend_mode: middle_repeat  # middle_repeat, slow_motion, boomerang, ai_transition, none
-  visual_masking: false  # true to enable masking at loop point
-  masking_effect: fade_black  # fade_black, blur, overlay, none
-  masking_duration: 0.15
-  content_aware: false  # true to enable content-aware loop points
+# Logging Configuration
+logging:
+  level: 'INFO'  # DEBUG, INFO, WARNING, ERROR
+  enable_file_logging: true
+  log_file: 'video_generation.log'
+  max_log_size_mb: 10
+  backup_count: 5
+  
+  # Component-specific log levels
+  component_levels:
+    'src.integrations.reddit_client': 'INFO'
+    'src.integrations.youtube_client': 'INFO'
+    'src.integrations.ai_client': 'INFO'
+    'src.processing.video_processor': 'INFO'
+    'src.database.db_manager': 'WARNING'
+
+# Development and Testing
+development:
+  enable_debug_mode: false
+  save_intermediate_files: false
+  mock_youtube_upload: false
+  mock_ai_analysis: false
+  test_subreddits:
+    - 'test'
+    - 'videos'
+  max_test_videos: 3
