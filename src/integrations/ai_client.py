@@ -140,6 +140,159 @@ class GeminiClient:
     def is_available(self) -> bool:
         """Check if Gemini client is available"""
         return self.model is not None
+
+    def analyze_comment_for_pinning(self, comment_text: str) -> Dict[str, Any]:
+        """
+        Analyze a comment to determine if it should be pinned
+        
+        Args:
+            comment_text: The comment text to analyze
+            
+        Returns:
+            Dict with 'should_pin' boolean and 'reason' string
+        """
+        if not self.is_available():
+            return {"should_pin": False, "reason": "Gemini client not available"}
+
+        try:
+            prompt = f"""
+            Analyze this YouTube comment for potential pinning:
+            "{comment_text}"
+            
+            Consider these factors:
+            - Positivity: Is the comment positive and encouraging?
+            - Relevance: Does it relate directly to the video content?
+            - Engagement: Does it ask a good question or encourage discussion?
+            - Quality: Is it well-written and thoughtful?
+            
+            Return your analysis in JSON format with these keys:
+            - "should_pin": boolean (true if worth pinning)
+            - "reason": short explanation (1-2 sentences)
+            - "score": integer from 1-10 (10 = best)
+            """
+            
+            response = self.model.generate_content(prompt)
+            response_text = response.text
+            
+            # Extract JSON from response
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+            if json_start == -1 or json_end == 0:
+                return {"should_pin": False, "reason": "Failed to parse AI response", "score": 0}
+                
+            json_str = response_text[json_start:json_end]
+            result = json.loads(json_str)
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing comment: {e}")
+            return {"should_pin": False, "reason": f"Analysis error: {str(e)}", "score": 0}
+    
+    def translate_analysis(self, video_analysis: VideoAnalysis, target_language: str) -> Dict[str, Any]:
+        """
+        Translate video analysis content to target language
+        
+        Args:
+            video_analysis: The VideoAnalysis object to translate
+            target_language: Target language code (e.g., 'es', 'fr', 'de', 'pt')
+            
+        Returns:
+            Dict with translated content including title, description, hashtags, etc.
+        """
+        if not self.is_available():
+            self.logger.warning("Gemini not available, returning original content")
+            return {
+                "title": video_analysis.suggested_title,
+                "description": video_analysis.summary_for_description,
+                "hashtags": video_analysis.hashtags,
+                "hook_text": video_analysis.hook_text,
+                "call_to_action": video_analysis.call_to_action.text if video_analysis.call_to_action else "",
+                "language": "en"
+            }
+        
+        # Language mapping for better prompts
+        language_names = {
+            'es': 'Spanish', 'fr': 'French', 'de': 'German', 'pt': 'Portuguese',
+            'it': 'Italian', 'ru': 'Russian', 'ja': 'Japanese', 'ko': 'Korean',
+            'zh': 'Chinese', 'ar': 'Arabic', 'hi': 'Hindi', 'tr': 'Turkish'
+        }
+        
+        language_name = language_names.get(target_language, target_language)
+        
+        try:
+            prompt = f"""
+            Translate the following YouTube video content to {language_name}.
+            Maintain the engaging, energetic tone suitable for YouTube Shorts.
+            Keep hashtags relevant and popular in the target language.
+            
+            Original Content:
+            - Title: "{video_analysis.suggested_title}"
+            - Description: "{video_analysis.summary_for_description}"
+            - Hook Text: "{video_analysis.hook_text}"
+            - Call to Action: "{video_analysis.call_to_action.text if video_analysis.call_to_action else 'Like and subscribe!'}"
+            - Hashtags: {', '.join(video_analysis.hashtags)}
+            
+            Requirements:
+            - Keep titles under 100 characters
+            - Make descriptions engaging and SEO-friendly
+            - Use popular hashtags in the target language
+            - Maintain the excitement and energy of the original
+            - Ensure cultural appropriateness
+            
+            Return the translation in JSON format with these keys:
+            - "title": translated title
+            - "description": translated description
+            - "hook_text": translated hook text
+            - "call_to_action": translated call to action
+            - "hashtags": array of translated/localized hashtags
+            - "language": language code ("{target_language}")
+            """
+            
+            response = self.model.generate_content(
+                prompt,
+                generation_config=genai.types.GenerationConfig(
+                    temperature=0.7,
+                    max_output_tokens=1024,
+                )
+            )
+            
+            response_text = response.text
+            
+            # Extract JSON from response
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}') + 1
+            if json_start == -1 or json_end == 0:
+                self.logger.error("Failed to parse translation response")
+                return self._get_fallback_translation(video_analysis, target_language)
+                
+            json_str = response_text[json_start:json_end]
+            result = json.loads(json_str)
+            
+            # Validate required fields
+            required_fields = ['title', 'description', 'hook_text', 'call_to_action', 'hashtags']
+            for field in required_fields:
+                if field not in result:
+                    self.logger.warning(f"Missing field {field} in translation")
+                    return self._get_fallback_translation(video_analysis, target_language)
+            
+            self.logger.info(f"Successfully translated content to {language_name}")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error translating content: {e}")
+            return self._get_fallback_translation(video_analysis, target_language)
+    
+    def _get_fallback_translation(self, video_analysis: VideoAnalysis, target_language: str) -> Dict[str, Any]:
+        """Return fallback translation when AI translation fails"""
+        return {
+            "title": video_analysis.suggested_title,
+            "description": video_analysis.summary_for_description,
+            "hashtags": video_analysis.hashtags,
+            "hook_text": video_analysis.hook_text,
+            "call_to_action": video_analysis.call_to_action.text if video_analysis.call_to_action else "Like and subscribe!",
+            "language": target_language
+        }
     
     def extract_video_frames(self, video_path: Path, max_frames: int = 20) -> List[np.ndarray]:
         """Extract frames from video for analysis"""

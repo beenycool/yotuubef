@@ -31,7 +31,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 
-                # Create uploads table with comprehensive schema
+                # Create uploads table with comprehensive schema including A/B testing support
                 cursor.execute('''
                     CREATE TABLE IF NOT EXISTS uploads (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,6 +50,12 @@ class DatabaseManager:
                         error_message TEXT,
                         thumbnail_uploaded BOOLEAN DEFAULT FALSE,
                         ai_analysis_used BOOLEAN DEFAULT FALSE,
+                        thumbnail_ctr_a REAL,
+                        thumbnail_ctr_b REAL,
+                        active_thumbnail TEXT DEFAULT 'A',
+                        thumbnail_test_start_date DATETIME,
+                        thumbnail_test_complete BOOLEAN DEFAULT FALSE,
+                        winning_thumbnail TEXT,
                         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
                     )
@@ -128,6 +134,13 @@ class DatabaseManager:
                 ("ai_analysis_used", "ALTER TABLE uploads ADD COLUMN ai_analysis_used BOOLEAN DEFAULT FALSE"),
                 ("created_at", "ALTER TABLE uploads ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"),
                 ("updated_at", "ALTER TABLE uploads ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"),
+                # A/B Testing columns
+                ("thumbnail_ctr_a", "ALTER TABLE uploads ADD COLUMN thumbnail_ctr_a REAL"),
+                ("thumbnail_ctr_b", "ALTER TABLE uploads ADD COLUMN thumbnail_ctr_b REAL"),
+                ("active_thumbnail", "ALTER TABLE uploads ADD COLUMN active_thumbnail TEXT DEFAULT 'A'"),
+                ("thumbnail_test_start_date", "ALTER TABLE uploads ADD COLUMN thumbnail_test_start_date DATETIME"),
+                ("thumbnail_test_complete", "ALTER TABLE uploads ADD COLUMN thumbnail_test_complete BOOLEAN DEFAULT FALSE"),
+                ("winning_thumbnail", "ALTER TABLE uploads ADD COLUMN winning_thumbnail TEXT"),
             ]
             
             for column_name, migration_sql in migrations:
@@ -489,6 +502,167 @@ class DatabaseManager:
                 
         except Exception as e:
             self.logger.error(f"Error exporting database: {e}")
+    
+    # A/B Thumbnail Testing Methods
+    
+    def start_thumbnail_ab_test(self, upload_id: int) -> bool:
+        """Start A/B test for thumbnail by recording test start date"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE uploads
+                    SET thumbnail_test_start_date = ?,
+                        active_thumbnail = 'A',
+                        updated_at = ?
+                    WHERE id = ?
+                ''', (datetime.now(), datetime.now(), upload_id))
+                
+                conn.commit()
+                self.logger.info(f"Started thumbnail A/B test for upload {upload_id}")
+                return True
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error starting thumbnail A/B test: {e}")
+            return False
+    
+    def update_thumbnail_ctr(self, upload_id: int, variant: str, ctr: float) -> bool:
+        """
+        Update CTR for a specific thumbnail variant
+        
+        Args:
+            upload_id: ID of the upload
+            variant: 'A' or 'B'
+            ctr: Click-through rate as decimal (e.g., 0.05 for 5%)
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                if variant.upper() == 'A':
+                    cursor.execute('''
+                        UPDATE uploads
+                        SET thumbnail_ctr_a = ?, updated_at = ?
+                        WHERE id = ?
+                    ''', (ctr, datetime.now(), upload_id))
+                elif variant.upper() == 'B':
+                    cursor.execute('''
+                        UPDATE uploads
+                        SET thumbnail_ctr_b = ?, updated_at = ?
+                        WHERE id = ?
+                    ''', (ctr, datetime.now(), upload_id))
+                else:
+                    raise ValueError(f"Invalid variant: {variant}. Must be 'A' or 'B'")
+                
+                conn.commit()
+                self.logger.info(f"Updated thumbnail CTR for upload {upload_id}, variant {variant}: {ctr:.4f}")
+                return True
+                
+        except (sqlite3.Error, ValueError) as e:
+            self.logger.error(f"Error updating thumbnail CTR: {e}")
+            return False
+    
+    def switch_active_thumbnail(self, upload_id: int, variant: str) -> bool:
+        """
+        Switch the active thumbnail variant
+        
+        Args:
+            upload_id: ID of the upload
+            variant: 'A' or 'B'
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE uploads
+                    SET active_thumbnail = ?, updated_at = ?
+                    WHERE id = ?
+                ''', (variant.upper(), datetime.now(), upload_id))
+                
+                conn.commit()
+                self.logger.info(f"Switched active thumbnail for upload {upload_id} to variant {variant}")
+                return True
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error switching active thumbnail: {e}")
+            return False
+    
+    def complete_thumbnail_ab_test(self, upload_id: int, winning_variant: str) -> bool:
+        """
+        Complete the A/B test and record the winning variant
+        
+        Args:
+            upload_id: ID of the upload
+            winning_variant: 'A' or 'B'
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE uploads
+                    SET thumbnail_test_complete = TRUE,
+                        winning_thumbnail = ?,
+                        active_thumbnail = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                ''', (winning_variant.upper(), winning_variant.upper(), datetime.now(), upload_id))
+                
+                conn.commit()
+                self.logger.info(f"Completed thumbnail A/B test for upload {upload_id}, winner: {winning_variant}")
+                return True
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error completing thumbnail A/B test: {e}")
+            return False
+    
+    def get_pending_ab_tests(self, hours_since_start: int = 24) -> List[Dict[str, Any]]:
+        """
+        Get uploads that are ready for thumbnail A/B test evaluation
+        
+        Args:
+            hours_since_start: Minimum hours since test started
+            
+        Returns:
+            List of uploads ready for evaluation
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT * FROM uploads
+                    WHERE thumbnail_test_start_date IS NOT NULL
+                    AND thumbnail_test_complete = FALSE
+                    AND datetime(thumbnail_test_start_date, '+{} hours') <= datetime('now')
+                    ORDER BY thumbnail_test_start_date ASC
+                '''.format(hours_since_start))
+                
+                rows = cursor.fetchall()
+                return [dict(row) for row in rows]
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error getting pending A/B tests: {e}")
+            return []
+    
+    def get_ab_test_results(self, upload_id: int) -> Optional[Dict[str, Any]]:
+        """Get A/B test results for a specific upload"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT thumbnail_ctr_a, thumbnail_ctr_b, active_thumbnail,
+                           thumbnail_test_start_date, thumbnail_test_complete,
+                           winning_thumbnail
+                    FROM uploads WHERE id = ?
+                ''', (upload_id,))
+                
+                row = cursor.fetchone()
+                if row:
+                    return dict(row)
+                return None
+                
+        except sqlite3.Error as e:
+            self.logger.error(f"Error getting A/B test results: {e}")
+            return None
 
 
 # Global database manager instance

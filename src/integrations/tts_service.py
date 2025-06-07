@@ -92,19 +92,21 @@ class TTSService:
         
         # Try preferred service first
         if prefer_elevenlabs and ELEVENLABS_AVAILABLE:
-            result = self._generate_with_elevenlabs(segment, output_path)
+            result = self._generate_with_elevenlabs(segment, output_path, language)
             if result:
                 return result
         
-        # Fallback to Dia
-        if DIA_AVAILABLE:
+        # Fallback to Dia (only supports English)
+        if DIA_AVAILABLE and language == 'en':
             result = self._generate_with_dia(segment, output_path)
             if result:
                 return result
+        elif DIA_AVAILABLE:
+            self.logger.warning(f"Dia only supports English, falling back to ElevenLabs for {language}")
         
         # Final fallback to ElevenLabs if not tried yet
         if not prefer_elevenlabs and ELEVENLABS_AVAILABLE:
-            result = self._generate_with_elevenlabs(segment, output_path)
+            result = self._generate_with_elevenlabs(segment, output_path, language)
             if result:
                 return result
         

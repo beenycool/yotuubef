@@ -302,63 +302,161 @@ class VideoEffects:
             self.logger.warning(f"Error creating zoom highlight: {e}")
             return None
     
-    def apply_intelligent_focus(self, clip: VideoFileClip, focus_points: List[Dict[str, Any]]) -> VideoFileClip:
-        """Apply intelligent panning and zooming based on AI-identified focus points"""
-        if not focus_points:
-            return clip
+    def apply_dynamic_pan_zoom(self, clip: VideoFileClip, focus_points: List[Dict[str, Any]]) -> VideoFileClip:
+        """
+        Apply dynamic panning and zooming based on AI-identified focus points.
+        This creates smooth transitions between focus points to make static or wide shots feel dynamic.
+        
+        Args:
+            clip: Input video clip
+            focus_points: List of focus points with x, y coordinates and timestamps
+            
+        Returns:
+            Video clip with dynamic panning and zooming applied
+        """
+        if not focus_points or len(focus_points) < 2:
+            self.logger.info("Insufficient focus points for dynamic pan/zoom, applying subtle zoom instead")
+            return self.apply_subtle_zoom(clip)
         
         try:
             # Sort focus points by timestamp
             sorted_points = sorted(focus_points, key=lambda x: x.get('timestamp_seconds', 0))
             
-            # Create segments with different focus areas
-            segments = []
-            current_time = 0
-            
-            for i, point in enumerate(sorted_points):
-                timestamp = point.get('timestamp_seconds', 0)
-                x = point.get('x', 0.5)  # Normalized coordinates (0-1)
-                y = point.get('y', 0.5)
-                description = point.get('description', '')
+            def make_dynamic_transform(get_frame, t):
+                """Create dynamic crop transformation based on current time and focus points"""
+                frame = get_frame(t)
+                h, w = frame.shape[:2]
                 
-                # Add normal segment before focus point if needed
-                if current_time < timestamp:
-                    normal_segment = clip.subclip(current_time, timestamp)
-                    segments.append(normal_segment)
+                # Find the current focus point pair to interpolate between
+                current_point = None
+                next_point = None
                 
-                # Calculate focus duration (time to next point or remaining duration)
-                if i + 1 < len(sorted_points):
-                    next_timestamp = sorted_points[i + 1].get('timestamp_seconds', clip.duration)
-                    focus_duration = min(3.0, next_timestamp - timestamp)  # Max 3 seconds per focus
+                for i, point in enumerate(sorted_points):
+                    point_time = point.get('timestamp_seconds', 0)
+                    if point_time <= t:
+                        current_point = point
+                        if i + 1 < len(sorted_points):
+                            next_point = sorted_points[i + 1]
+                    else:
+                        break
+                
+                # If no current point found, use first point
+                if current_point is None:
+                    current_point = sorted_points[0]
+                    next_point = sorted_points[1] if len(sorted_points) > 1 else None
+                
+                # If no next point, use current point (end of sequence)
+                if next_point is None:
+                    target_x = current_point.get('x', 0.5)
+                    target_y = current_point.get('y', 0.5)
+                    interpolation_factor = 0
                 else:
-                    focus_duration = min(3.0, clip.duration - timestamp)
+                    # Calculate interpolation between current and next point
+                    current_time = current_point.get('timestamp_seconds', 0)
+                    next_time = next_point.get('timestamp_seconds', clip.duration)
+                    
+                    if next_time > current_time:
+                        interpolation_factor = (t - current_time) / (next_time - current_time)
+                        interpolation_factor = max(0, min(1, interpolation_factor))  # Clamp to [0,1]
+                        
+                        # Smooth interpolation using easing function
+                        eased_factor = self._ease_in_out_cubic(interpolation_factor)
+                        
+                        # Interpolate between focus points
+                        current_x = current_point.get('x', 0.5)
+                        current_y = current_point.get('y', 0.5)
+                        next_x = next_point.get('x', 0.5)
+                        next_y = next_point.get('y', 0.5)
+                        
+                        target_x = current_x + (next_x - current_x) * eased_factor
+                        target_y = current_y + (next_y - current_y) * eased_factor
+                    else:
+                        target_x = current_point.get('x', 0.5)
+                        target_y = current_point.get('y', 0.5)
+                        interpolation_factor = 0
                 
-                if focus_duration > 0.1:  # Minimum focus duration
-                    # Create focused segment
-                    focus_segment = self._create_focus_segment(
-                        clip, timestamp, focus_duration, x, y, description
-                    )
-                    if focus_segment:
-                        segments.append(focus_segment)
+                # Apply dynamic zoom based on motion intensity
+                base_zoom = 1.1  # Base zoom factor
+                motion_zoom = 0.05 * abs(interpolation_factor - 0.5)  # More zoom during transitions
+                zoom_factor = base_zoom + motion_zoom
                 
-                current_time = timestamp + focus_duration
+                # Calculate crop dimensions
+                crop_w = int(w / zoom_factor)
+                crop_h = int(h / zoom_factor)
+                
+                # Convert normalized coordinates to pixel coordinates
+                focus_x = int(target_x * w)
+                focus_y = int(target_y * h)
+                
+                # Calculate crop window centered on focus point
+                crop_x1 = max(0, focus_x - crop_w // 2)
+                crop_y1 = max(0, focus_y - crop_h // 2)
+                crop_x2 = min(w, crop_x1 + crop_w)
+                crop_y2 = min(h, crop_y1 + crop_h)
+                
+                # Adjust if crop extends beyond bounds
+                if crop_x2 == w:
+                    crop_x1 = w - crop_w
+                if crop_y2 == h:
+                    crop_y1 = h - crop_h
+                
+                # Ensure crop coordinates are valid
+                crop_x1 = max(0, crop_x1)
+                crop_y1 = max(0, crop_y1)
+                crop_x2 = min(w, crop_x2)
+                crop_y2 = min(h, crop_y2)
+                
+                # Apply crop
+                cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                
+                # Resize back to original dimensions
+                if cropped.size > 0:
+                    return cv2.resize(cropped, (w, h))
+                else:
+                    return frame
             
-            # Add remaining segment if any
-            if current_time < clip.duration:
-                remaining_segment = clip.subclip(current_time, clip.duration)
-                segments.append(remaining_segment)
+            # Apply the transformation
+            transformed_clip = clip.fl(make_dynamic_transform)
             
-            # Concatenate all segments
-            if len(segments) > 1:
-                return concatenate_videoclips(segments)
-            elif segments:
-                return segments[0]
-            else:
-                return clip
-                
+            self.logger.info(f"Applied dynamic pan/zoom with {len(sorted_points)} focus points")
+            return transformed_clip
+            
         except Exception as e:
-            self.logger.warning(f"Error applying intelligent focus: {e}")
+            self.logger.warning(f"Error applying dynamic pan/zoom: {e}")
+            return self.apply_subtle_zoom(clip)  # Fallback to subtle zoom
+    
+    def _ease_in_out_cubic(self, t: float) -> float:
+        """
+        Cubic easing function for smooth transitions
+        
+        Args:
+            t: Input value between 0 and 1
+            
+        Returns:
+            Eased value between 0 and 1
+        """
+        if t < 0.5:
+            return 4 * t * t * t
+        else:
+            return 1 - pow(-2 * t + 2, 3) / 2
+
+    def apply_intelligent_focus(self, clip: VideoFileClip, focus_points: List[Dict[str, Any]]) -> VideoFileClip:
+        """
+        Apply intelligent panning and zooming based on AI-identified focus points.
+        This method now uses the new dynamic pan/zoom functionality.
+        
+        Args:
+            clip: Input video clip
+            focus_points: List of focus points with coordinates and timestamps
+            
+        Returns:
+            Video clip with intelligent focus applied
+        """
+        if not focus_points:
             return clip
+        
+        # Use the new dynamic pan/zoom method for better results
+        return self.apply_dynamic_pan_zoom(clip, focus_points)
     
     def _create_focus_segment(self, clip: VideoFileClip, timestamp: float, duration: float,
                              x: float, y: float, description: str) -> Optional[VideoFileClip]:
@@ -1563,6 +1661,25 @@ class VideoProcessor:
                 except Exception as e:
                     self.logger.warning(f"Failed to apply visual cues: {e}")
             
+            # Apply dynamic pan/zoom using focus points if available
+            if hasattr(analysis, 'focus_points') and analysis.focus_points:
+                try:
+                    pan_zoom_clip = self.effects.apply_dynamic_pan_zoom(video_clip, analysis.focus_points)
+                    if pan_zoom_clip != video_clip:
+                        resource_manager.register_clip(pan_zoom_clip)
+                        video_clip = pan_zoom_clip
+                except Exception as e:
+                    self.logger.warning(f"Failed to apply dynamic pan/zoom: {e}")
+            else:
+                # Apply subtle zoom as fallback
+                try:
+                    zoom_clip = self.effects.apply_subtle_zoom(video_clip)
+                    if zoom_clip != video_clip:
+                        resource_manager.register_clip(zoom_clip)
+                        video_clip = zoom_clip
+                except Exception as e:
+                    self.logger.warning(f"Failed to apply zoom effect: {e}")
+            
             # Apply speed effects
             if analysis.speed_effects:
                 try:
@@ -1572,15 +1689,6 @@ class VideoProcessor:
                         video_clip = speed_clip
                 except Exception as e:
                     self.logger.warning(f"Failed to apply speed effects: {e}")
-            
-            # Apply visual enhancements
-            try:
-                zoom_clip = self.effects.apply_subtle_zoom(video_clip)
-                if zoom_clip != video_clip:
-                    resource_manager.register_clip(zoom_clip)
-                    video_clip = zoom_clip
-            except Exception as e:
-                self.logger.warning(f"Failed to apply zoom effect: {e}")
             
             try:
                 # Use adaptive color grading instead of basic color grading for better quality

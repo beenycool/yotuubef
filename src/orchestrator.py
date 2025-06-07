@@ -14,6 +14,7 @@ import gc
 from src.config.settings import get_config, init_config
 from src.integrations.reddit_client import RedditClient, RedditPost
 from src.integrations.youtube_client import YouTubeClient, VideoMetadata
+from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.integrations.ai_client import GeminiClient, VideoAnalysis
 from src.processing.video_processor import VideoProcessor
 from src.database.db_manager import DatabaseManager
@@ -46,6 +47,7 @@ class VideoGenerationOrchestrator:
         self.ai_client = GeminiClient()
         self.video_processor = VideoProcessor()
         self.db_manager = DatabaseManager()
+        self.thumbnail_generator = ThumbnailGenerator()
         
         # Processing statistics
         self.stats = {
@@ -89,12 +91,12 @@ class VideoGenerationOrchestrator:
             processed_videos = []
             for post in reddit_posts[:max_videos]:
                 try:
-                    result = self._process_single_video(post, dry_run)
-                    if result:
-                        processed_videos.append(result)
+                    results = self._process_single_video(post, dry_run)
+                    if results:
+                        processed_videos.append(results)
                         self.stats['videos_processed'] += 1
                         
-                        if not dry_run and result.get('uploaded'):
+                        if not dry_run and results.get('uploaded'):
                             self.stats['videos_uploaded'] += 1
                     
                     # Rate limiting between videos
@@ -273,6 +275,26 @@ class VideoGenerationOrchestrator:
             thumbnail_path = processing_result.get('thumbnail_path')
             processing_stats = processing_result.get('processing_stats', {})
             
+            # Generate multiple thumbnail variants for A/B testing
+            thumbnail_variants = []
+            thumbnail_dir = self.config.paths.temp_dir / f"thumbnails_{post.id}"
+            try:
+                variants = self.thumbnail_generator.generate_multiple_variants(
+                    processed_video_path, analysis, thumbnail_dir, variants=2
+                )
+                thumbnail_variants.extend(variants)
+                temp_files.extend(variants)
+                
+                self.logger.info(f"Generated {len(thumbnail_variants)} thumbnail variants for A/B testing")
+            except Exception as e:
+                self.logger.warning(f"Failed to generate thumbnail variants: {e}")
+                # Fallback to single thumbnail if available
+                if thumbnail_path:
+                    thumbnail_variants = [thumbnail_path]
+            
+            # Use first variant as primary thumbnail
+            primary_thumbnail = thumbnail_variants[0] if thumbnail_variants else thumbnail_path
+            
             if thumbnail_path:
                 temp_files.append(thumbnail_path)
             
@@ -290,13 +312,22 @@ class VideoGenerationOrchestrator:
             youtube_result = None
             if not dry_run:
                 step_start = datetime.now()
-                youtube_result = self._upload_to_youtube(processed_path, analysis, post, thumbnail_path)
+                youtube_result = self._upload_to_youtube(processed_path, analysis, post, primary_thumbnail)
+                
+                # Start A/B thumbnail test if we have multiple variants
+                if youtube_result.success and len(thumbnail_variants) >= 2:
+                    self.db_manager.start_thumbnail_ab_test(upload_id)
+                    self.logger.info(f"Started A/B thumbnail test for video {youtube_result.video_id}")
                 
                 self.db_manager.record_processing_step(
-                    upload_id, "youtube_upload", 
+                    upload_id, "youtube_upload",
                     "completed" if youtube_result.success else "failed",
                     step_start, datetime.now(),
-                    error_message=youtube_result.error if not youtube_result.success else None
+                    error_message=youtube_result.error if not youtube_result.success else None,
+                    metadata={
+                        "thumbnail_variants_generated": len(thumbnail_variants),
+                        "ab_test_started": youtube_result.success and len(thumbnail_variants) >= 2
+                    }
                 )
             
             # Calculate final metrics
@@ -565,16 +596,207 @@ class VideoGenerationOrchestrator:
         if self.stats['start_time'] and self.stats['end_time']:
             total_time = (self.stats['end_time'] - self.stats['start_time']).total_seconds()
         
+        success_rate = (self.stats['videos_uploaded'] / self.stats['videos_processed'] * 100 
+                        if self.stats['videos_processed'] > 0 else 0.0)
+        
         return {
-            'total_processing_time_seconds': total_time,
+            'processed_videos': processed_videos,
+            'total_videos': len(processed_videos),
             'videos_processed': self.stats['videos_processed'],
             'videos_uploaded': self.stats['videos_uploaded'],
             'processing_errors': self.stats['processing_errors'],
-            'success_rate': (self.stats['videos_uploaded'] / self.stats['videos_processed'] * 100) if self.stats['videos_processed'] > 0 else 0,
-            'processed_videos': processed_videos,
+            'success_rate': success_rate,
+            'total_processing_time_seconds': total_time,
             'start_time': self.stats['start_time'],
             'end_time': self.stats['end_time']
         }
+    
+    def run_comment_pinning(self, max_comments: int = 50) -> Dict[str, Any]:
+        """
+        Run automated comment pinning for recent videos
+        
+        Args:
+            max_comments: Maximum comments to analyze per video
+            
+        Returns:
+            Dict with results of the operation
+        """
+        results = {
+            'videos_processed': 0,
+            'comments_analyzed': 0,
+            'comments_pinned': 0,
+            'errors': 0
+        }
+        
+        try:
+            # Get recent videos uploaded in the last 3 days
+            recent_uploads = self.db_manager.get_recent_uploads(days=3)
+            
+            for upload in recent_uploads:
+                if not upload.get('youtube_video_id'):
+                    continue
+                    
+                video_id = upload['youtube_video_id']
+                self.logger.info(f"Processing comments for video: {video_id}")
+                
+                try:
+                    # Fetch video comments
+                    comments = self.youtube_client.get_video_comments(video_id, max_results=max_comments)
+                    results['comments_analyzed'] += len(comments)
+                    
+                    if not comments:
+                        self.logger.info(f"No comments found for video {video_id}")
+                        continue
+                    
+                    # Analyze comments to find the best one to pin
+                    best_comment = None
+                    best_score = 0
+                    
+                    for comment in comments:
+                        analysis = self.ai_client.analyze_comment_for_pinning(comment['text'])
+                        score = analysis.get('score', 0)
+                        
+                        if analysis.get('should_pin', False) and score > best_score:
+                            best_comment = comment
+                            best_score = score
+                    
+                    # Pin the best comment if found
+                    if best_comment and best_score >= 7:  # Minimum score threshold
+                        try:
+                            # Use YouTube API to pin the comment
+                            self.youtube_client.service.comments().setModerationStatus(
+                                id=best_comment['id'],
+                                moderationStatus='published',
+                                banAuthor=False
+                            ).execute()
+                            
+                            self.logger.info(f"Pinned comment for video {video_id}: {best_comment['text'][:50]}...")
+                            results['comments_pinned'] += 1
+                        except Exception as e:
+                            self.logger.error(f"Error pinning comment: {e}")
+                            results['errors'] += 1
+                    
+                    results['videos_processed'] += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Error processing comments for video {video_id}: {e}")
+                    results['errors'] += 1
+            
+            self.logger.info(f"Comment pinning completed: {results}")
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error in comment pinning workflow: {e}")
+            results['errors'] += 1
+            return results
+    
+    def run_ab_thumbnail_tests(self, test_duration_hours: int = 24) -> Dict[str, Any]:
+        """
+        Run A/B thumbnail tests for eligible videos
+        
+        Args:
+            test_duration_hours: How long to wait before evaluating A/B test results
+            
+        Returns:
+            Dictionary with test results and actions taken
+        """
+        self.logger.info("Starting A/B thumbnail test evaluation")
+        
+        results = {
+            'tests_evaluated': 0,
+            'tests_completed': 0,
+            'thumbnail_switches': 0,
+            'errors': 0,
+            'test_results': []
+        }
+        
+        try:
+            # Get videos ready for A/B test evaluation
+            pending_tests = self.db_manager.get_pending_ab_tests(test_duration_hours)
+            
+            for upload in pending_tests:
+                try:
+                    upload_id = upload['id']
+                    video_id = upload['youtube_video_id']
+                    
+                    if not video_id:
+                        self.logger.warning(f"No YouTube video ID for upload {upload_id}")
+                        continue
+                    
+                    # Get current CTR for variant A
+                    ctr_a = self.youtube_client.get_video_ctr_estimate(video_id)
+                    if ctr_a is not None:
+                        self.db_manager.update_thumbnail_ctr(upload_id, 'A', ctr_a)
+                    
+                    # Switch to variant B if we haven't already
+                    current_variant = upload.get('active_thumbnail', 'A')
+                    if current_variant == 'A':
+                        # Find variant B thumbnail
+                        thumbnail_dir = self.config.paths.temp_dir / f"thumbnails_{upload['reddit_post_id']}"
+                        variant_b_path = thumbnail_dir / "thumbnail_variant_2.jpg"
+                        
+                        if variant_b_path.exists():
+                            # Switch to variant B thumbnail
+                            try:
+                                success = self.youtube_client.update_video_thumbnail(video_id, variant_b_path)
+                                if success:
+                                    self.db_manager.update_active_thumbnail(upload_id, 'B')
+                                    results['thumbnail_switches'] += 1
+                                    self.logger.info(f"Switched to variant B for video {video_id}")
+                                else:
+                                    self.logger.warning(f"Failed to switch thumbnail for video {video_id}")
+                            except Exception as e:
+                                self.logger.error(f"Error switching thumbnail for video {video_id}: {e}")
+                                results['errors'] += 1
+                        else:
+                            self.logger.warning(f"Variant B thumbnail not found for upload {upload_id}")
+                    
+                    # Evaluate test after sufficient time has passed
+                    elif current_variant == 'B':
+                        # Get CTR for variant B
+                        ctr_b = self.youtube_client.get_video_ctr_estimate(video_id)
+                        if ctr_b is not None:
+                            self.db_manager.update_thumbnail_ctr(upload_id, 'B', ctr_b)
+                        
+                        # Compare results and choose winner
+                        test_result = self.db_manager.evaluate_ab_test(upload_id)
+                        if test_result:
+                            results['test_results'].append(test_result)
+                            results['tests_completed'] += 1
+                            
+                            # Switch to winning thumbnail if needed
+                            winner = test_result.get('winner')
+                            if winner and winner != current_variant:
+                                winner_path = (thumbnail_dir / f"thumbnail_variant_{1 if winner == 'A' else 2}.jpg")
+                                if winner_path.exists():
+                                    try:
+                                        success = self.youtube_client.update_video_thumbnail(video_id, winner_path)
+                                        if success:
+                                            self.db_manager.update_active_thumbnail(upload_id, winner)
+                                            self.logger.info(f"A/B test complete: Winner is variant {winner} for video {video_id}")
+                                        else:
+                                            self.logger.warning(f"Failed to set winning thumbnail for video {video_id}")
+                                    except Exception as e:
+                                        self.logger.error(f"Error setting winning thumbnail: {e}")
+                                        results['errors'] += 1
+                    
+                    results['tests_evaluated'] += 1
+                    
+                except Exception as e:
+                    self.logger.error(f"Error processing A/B test for upload {upload_id}: {e}")
+                    results['errors'] += 1
+                    continue
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error in A/B thumbnail test evaluation: {e}")
+            results['errors'] += 1
+            return results
+        
+        finally:
+            self.logger.info(f"A/B test evaluation completed. Processed {results['tests_evaluated']} tests, "
+                           f"completed {results['tests_completed']}, made {results['thumbnail_switches']} switches")
 
 
 def main():
@@ -623,6 +845,7 @@ def main():
         logger.info("=== Final Results ===")
         logger.info(f"Videos processed: {results['videos_processed']}")
         logger.info(f"Videos uploaded: {results['videos_uploaded']}")
+        logger.info(f"Processing errors: {results['processing_errors']}")
         logger.info(f"Success rate: {results['success_rate']:.1f}%")
         logger.info(f"Total time: {results['total_processing_time_seconds']:.1f}s")
         logger.info("====================")
