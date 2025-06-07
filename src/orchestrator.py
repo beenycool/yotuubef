@@ -613,24 +613,41 @@ class VideoGenerationOrchestrator:
     
     def run_comment_pinning(self, max_comments: int = 50) -> Dict[str, Any]:
         """
-        Run automated comment pinning for recent videos
+        Analyze and pin engaging comments on recent videos with enhanced AI analysis.
         
         Args:
             max_comments: Maximum comments to analyze per video
             
         Returns:
-            Dict with results of the operation
+            Dict with results of the operation including:
+            - videos_processed: Number of videos analyzed
+            - comments_analyzed: Total comments processed
+            - comments_pinned: Comments successfully pinned
+            - errors: Number of errors encountered
+            - engagement_stats: Engagement metrics
         """
         results = {
             'videos_processed': 0,
             'comments_analyzed': 0,
             'comments_pinned': 0,
-            'errors': 0
+            'errors': 0,
+            'engagement_stats': {
+                'avg_likes': 0,
+                'avg_replies': 0,
+                'top_comment_score': 0
+            }
         }
         
         try:
             # Get recent videos uploaded in the last 3 days
             recent_uploads = self.db_manager.get_recent_uploads(days=3)
+            if not recent_uploads:
+                self.logger.info("No recent uploads found for comment processing")
+                return results
+                
+            total_likes = 0
+            total_replies = 0
+            top_scores = []
             
             for upload in recent_uploads:
                 if not upload.get('youtube_video_id'):
@@ -640,163 +657,343 @@ class VideoGenerationOrchestrator:
                 self.logger.info(f"Processing comments for video: {video_id}")
                 
                 try:
-                    # Fetch video comments
-                    comments = self.youtube_client.get_video_comments(video_id, max_results=max_comments)
-                    results['comments_analyzed'] += len(comments)
-                    
+                    # Get comments with engagement metrics
+                    comments = self.youtube_client.get_video_comments(
+                        video_id,
+                        max_results=max_comments,
+                        include_engagement=True
+                    )
                     if not comments:
                         self.logger.info(f"No comments found for video {video_id}")
                         continue
+                        
+                    results['videos_processed'] += 1
+                    results['comments_analyzed'] += len(comments)
                     
-                    # Analyze comments to find the best one to pin
+                    # Analyze comments using AI to find best one to pin
                     best_comment = None
                     best_score = 0
+                    video_likes = 0
+                    video_replies = 0
                     
                     for comment in comments:
-                        analysis = self.ai_client.analyze_comment_for_pinning(comment['text'])
-                        score = analysis.get('score', 0)
+                        # Calculate engagement metrics
+                        video_likes += comment.get('like_count', 0)
+                        video_replies += comment.get('reply_count', 0)
                         
-                        if analysis.get('should_pin', False) and score > best_score:
+                        # Score comment using AI analysis
+                        score = self._score_comment_with_ai(comment, upload)
+                        if score > best_score:
                             best_comment = comment
                             best_score = score
                     
-                    # Pin the best comment if found
-                    if best_comment and best_score >= 7:  # Minimum score threshold
+                    # Update engagement stats
+                    if comments:
+                        total_likes += video_likes / len(comments)
+                        total_replies += video_replies / len(comments)
+                        top_scores.append(best_score)
+                    
+                    # Pin the best comment if it meets quality threshold
+                    if best_comment and best_score >= 7.5:  # Higher quality threshold
                         try:
-                            # Use YouTube API to pin the comment
-                            self.youtube_client.service.comments().setModerationStatus(
-                                id=best_comment['id'],
-                                moderationStatus='published',
-                                banAuthor=False
-                            ).execute()
+                            self.youtube_client.pin_comment(video_id, best_comment['id'])
                             
-                            self.logger.info(f"Pinned comment for video {video_id}: {best_comment['text'][:50]}...")
+                            # Record pinned comment in database
+                            self.db_manager.record_pinned_comment(
+                                upload['id'],
+                                best_comment['id'],
+                                best_comment['text'],
+                                best_score,
+                                best_comment.get('like_count', 0),
+                                best_comment.get('reply_count', 0)
+                            )
+                            
+                            self.logger.info(f"Pinned comment for video {video_id} (score: {best_score:.1f}): {best_comment['text'][:50]}...")
                             results['comments_pinned'] += 1
                         except Exception as e:
-                            self.logger.error(f"Error pinning comment: {e}")
+                            self.logger.warning(f"Failed to pin comment: {e}")
                             results['errors'] += 1
-                    
-                    results['videos_processed'] += 1
-                    
+                            
                 except Exception as e:
                     self.logger.error(f"Error processing comments for video {video_id}: {e}")
                     results['errors'] += 1
+                    continue
             
-            self.logger.info(f"Comment pinning completed: {results}")
+            # Calculate aggregate engagement stats
+            if results['videos_processed'] > 0:
+                results['engagement_stats'] = {
+                    'avg_likes': total_likes / results['videos_processed'],
+                    'avg_replies': total_replies / results['videos_processed'],
+                    'top_comment_score': sum(top_scores) / len(top_scores) if top_scores else 0
+                }
+            
+            self.logger.info(f"Comment pinning completed. Results: {results}")
             return results
             
         except Exception as e:
-            self.logger.error(f"Error in comment pinning workflow: {e}")
+            self.logger.error(f"Critical error in comment pinning workflow: {e}", exc_info=True)
             results['errors'] += 1
             return results
     
     def run_ab_thumbnail_tests(self, test_duration_hours: int = 24) -> Dict[str, Any]:
         """
-        Run A/B thumbnail tests for eligible videos
+        Run comprehensive A/B thumbnail tests with statistical evaluation.
         
         Args:
-            test_duration_hours: How long to wait before evaluating A/B test results
+            test_duration_hours: Minimum test duration before evaluation
             
         Returns:
-            Dictionary with test results and actions taken
+            Dictionary with detailed test results including:
+            - tests_evaluated: Total tests processed
+            - tests_completed: Tests that reached conclusion
+            - winning_variants: Count per variant (A/B)
+            - avg_ctr_improvement: Average CTR improvement
+            - errors: Number of errors encountered
         """
         self.logger.info("Starting A/B thumbnail test evaluation")
         
         results = {
             'tests_evaluated': 0,
             'tests_completed': 0,
-            'thumbnail_switches': 0,
+            'winning_variants': {'A': 0, 'B': 0},
+            'avg_ctr_improvement': 0.0,
             'errors': 0,
             'test_results': []
         }
         
         try:
-            # Get videos ready for A/B test evaluation
-            pending_tests = self.db_manager.get_pending_ab_tests(test_duration_hours)
+            # Get videos ready for evaluation (minimum view threshold)
+            pending_tests = self.db_manager.get_pending_ab_tests(
+                min_duration_hours=test_duration_hours,
+                min_views=1000  # Only evaluate tests with sufficient data
+            )
+            
+            if not pending_tests:
+                self.logger.info("No A/B tests ready for evaluation")
+                return results
+                
+            ctr_improvements = []
             
             for upload in pending_tests:
                 try:
                     upload_id = upload['id']
-                    video_id = upload['youtube_video_id']
+                    video_id = upload.get('youtube_video_id')
                     
                     if not video_id:
                         self.logger.warning(f"No YouTube video ID for upload {upload_id}")
                         continue
                     
-                    # Get current CTR for variant A
-                    ctr_a = self.youtube_client.get_video_ctr_estimate(video_id)
-                    if ctr_a is not None:
-                        self.db_manager.update_thumbnail_ctr(upload_id, 'A', ctr_a)
-                    
-                    # Switch to variant B if we haven't already
-                    current_variant = upload.get('active_thumbnail', 'A')
-                    if current_variant == 'A':
-                        # Find variant B thumbnail
-                        thumbnail_dir = self.config.paths.temp_dir / f"thumbnails_{upload['reddit_post_id']}"
-                        variant_b_path = thumbnail_dir / "thumbnail_variant_2.jpg"
-                        
-                        if variant_b_path.exists():
-                            # Switch to variant B thumbnail
-                            try:
-                                success = self.youtube_client.update_video_thumbnail(video_id, variant_b_path)
-                                if success:
-                                    self.db_manager.update_active_thumbnail(upload_id, 'B')
-                                    results['thumbnail_switches'] += 1
-                                    self.logger.info(f"Switched to variant B for video {video_id}")
-                                else:
-                                    self.logger.warning(f"Failed to switch thumbnail for video {video_id}")
-                            except Exception as e:
-                                self.logger.error(f"Error switching thumbnail for video {video_id}: {e}")
-                                results['errors'] += 1
-                        else:
-                            self.logger.warning(f"Variant B thumbnail not found for upload {upload_id}")
-                    
-                    # Evaluate test after sufficient time has passed
-                    elif current_variant == 'B':
-                        # Get CTR for variant B
-                        ctr_b = self.youtube_client.get_video_ctr_estimate(video_id)
-                        if ctr_b is not None:
-                            self.db_manager.update_thumbnail_ctr(upload_id, 'B', ctr_b)
-                        
-                        # Compare results and choose winner
-                        test_result = self.db_manager.evaluate_ab_test(upload_id)
-                        if test_result:
-                            results['test_results'].append(test_result)
-                            results['tests_completed'] += 1
-                            
-                            # Switch to winning thumbnail if needed
-                            winner = test_result.get('winner')
-                            if winner and winner != current_variant:
-                                winner_path = (thumbnail_dir / f"thumbnail_variant_{1 if winner == 'A' else 2}.jpg")
-                                if winner_path.exists():
-                                    try:
-                                        success = self.youtube_client.update_video_thumbnail(video_id, winner_path)
-                                        if success:
-                                            self.db_manager.update_active_thumbnail(upload_id, winner)
-                                            self.logger.info(f"A/B test complete: Winner is variant {winner} for video {video_id}")
-                                        else:
-                                            self.logger.warning(f"Failed to set winning thumbnail for video {video_id}")
-                                    except Exception as e:
-                                        self.logger.error(f"Error setting winning thumbnail: {e}")
-                                        results['errors'] += 1
-                    
                     results['tests_evaluated'] += 1
                     
+                    # Get current performance metrics for both variants
+                    ctr_a = upload.get('thumbnail_ctr_a')
+                    ctr_b = upload.get('thumbnail_ctr_b')
+                    views_a = upload.get('thumbnail_views_a', 0)
+                    views_b = upload.get('thumbnail_views_b', 0)
+                    
+                    # If we don't have both CTRs, fetch current data
+                    if ctr_a is None or ctr_b is None:
+                        current_metrics = self.youtube_client.get_thumbnail_performance(video_id)
+                        if current_metrics:
+                            current_variant = upload.get('active_thumbnail', 'A')
+                            if current_variant == 'A':
+                                ctr_a = current_metrics['ctr']
+                                views_a = current_metrics['views']
+                            else:
+                                ctr_b = current_metrics['ctr']
+                                views_b = current_metrics['views']
+                            
+                            # Update database with latest metrics
+                            self.db_manager.update_thumbnail_ctr(
+                                upload_id,
+                                current_variant,
+                                ctr_a if current_variant == 'A' else ctr_b
+                            )
+                    
+                    # Only evaluate if we have data for both variants
+                    if ctr_a is not None and ctr_b is not None and views_a + views_b > 0:
+                        # Calculate statistical significance
+                        is_significant = self._is_ctr_difference_significant(
+                            ctr_a, views_a,
+                            ctr_b, views_b,
+                            confidence_level=0.95
+                        )
+                        
+                        if is_significant:
+                            # Determine winner
+                            winner = 'A' if ctr_a >= ctr_b else 'B'
+                            improvement = (max(ctr_a, ctr_b) - min(ctr_a, ctr_b)) / min(ctr_a, ctr_b)
+                            
+                            # Update video with winning thumbnail
+                            thumbnail_dir = self.config.paths.temp_dir / f"thumbnails_{upload['reddit_post_id']}"
+                            winner_thumbnail = next(thumbnail_dir.glob(f"*_{winner}.*"), None)
+                            
+                            if winner_thumbnail:
+                                if self.youtube_client.set_thumbnail(video_id, winner_thumbnail):
+                                    self.db_manager.complete_ab_test(upload_id, winner)
+                                    results['winning_variants'][winner] += 1
+                                    results['tests_completed'] += 1
+                                    ctr_improvements.append(improvement)
+                                    
+                                    test_result = {
+                                        'video_id': video_id,
+                                        'winner': winner,
+                                        'ctr_a': ctr_a,
+                                        'ctr_b': ctr_b,
+                                        'improvement': improvement,
+                                        'views_a': views_a,
+                                        'views_b': views_b
+                                    }
+                                    results['test_results'].append(test_result)
+                                    
+                                    self.logger.info(
+                                        f"Completed A/B test for video {video_id}. Winner: {winner} "
+                                        f"(A: {ctr_a:.2%}, B: {ctr_b:.2%}, Improvement: {improvement:.2%})"
+                                    )
+                        else:
+                            self.logger.info(
+                                f"Inconclusive A/B test for video {video_id} "
+                                f"(A: {ctr_a:.2%}, B: {ctr_b:.2%} - difference not significant)"
+                            )
+                    else:
+                        self.logger.warning(f"Insufficient data for A/B test evaluation (video {video_id})")
+                        
                 except Exception as e:
-                    self.logger.error(f"Error processing A/B test for upload {upload_id}: {e}")
+                    self.logger.error(f"Error processing A/B test for upload {upload_id}: {e}", exc_info=True)
                     results['errors'] += 1
                     continue
             
+            # Calculate average improvement for completed tests
+            if ctr_improvements:
+                results['avg_ctr_improvement'] = sum(ctr_improvements) / len(ctr_improvements)
+            
+            self.logger.info(
+                f"A/B test evaluation completed. Results: {results['tests_completed']}/{results['tests_evaluated']} "
+                f"tests concluded with average CTR improvement of {results['avg_ctr_improvement']:.2%}"
+            )
             return results
             
         except Exception as e:
-            self.logger.error(f"Error in A/B thumbnail test evaluation: {e}")
+            self.logger.error(f"Critical error in A/B test evaluation: {e}", exc_info=True)
             results['errors'] += 1
             return results
         
         finally:
             self.logger.info(f"A/B test evaluation completed. Processed {results['tests_evaluated']} tests, "
-                           f"completed {results['tests_completed']}, made {results['thumbnail_switches']} switches")
+                           f"completed {results['tests_completed']}, made {len([r for r in results['test_results']])} switches")
+
+
+    def _score_comment_with_ai(self, comment: Dict[str, Any], upload: Dict[str, Any]) -> float:
+        """
+        Score a comment using AI analysis considering:
+        - Engagement metrics (likes, replies)
+        - Sentiment and relevance
+        - Content quality and originality
+        - Match with video topic
+        
+        Args:
+            comment: Comment data including text and engagement metrics
+            upload: Upload metadata for context
+            
+        Returns:
+            Quality score from 0-10
+        """
+        try:
+            # Base score from engagement metrics
+            engagement_score = (
+                comment.get('like_count', 0) * 0.2 +
+                comment.get('reply_count', 0) * 0.3
+            )
+            
+            # Get AI analysis of comment content
+            analysis = self.ai_client.analyze_comment(
+                comment['text'],
+                video_title=upload.get('title', ''),
+                video_description=upload.get('description', '')
+            )
+            
+            # Calculate content quality score (0-5 scale)
+            content_score = (
+                analysis.get('sentiment_score', 0) * 2 +  # -1 to 1 -> 0 to 2
+                min(analysis.get('relevance_score', 0), 1) * 2 +
+                min(analysis.get('originality_score', 0), 1)
+            )
+            
+            # Combine scores with weighting
+            total_score = (
+                engagement_score * 0.4 +
+                content_score * 0.6
+            )
+            
+            # Cap at 10 and round to 1 decimal
+            return min(10, round(total_score * 2, 1))
+            
+        except Exception as e:
+            self.logger.warning(f"Error scoring comment with AI: {e}")
+            # Fallback to simple engagement scoring
+            return min(10, comment.get('like_count', 0) * 0.2)
+
+    def _is_ctr_difference_significant(self, ctr_a: float, views_a: int,
+                                     ctr_b: float, views_b: int,
+                                     confidence_level: float = 0.95) -> bool:
+        """
+        Check if CTR difference is statistically significant using chi-squared test
+        with additional checks for practical significance.
+        
+        Args:
+            ctr_a: CTR for variant A (0-1)
+            views_a: Views for variant A
+            ctr_b: CTR for variant B (0-1)
+            views_b: Views for variant B
+            confidence_level: Desired confidence level (0-1)
+            
+        Returns:
+            True if difference is both statistically and practically significant
+        """
+        try:
+            # Import scipy for statistical testing
+            from scipy.stats import chi2_contingency
+            
+            # Minimum practical difference threshold (5% relative improvement)
+            min_practical_diff = 0.05
+            
+            # Calculate absolute difference
+            abs_diff = abs(ctr_a - ctr_b)
+            rel_diff = abs_diff / min(ctr_a, ctr_b) if min(ctr_a, ctr_b) > 0 else 0
+            
+            # Check if difference is practically significant
+            if rel_diff < min_practical_diff:
+                return False
+                
+            # Check if we have enough data
+            min_views = 1000
+            if views_a < min_views or views_b < min_views:
+                return False
+                
+            # Create contingency table
+            clicks_a = int(round(ctr_a * views_a))
+            clicks_b = int(round(ctr_b * views_b))
+            
+            table = [
+                [clicks_a, views_a - clicks_a],
+                [clicks_b, views_b - clicks_b]
+            ]
+            
+            # Perform chi-squared test
+            chi2, p, _, _ = chi2_contingency(table)
+            
+            # Check both statistical and practical significance
+            return p < (1 - confidence_level) and rel_diff >= min_practical_diff
+            
+        except ImportError:
+            self.logger.warning("scipy not available for statistical testing, using simple threshold")
+            # Fallback: simple threshold-based comparison
+            rel_diff = abs(ctr_a - ctr_b) / min(ctr_a, ctr_b) if min(ctr_a, ctr_b) > 0 else 0
+            return rel_diff >= 0.1 and views_a >= 500 and views_b >= 500
+            
+        except Exception as e:
+            self.logger.warning(f"Error in statistical significance test: {e}")
+            return False
 
 
 def main():

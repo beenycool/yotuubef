@@ -211,7 +211,7 @@ class VideoEffects:
             return clip
     
     def apply_speed_effects(self, clip: VideoFileClip, speed_effects: List[Dict]) -> VideoFileClip:
-        """Apply speed effects based on AI analysis"""
+        """Apply speed effects based on AI analysis with enhanced transitions"""
         if not speed_effects:
             return clip
         
@@ -224,14 +224,23 @@ class VideoEffects:
                 end_time = effect.get('end_seconds', clip.duration)
                 speed_factor = effect.get('speed_factor', 1.0)
                 
+                # Validate speed factor
+                speed_factor = max(0.5, min(2.0, speed_factor))  # Keep within reasonable bounds
+                
                 # Add normal segment before effect if needed
                 if current_time < start_time:
-                    segments.append(clip.subclip(current_time, start_time))
+                    normal_segment = clip.subclip(current_time, start_time)
+                    segments.append(normal_segment)
                 
-                # Add speed-affected segment
+                # Add speed-affected segment with transition
                 effect_segment = clip.subclip(start_time, end_time)
                 if speed_factor != 1.0:
                     effect_segment = effect_segment.fx(speedx, speed_factor)
+                    
+                    # Add transition if this isn't the first segment
+                    if segments and speed_factor > 1.0:  # Only for speed-ups
+                        transition_duration = min(0.3, (end_time - start_time) * 0.2)
+                        effect_segment = effect_segment.crossfadein(transition_duration)
                 
                 segments.append(effect_segment)
                 current_time = end_time
@@ -240,15 +249,17 @@ class VideoEffects:
             if current_time < clip.duration:
                 segments.append(clip.subclip(current_time, clip.duration))
             
+            # Combine segments with transitions
             if len(segments) > 1:
-                return concatenate_videoclips(segments)
+                final_clip = concatenate_videoclips(segments, method="compose")
+                return final_clip
             elif segments:
                 return segments[0]
             else:
                 return clip
                 
         except Exception as e:
-            self.logger.warning(f"Error applying speed effects: {e}")
+            self.logger.warning(f"Error applying speed effects: {e}", exc_info=True)
             return clip
     
     def add_visual_cues(self, clip: VideoFileClip, visual_cues: List[VisualCue]) -> VideoFileClip:
@@ -304,8 +315,8 @@ class VideoEffects:
     
     def apply_dynamic_pan_zoom(self, clip: VideoFileClip, focus_points: List[Dict[str, Any]]) -> VideoFileClip:
         """
-        Apply dynamic panning and zooming based on AI-identified focus points.
-        This creates smooth transitions between focus points to make static or wide shots feel dynamic.
+        Apply dynamic panning and zooming with enhanced motion smoothing and edge handling.
+        Uses AI-identified focus points to create professional cinematic movements.
         
         Args:
             clip: Input video clip
@@ -319,66 +330,20 @@ class VideoEffects:
             return self.apply_subtle_zoom(clip)
         
         try:
-            # Sort focus points by timestamp
+            # Sort focus points by timestamp and validate
             sorted_points = sorted(focus_points, key=lambda x: x.get('timestamp_seconds', 0))
+            self._validate_focus_points(sorted_points, clip.duration)
+            
+            # Calculate motion paths and velocities
+            motion_path = self._calculate_motion_path(sorted_points, clip.duration)
             
             def make_dynamic_transform(get_frame, t):
-                """Create dynamic crop transformation based on current time and focus points"""
+                """Create optimized crop transformation with motion smoothing"""
                 frame = get_frame(t)
                 h, w = frame.shape[:2]
                 
-                # Find the current focus point pair to interpolate between
-                current_point = None
-                next_point = None
-                
-                for i, point in enumerate(sorted_points):
-                    point_time = point.get('timestamp_seconds', 0)
-                    if point_time <= t:
-                        current_point = point
-                        if i + 1 < len(sorted_points):
-                            next_point = sorted_points[i + 1]
-                    else:
-                        break
-                
-                # If no current point found, use first point
-                if current_point is None:
-                    current_point = sorted_points[0]
-                    next_point = sorted_points[1] if len(sorted_points) > 1 else None
-                
-                # If no next point, use current point (end of sequence)
-                if next_point is None:
-                    target_x = current_point.get('x', 0.5)
-                    target_y = current_point.get('y', 0.5)
-                    interpolation_factor = 0
-                else:
-                    # Calculate interpolation between current and next point
-                    current_time = current_point.get('timestamp_seconds', 0)
-                    next_time = next_point.get('timestamp_seconds', clip.duration)
-                    
-                    if next_time > current_time:
-                        interpolation_factor = (t - current_time) / (next_time - current_time)
-                        interpolation_factor = max(0, min(1, interpolation_factor))  # Clamp to [0,1]
-                        
-                        # Smooth interpolation using easing function
-                        eased_factor = self._ease_in_out_cubic(interpolation_factor)
-                        
-                        # Interpolate between focus points
-                        current_x = current_point.get('x', 0.5)
-                        current_y = current_point.get('y', 0.5)
-                        next_x = next_point.get('x', 0.5)
-                        next_y = next_point.get('y', 0.5)
-                        
-                        target_x = current_x + (next_x - current_x) * eased_factor
-                        target_y = current_y + (next_y - current_y) * eased_factor
-                    else:
-                        target_x = current_point.get('x', 0.5)
-                        target_y = current_point.get('y', 0.5)
-                        interpolation_factor = 0
-                
-                # Apply dynamic zoom based on motion intensity
-                base_zoom = 1.1  # Base zoom factor
-                motion_zoom = 0.05 * abs(interpolation_factor - 0.5)  # More zoom during transitions
-                zoom_factor = base_zoom + motion_zoom
+                # Get current position and zoom from motion path
+                target_x, target_y, zoom_factor = motion_path(t)
                 
                 # Calculate crop dimensions
                 crop_w = int(w / zoom_factor)
@@ -388,57 +353,174 @@ class VideoEffects:
                 focus_x = int(target_x * w)
                 focus_y = int(target_y * h)
                 
-                # Calculate crop window centered on focus point
-                crop_x1 = max(0, focus_x - crop_w // 2)
-                crop_y1 = max(0, focus_y - crop_h // 2)
-                crop_x2 = min(w, crop_x1 + crop_w)
-                crop_y2 = min(h, crop_y1 + crop_h)
+                # Calculate crop window with edge padding
+                crop_x1, crop_y1, crop_x2, crop_y2 = self._calculate_crop_window(
+                    w, h, focus_x, focus_y, crop_w, crop_h
+                )
                 
-                # Adjust if crop extends beyond bounds
-                if crop_x2 == w:
-                    crop_x1 = w - crop_w
-                if crop_y2 == h:
-                    crop_y1 = h - crop_h
+                # Apply crop with fallback to full frame if invalid
+                try:
+                    cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                    if cropped.size > 0:
+                        return cv2.resize(cropped, (w, h))
+                except Exception as crop_error:
+                    self.logger.debug(f"Crop error at t={t}: {crop_error}")
                 
-                # Ensure crop coordinates are valid
-                crop_x1 = max(0, crop_x1)
-                crop_y1 = max(0, crop_y1)
-                crop_x2 = min(w, crop_x2)
-                crop_y2 = min(h, crop_y2)
-                
-                # Apply crop
-                cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
-                
-                # Resize back to original dimensions
-                if cropped.size > 0:
-                    return cv2.resize(cropped, (w, h))
-                else:
-                    return frame
+                return frame
             
-            # Apply the transformation
-            transformed_clip = clip.fl(make_dynamic_transform)
+            # Apply the transformation with optimized rendering
+            transformed_clip = clip.fl(make_dynamic_transform, apply_to=['mask'])
             
-            self.logger.info(f"Applied dynamic pan/zoom with {len(sorted_points)} focus points")
+            # Add motion blur for smoother transitions
+            if len(sorted_points) > 3:
+                transformed_clip = self._apply_motion_blur(transformed_clip, motion_path)
+            
+            self.logger.info(f"Applied enhanced dynamic pan/zoom with {len(sorted_points)} focus points")
             return transformed_clip
             
         except Exception as e:
             self.logger.warning(f"Error applying dynamic pan/zoom: {e}")
             return self.apply_subtle_zoom(clip)  # Fallback to subtle zoom
     
-    def _ease_in_out_cubic(self, t: float) -> float:
-        """
-        Cubic easing function for smooth transitions
-        
-        Args:
-            t: Input value between 0 and 1
+    def _validate_focus_points(self, focus_points: List[Dict[str, Any]], duration: float):
+        """Validate focus points for consistency and timing"""
+        if not focus_points:
+            raise ValueError("No focus points provided")
             
-        Returns:
-            Eased value between 0 and 1
-        """
+        # Check timing sequence
+        prev_time = 0
+        for point in focus_points:
+            point_time = point.get('timestamp_seconds', 0)
+            if point_time < prev_time:
+                raise ValueError(f"Focus points not in chronological order at {point_time}")
+            prev_time = point_time
+            
+        # Check coverage
+        first_time = focus_points[0].get('timestamp_seconds', 0)
+        last_time = focus_points[-1].get('timestamp_seconds', duration)
+        if first_time > 0 or last_time < duration:
+            self.logger.warning("Focus points don't cover full video duration")
+
+    def _calculate_motion_path(self, focus_points: List[Dict[str, Any]], duration: float):
+        """Calculate smooth motion path with velocity-based interpolation"""
+        # Pre-calculate motion segments between points
+        segments = []
+        for i in range(len(focus_points) - 1):
+            start = focus_points[i]
+            end = focus_points[i + 1]
+            
+            start_time = start.get('timestamp_seconds', 0)
+            end_time = end.get('timestamp_seconds', duration)
+            
+            # Calculate segment duration and velocity
+            duration_seg = end_time - start_time
+            if duration_seg <= 0:
+                continue
+                
+            x_vel = (end.get('x', 0.5) - start.get('x', 0.5)) / duration_seg
+            y_vel = (end.get('y', 0.5) - start.get('y', 0.5)) / duration_seg
+            
+            # Base zoom with slight variation during movement
+            base_zoom = 1.1
+            zoom_variation = 0.05
+            
+            segments.append({
+                'start_time': start_time,
+                'end_time': end_time,
+                'start_x': start.get('x', 0.5),
+                'start_y': start.get('y', 0.5),
+                'x_vel': x_vel,
+                'y_vel': y_vel,
+                'base_zoom': base_zoom,
+                'zoom_variation': zoom_variation
+            })
+        
+        def motion_path_func(t):
+            """Calculate position and zoom at time t"""
+            # Find current segment
+            current_seg = None
+            for seg in segments:
+                if seg['start_time'] <= t <= seg['end_time']:
+                    current_seg = seg
+                    break
+            
+            if current_seg:
+                # Linear interpolation within segment
+                seg_progress = (t - current_seg['start_time']) / (
+                    current_seg['end_time'] - current_seg['start_time']
+                )
+                x = current_seg['start_x'] + current_seg['x_vel'] * (t - current_seg['start_time'])
+                y = current_seg['start_y'] + current_seg['y_vel'] * (t - current_seg['start_time'])
+                
+                # Apply easing to progress
+                eased_progress = self._ease_in_out_quint(seg_progress)
+                
+                # Dynamic zoom based on motion
+                zoom_factor = current_seg['base_zoom'] + (
+                    current_seg['zoom_variation'] * math.sin(eased_progress * math.pi)
+                )
+                
+                return x, y, zoom_factor
+            else:
+                # Default to last point if beyond segments
+                last_point = focus_points[-1]
+                return last_point.get('x', 0.5), last_point.get('y', 0.5), 1.1
+        
+        return motion_path_func
+
+    def _calculate_crop_window(self, w: int, h: int, focus_x: int, focus_y: int, crop_w: int, crop_h: int):
+        """Calculate crop window with edge handling and padding"""
+        # Calculate initial crop coordinates
+        crop_x1 = max(0, focus_x - crop_w // 2)
+        crop_y1 = max(0, focus_y - crop_h // 2)
+        crop_x2 = min(w, crop_x1 + crop_w)
+        crop_y2 = min(h, crop_y1 + crop_h)
+        
+        # Adjust if crop extends beyond bounds
+        if crop_x2 == w:
+            crop_x1 = w - crop_w
+        if crop_y2 == h:
+            crop_y1 = h - crop_h
+            
+        # Ensure minimum dimensions
+        crop_w = max(100, crop_w)
+        crop_h = max(100, crop_h)
+        
+        # Final validation
+        crop_x1 = max(0, min(w - crop_w, crop_x1))
+        crop_y1 = max(0, min(h - crop_h, crop_y1))
+        crop_x2 = crop_x1 + crop_w
+        crop_y2 = crop_y1 + crop_h
+        
+        return crop_x1, crop_y1, crop_x2, crop_y2
+
+    def _apply_motion_blur(self, clip: VideoFileClip, motion_path):
+        """Apply subtle motion blur based on movement velocity"""
+        # Calculate average velocity
+        sample_times = np.linspace(0, clip.duration, 10)
+        velocities = []
+        
+        for t in sample_times:
+            x1, y1, _ = motion_path(t)
+            x2, y2, _ = motion_path(t + 0.1)
+            vel = math.sqrt((x2-x1)**2 + (y2-y1)**2)
+            velocities.append(vel)
+            
+        avg_vel = sum(velocities) / len(velocities)
+        
+        # Only apply blur if significant movement
+        if avg_vel > 0.01:
+            blur_amount = min(1.5, avg_vel * 50)
+            return clip.fx(vfx.motion_blur, blur_amount, 0.5)
+        return clip
+
+    def _ease_in_out_quint(self, t: float) -> float:
+        """Quintic easing function for smoother motion"""
         if t < 0.5:
-            return 4 * t * t * t
+            return 16 * t * t * t * t * t
         else:
-            return 1 - pow(-2 * t + 2, 3) / 2
+            t = 2 * t - 2
+            return 0.5 * (t * t * t * t * t + 2)
 
     def apply_intelligent_focus(self, clip: VideoFileClip, focus_points: List[Dict[str, Any]]) -> VideoFileClip:
         """
