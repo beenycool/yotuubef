@@ -252,7 +252,7 @@ class VideoGenerationOrchestrator:
                 }
             )
             
-            # Step 3: Video Processing
+            # Step 3: Enhanced Video Processing with AI-Powered Features
             step_start = datetime.now()
             processed_path = self.config.paths.temp_dir / f"processed_{post.id}.mp4"
             temp_files.append(processed_path)
@@ -260,25 +260,30 @@ class VideoGenerationOrchestrator:
             # Select background music based on mood
             background_music_path = self._select_background_music(analysis.mood)
             
-            success = self.video_processor.process_video(
-                download_path, processed_path, analysis, background_music_path
+            # Enhanced video processing with thumbnails and CTAs
+            processing_result = self.video_processor.process_video(
+                download_path, processed_path, analysis, background_music_path, generate_thumbnail=True
             )
             
-            if not success:
-                raise ProcessingError("Video processing failed")
+            if not processing_result['success']:
+                raise ProcessingError("Enhanced video processing failed")
             
-            self.db_manager.record_processing_step(
-                upload_id, "video_processing", "completed", step_start, datetime.now()
-            )
+            # Extract results
+            processed_video_path = processing_result['video_path']
+            thumbnail_path = processing_result.get('thumbnail_path')
+            processing_stats = processing_result.get('processing_stats', {})
             
-            # Step 4: Generate thumbnail
-            step_start = datetime.now()
-            thumbnail_path = self._generate_thumbnail(processed_path, analysis)
             if thumbnail_path:
                 temp_files.append(thumbnail_path)
             
             self.db_manager.record_processing_step(
-                upload_id, "thumbnail_generation", "completed", step_start, datetime.now()
+                upload_id, "video_processing", "completed", step_start, datetime.now(),
+                metadata={
+                    "tts_segments": processing_stats.get('tts_segments', 0),
+                    "visual_effects": processing_stats.get('visual_effects', 0),
+                    "cta_elements": processing_stats.get('cta_elements', 0),
+                    "final_duration": processing_stats.get('duration', 0.0)
+                }
             )
             
             # Step 5: Upload to YouTube (unless dry run)
@@ -453,34 +458,53 @@ class VideoGenerationOrchestrator:
             self.logger.warning(f"Error generating thumbnail: {e}")
             return None
     
-    def _upload_to_youtube(self, 
-                           video_path: Path, 
-                           analysis: VideoAnalysis, 
+    def _upload_to_youtube(self,
+                           video_path: Path,
+                           analysis: VideoAnalysis,
                            post: RedditPost,
                            thumbnail_path: Optional[Path]) -> Any:
-        """Upload video to YouTube with metadata"""
+        """Upload video to YouTube with enhanced metadata and CTAs"""
         try:
-            # Prepare metadata
-            metadata = VideoMetadata(
-                title=analysis.suggested_title,
-                description=self._create_video_description(analysis, post),
-                tags=analysis.hashtags + [post.subreddit, "shorts"],
-                category_id=self.config.api.youtube_upload_category_id,
-                privacy_status=self.config.api.youtube_upload_privacy_status,
-                thumbnail_path=thumbnail_path
+            # Import enhanced description function
+            from src.integrations.youtube_client import create_enhanced_description
+            
+            # Create compelling description with strong CTAs
+            enhanced_description = create_enhanced_description(
+                summary=analysis.summary_for_description,
+                call_to_action=analysis.call_to_action.text if analysis.call_to_action else "Subscribe for more amazing content!",
+                hashtags=analysis.hashtags,
+                channel_branding=getattr(self.config, 'channel_branding', None)
             )
             
-            # Upload video
+            # Add source attribution
+            source_attribution = f"\n\n📍 SOURCE:\nOriginal post from r/{post.subreddit}\nCredit to u/{post.author}"
+            enhanced_description += source_attribution
+            
+            # Prepare enhanced metadata
+            metadata = VideoMetadata(
+                title=analysis.suggested_title,
+                description=enhanced_description,
+                tags=analysis.hashtags + [post.subreddit, "shorts", "viral", "reddit"],
+                category_id=self.config.api.youtube_upload_category_id,
+                privacy_status=self.config.api.youtube_upload_privacy_status,
+                thumbnail_path=thumbnail_path,
+                call_to_action=analysis.call_to_action.text if analysis.call_to_action else None
+            )
+            
+            # Upload video with enhanced metadata
             result = self.youtube_client.upload_video(video_path, metadata)
+            
+            if result.success:
+                self.logger.info(f"Successfully uploaded video with enhanced CTAs: {result.video_url}")
             
             return result
             
         except Exception as e:
             self.logger.error(f"Error uploading to YouTube: {e}")
             return type('UploadResult', (), {
-                'success': False, 
-                'error': str(e), 
-                'video_url': None, 
+                'success': False,
+                'error': str(e),
+                'video_url': None,
                 'video_id': None,
                 'thumbnail_uploaded': False
             })()

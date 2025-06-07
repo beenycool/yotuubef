@@ -295,7 +295,9 @@ Please provide a comprehensive JSON response with the following structure:
     ],
     
     "narrative_script_segments": [
-        {{"text": "Watch this incredible moment!", "time_seconds": 1.0, "intended_duration_seconds": 2.0, "emotion": "excited", "pacing": "normal"}}
+        {{"text": "Watch this incredible moment that will blow your mind!", "time_seconds": 1.0, "intended_duration_seconds": 2.5, "emotion": "excited", "pacing": "normal"}},
+        {{"text": "You won't believe what happens next...", "time_seconds": 15.0, "intended_duration_seconds": 2.0, "emotion": "dramatic", "pacing": "slow"}},
+        {{"text": "This is why the internet loves this!", "time_seconds": 45.0, "intended_duration_seconds": 2.0, "emotion": "excited", "pacing": "fast"}}
     ],
     
     "visual_cues": [
@@ -324,6 +326,15 @@ Please provide a comprehensive JSON response with the following structure:
 
 Focus on creating engaging, family-friendly content suitable for YouTube monetization.
 Ensure all suggestions enhance viewer retention and engagement.
+
+IMPORTANT GUIDELINES FOR NARRATIVE SEGMENTS:
+- Create 2-4 narrative segments that add VALUE and CONTEXT, not just transcription
+- Use engaging language that builds anticipation ("You won't believe...", "Wait for it...", "This is insane...")
+- Time segments strategically: hook (0-3s), mid-video retention (15-30s), and conclusion (45-55s)
+- Match emotion to video content: "excited" for amazing moments, "dramatic" for suspenseful content, "calm" for educational
+- Vary pacing: "fast" for action sequences, "slow" for dramatic reveals, "normal" for general content
+- Keep segments concise (1.5-3 seconds each) to maintain engagement
+- Focus on FOMO (fear of missing out) and curiosity gaps
 """
     
     def _parse_analysis_response(self, response_text: str, post: RedditPost) -> VideoAnalysis:

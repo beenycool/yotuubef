@@ -25,6 +25,9 @@ import yt_dlp
 
 from src.config.settings import get_config
 from src.models import VideoAnalysis, TextOverlay, NarrativeSegment, VisualCue
+from src.integrations.tts_service import TTSService
+from src.processing.cta_processor import CTAProcessor
+from src.processing.thumbnail_generator import ThumbnailGenerator
 
 
 class ResourceManager:
@@ -299,6 +302,110 @@ class VideoEffects:
             self.logger.warning(f"Error creating zoom highlight: {e}")
             return None
     
+    def apply_intelligent_focus(self, clip: VideoFileClip, focus_points: List[Dict[str, Any]]) -> VideoFileClip:
+        """Apply intelligent panning and zooming based on AI-identified focus points"""
+        if not focus_points:
+            return clip
+        
+        try:
+            # Sort focus points by timestamp
+            sorted_points = sorted(focus_points, key=lambda x: x.get('timestamp_seconds', 0))
+            
+            # Create segments with different focus areas
+            segments = []
+            current_time = 0
+            
+            for i, point in enumerate(sorted_points):
+                timestamp = point.get('timestamp_seconds', 0)
+                x = point.get('x', 0.5)  # Normalized coordinates (0-1)
+                y = point.get('y', 0.5)
+                description = point.get('description', '')
+                
+                # Add normal segment before focus point if needed
+                if current_time < timestamp:
+                    normal_segment = clip.subclip(current_time, timestamp)
+                    segments.append(normal_segment)
+                
+                # Calculate focus duration (time to next point or remaining duration)
+                if i + 1 < len(sorted_points):
+                    next_timestamp = sorted_points[i + 1].get('timestamp_seconds', clip.duration)
+                    focus_duration = min(3.0, next_timestamp - timestamp)  # Max 3 seconds per focus
+                else:
+                    focus_duration = min(3.0, clip.duration - timestamp)
+                
+                if focus_duration > 0.1:  # Minimum focus duration
+                    # Create focused segment
+                    focus_segment = self._create_focus_segment(
+                        clip, timestamp, focus_duration, x, y, description
+                    )
+                    if focus_segment:
+                        segments.append(focus_segment)
+                
+                current_time = timestamp + focus_duration
+            
+            # Add remaining segment if any
+            if current_time < clip.duration:
+                remaining_segment = clip.subclip(current_time, clip.duration)
+                segments.append(remaining_segment)
+            
+            # Concatenate all segments
+            if len(segments) > 1:
+                return concatenate_videoclips(segments)
+            elif segments:
+                return segments[0]
+            else:
+                return clip
+                
+        except Exception as e:
+            self.logger.warning(f"Error applying intelligent focus: {e}")
+            return clip
+    
+    def _create_focus_segment(self, clip: VideoFileClip, timestamp: float, duration: float,
+                             x: float, y: float, description: str) -> Optional[VideoFileClip]:
+        """Create a focused segment with intelligent cropping and zooming"""
+        try:
+            # Extract the segment
+            segment = clip.subclip(timestamp, timestamp + duration)
+            
+            # Calculate zoom and pan parameters
+            zoom_factor = 1.2  # Moderate zoom
+            w, h = segment.size
+            
+            # Convert normalized coordinates to pixel coordinates
+            focus_x = int(x * w)
+            focus_y = int(y * h)
+            
+            # Calculate crop area centered on focus point
+            crop_w = int(w / zoom_factor)
+            crop_h = int(h / zoom_factor)
+            
+            # Ensure crop area is within bounds
+            crop_x1 = max(0, focus_x - crop_w // 2)
+            crop_y1 = max(0, focus_y - crop_h // 2)
+            crop_x2 = min(w, crop_x1 + crop_w)
+            crop_y2 = min(h, crop_y1 + crop_h)
+            
+            # Adjust if crop extends beyond bounds
+            if crop_x2 == w:
+                crop_x1 = w - crop_w
+            if crop_y2 == h:
+                crop_y1 = h - crop_h
+            
+            # Apply crop and resize back to original size
+            focused_segment = segment.crop(x1=crop_x1, y1=crop_y1, x2=crop_x2, y2=crop_y2)
+            focused_segment = focused_segment.resize((w, h))
+            
+            # Add smooth transition at the beginning and end
+            if duration > 1.0:
+                focused_segment = focused_segment.crossfadein(0.3).crossfadeout(0.3)
+            
+            self.logger.debug(f"Created focus segment at ({x:.2f}, {y:.2f}): {description}")
+            return focused_segment
+            
+        except Exception as e:
+            self.logger.warning(f"Error creating focus segment: {e}")
+            return None
+    
     def _create_highlight_effect(self, clip: VideoFileClip, timestamp: float, duration: float) -> Optional[VideoFileClip]:
         """Create a highlight effect"""
         try:
@@ -351,17 +458,63 @@ class AdvancedVideoEnhancer:
                 filter_string = ','.join(filters)
                 self.logger.info(f"Applying enhancement filters: {filter_string}")
                 
-                # Apply filters using moviepy's ffmpeg integration
-                # Note: This is a complex operation that may require custom FFmpeg integration
-                # For now, we'll log the filter and return the original clip
-                # In a production environment, you might want to use subprocess to call FFmpeg directly
-                self.logger.warning("Advanced filters logged but not applied - requires custom FFmpeg integration")
+                # Apply filters using FFmpeg subprocess for professional quality
+                enhanced_clip = self._apply_ffmpeg_filters(clip, filter_string)
+                return enhanced_clip if enhanced_clip else clip
             
             return clip
             
         except Exception as e:
             self.logger.warning(f"Error applying enhancement filters: {e}")
             return clip
+    
+    def _apply_ffmpeg_filters(self, clip: VideoFileClip, filter_string: str) -> Optional[VideoFileClip]:
+        """Apply FFmpeg filters using subprocess for professional quality"""
+        try:
+            import tempfile
+            import subprocess
+            
+            # Create temporary files
+            input_path = tempfile.mktemp(suffix='.mp4')
+            output_path = tempfile.mktemp(suffix='.mp4')
+            
+            # Write input clip to temporary file
+            clip.write_videofile(input_path, verbose=False, logger=None)
+            
+            # Build FFmpeg command
+            cmd = [
+                'ffmpeg', '-i', input_path,
+                '-vf', filter_string,
+                '-c:a', 'copy',  # Copy audio without re-encoding
+                '-y', output_path
+            ]
+            
+            # Run FFmpeg
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                # Load enhanced clip
+                enhanced_clip = VideoFileClip(output_path)
+                
+                # Clean up temporary input file
+                Path(input_path).unlink(missing_ok=True)
+                
+                # Note: output_path will be cleaned up by caller or temp file manager
+                self.logger.info("Successfully applied FFmpeg enhancement filters")
+                return enhanced_clip
+            else:
+                self.logger.warning(f"FFmpeg filter failed: {result.stderr}")
+                # Clean up temporary files
+                Path(input_path).unlink(missing_ok=True)
+                Path(output_path).unlink(missing_ok=True)
+                return None
+                
+        except FileNotFoundError:
+            self.logger.warning("FFmpeg not found - install FFmpeg for advanced filters")
+            return None
+        except Exception as e:
+            self.logger.warning(f"Error applying FFmpeg filters: {e}")
+            return None
     
     def apply_adaptive_color_grading(self, clip: VideoFileClip) -> VideoFileClip:
         """Apply adaptive color grading based on video analysis"""
@@ -436,22 +589,35 @@ class TextOverlayProcessor:
             return clip
     
     def _create_text_clip(self, video_clip: VideoFileClip, overlay: TextOverlay) -> Optional[TextClip]:
-        """Create a single text clip"""
+        """Create a single text clip with dynamic animations and adaptive sizing"""
         try:
-            # Get font and size based on style
+            # Get font and size based on style and text length
             font_path = self.config.get_font_path(self.config.text_overlay.graphical_font)
             
-            # Calculate font size based on video resolution
+            # Calculate adaptive font size based on text length and video resolution
             video_height = video_clip.h
-            font_size = int(video_height * self.config.text_overlay.graphical_font_size_ratio)
+            text_length = len(overlay.text)
+            
+            # Use font size profiles for better readability
+            if text_length <= 10:
+                size_ratio = self.config.text_overlay.font_size_ratio_profiles.get('short', 0.06)
+            elif text_length <= 30:
+                size_ratio = self.config.text_overlay.font_size_ratio_profiles.get('medium', 0.045)
+            else:
+                size_ratio = self.config.text_overlay.font_size_ratio_profiles.get('long', 0.035)
+            
+            font_size = int(video_height * size_ratio)
             
             # Adjust font size based on overlay style
-            if overlay.style == "dramatic":
-                font_size = int(font_size * 1.3)
-            elif overlay.style == "highlight":
-                font_size = int(font_size * 1.1)
+            style_multipliers = {
+                "dramatic": 1.3,
+                "highlight": 1.1,
+                "bold": 1.2,
+                "default": 1.0
+            }
+            font_size = int(font_size * style_multipliers.get(overlay.style, 1.0))
             
-            # Create text clip
+            # Create text clip with enhanced styling
             text_clip = TextClip(
                 overlay.text,
                 fontsize=font_size,
@@ -459,33 +625,97 @@ class TextOverlayProcessor:
                 color=self.config.text_overlay.graphical_text_color,
                 stroke_color=self.config.text_overlay.graphical_stroke_color,
                 stroke_width=self.config.text_overlay.graphical_stroke_width,
-                method='caption' if len(overlay.text) > 20 else 'label'
+                method='caption' if len(overlay.text) > 20 else 'label',
+                align='center'
             )
             
-            # Set position
-            if overlay.position == "center":
-                text_clip = text_clip.set_position('center')
-            elif overlay.position == "top":
-                text_clip = text_clip.set_position(('center', 0.1), relative=True)
-            elif overlay.position == "bottom":
-                text_clip = text_clip.set_position(('center', 0.9), relative=True)
-            else:
-                text_clip = text_clip.set_position('center')
+            # Enhanced positioning with better placement
+            position = self._calculate_text_position(overlay.position, video_clip.size, text_clip.size)
+            text_clip = text_clip.set_position(position)
             
             # Set timing
             text_clip = text_clip.set_start(overlay.timestamp_seconds)
             text_clip = text_clip.set_duration(overlay.duration)
             
-            # Add animation based on style
-            if overlay.style == "dramatic":
-                # Add fade in/out
-                text_clip = text_clip.crossfadein(0.3).crossfadeout(0.3)
+            # Apply dynamic animations based on style
+            text_clip = self._apply_text_animation(text_clip, overlay.style, overlay.duration)
             
             return text_clip
             
         except Exception as e:
             self.logger.warning(f"Error creating text clip: {e}")
             return None
+    
+    def _calculate_text_position(self, position_type: str, video_size: tuple, text_size: tuple) -> tuple:
+        """Calculate optimal text position to avoid overlap and ensure readability"""
+        video_width, video_height = video_size
+        text_width, text_height = text_size
+        
+        # Safe margins (percentage of video dimensions)
+        margin_x = video_width * 0.05
+        margin_y = video_height * 0.05
+        
+        position_map = {
+            "center": ('center', 'center'),
+            "top": (
+                (video_width - text_width) // 2,
+                margin_y
+            ),
+            "bottom": (
+                (video_width - text_width) // 2,
+                video_height - text_height - margin_y
+            ),
+            "left": (
+                margin_x,
+                (video_height - text_height) // 2
+            ),
+            "right": (
+                video_width - text_width - margin_x,
+                (video_height - text_height) // 2
+            )
+        }
+        
+        return position_map.get(position_type, ('center', 'center'))
+    
+    def _apply_text_animation(self, text_clip: TextClip, style: str, duration: float) -> TextClip:
+        """Apply dynamic animations based on text style"""
+        try:
+            fade_duration = min(0.3, duration * 0.2)  # 20% of duration, max 0.3s
+            
+            if style == "dramatic":
+                # Dramatic entrance with scale and fade
+                text_clip = text_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+                # Add subtle zoom effect
+                text_clip = text_clip.resize(lambda t: 1 + 0.1 * (1 - abs(2*t/duration - 1)))
+                
+            elif style == "highlight":
+                # Pop-in effect with bounce
+                def bounce_scale(t):
+                    if t < fade_duration:
+                        # Bounce in
+                        progress = t / fade_duration
+                        return 0.8 + 0.4 * progress - 0.2 * (progress ** 2)
+                    else:
+                        return 1.0
+                
+                text_clip = text_clip.resize(bounce_scale)
+                text_clip = text_clip.crossfadeout(fade_duration)
+                
+            elif style == "bold":
+                # Quick fade with slight pulse
+                text_clip = text_clip.crossfadein(fade_duration * 0.5).crossfadeout(fade_duration)
+                # Subtle pulse effect
+                text_clip = text_clip.resize(lambda t: 1 + 0.05 * np.sin(t * 4))
+                
+            else:  # default
+                # Standard fade in/out
+                text_clip = text_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+            
+            return text_clip
+            
+        except Exception as e:
+            self.logger.warning(f"Error applying text animation: {e}")
+            return text_clip.crossfadein(0.2).crossfadeout(0.2)  # Fallback animation
 
 
 class AudioProcessor:
@@ -494,11 +724,13 @@ class AudioProcessor:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
+        self.tts_service = TTSService()
     
     def process_audio(self,
                       video_clip: VideoFileClip,
                       narrative_segments: List[NarrativeSegment],
-                      background_music_path: Optional[Path] = None) -> Optional[CompositeAudioClip]:
+                      background_music_path: Optional[Path] = None,
+                      sound_effects: Optional[List[Dict[str, Any]]] = None) -> Optional[CompositeAudioClip]:
         """Process and mix all audio components with enhanced error handling"""
         audio_tracks = []
         
@@ -522,14 +754,22 @@ class AudioProcessor:
             if tts_audio:
                 audio_tracks.extend(tts_audio)
             
-            # Combine all audio tracks
+            # Combine base audio tracks
+            base_composite = None
             if audio_tracks:
                 try:
-                    return CompositeAudioClip(audio_tracks)
+                    base_composite = CompositeAudioClip(audio_tracks)
                 except Exception as e:
-                    self.logger.error(f"Failed to create composite audio: {e}")
+                    self.logger.error(f"Failed to create base composite audio: {e}")
                     # Fallback to first available track
-                    return audio_tracks[0] if audio_tracks else None
+                    base_composite = audio_tracks[0] if audio_tracks else None
+            
+            # Add sound effects to the composite
+            if sound_effects and base_composite:
+                final_audio = self.add_sound_effects(base_composite, sound_effects, video_clip.duration)
+                return final_audio
+            elif base_composite:
+                return base_composite
             else:
                 self.logger.warning("No audio tracks available, returning original audio")
                 return video_clip.audio
@@ -579,31 +819,57 @@ class AudioProcessor:
         if not segments:
             return []
         
+        if not self.tts_service.is_available():
+            self.logger.warning("No TTS service available, skipping narrative segments")
+            return []
+        
         try:
-            # This would integrate with TTS service to generate audio
-            # For now, return empty list but with proper error handling structure
-            self.logger.info(f"Processing {len(segments)} narrative segments")
+            self.logger.info(f"Processing {len(segments)} narrative segments with TTS")
             
-            successful_segments = []
-            for i, segment in enumerate(segments):
+            # Generate all TTS audio files
+            tts_results = self.tts_service.generate_multiple_segments(segments)
+            
+            successful_audio_clips = []
+            for result in tts_results:
+                if not result['success'] or not result['audio_path']:
+                    continue
+                
                 try:
-                    # Placeholder for actual TTS processing
-                    # In real implementation, this would:
-                    # 1. Call TTS service with segment.text
-                    # 2. Apply segment.emotion and segment.pacing
-                    # 3. Set timing based on segment.time_seconds
-                    # 4. Return AudioFileClip
+                    segment = result['segment']
+                    audio_path = result['audio_path']
                     
-                    self.logger.debug(f"Processing TTS segment {i+1}: '{segment.text[:50]}...'")
-                    # For now, skip actual TTS generation
-                    pass
+                    # Load audio clip
+                    audio_clip = AudioFileClip(str(audio_path))
+                    
+                    # Adjust duration if needed
+                    target_duration = segment.intended_duration_seconds
+                    if abs(audio_clip.duration - target_duration) > 0.5:
+                        # Significant difference, adjust speed
+                        adjusted_path = self.tts_service.adjust_audio_speed(
+                            audio_path, target_duration
+                        )
+                        if adjusted_path and adjusted_path != audio_path:
+                            audio_clip.close()
+                            audio_clip = AudioFileClip(str(adjusted_path))
+                    
+                    # Set timing and apply effects
+                    audio_clip = audio_clip.set_start(segment.time_seconds)
+                    
+                    # Apply emotional volume adjustments
+                    volume_factor = self._get_emotion_volume_factor(segment.emotion)
+                    if volume_factor != 1.0:
+                        audio_clip = audio_clip.multiply_volume(volume_factor)
+                    
+                    successful_audio_clips.append(audio_clip)
+                    
+                    self.logger.debug(f"Successfully processed TTS segment: '{segment.text[:50]}...'")
                     
                 except Exception as e:
-                    self.logger.warning(f"Failed to process TTS segment {i+1}: {e}")
+                    self.logger.warning(f"Failed to process TTS audio for segment: {e}")
                     continue
             
-            self.logger.info(f"Successfully processed {len(successful_segments)} TTS segments")
-            return successful_segments
+            self.logger.info(f"Successfully processed {len(successful_audio_clips)}/{len(segments)} TTS segments")
+            return successful_audio_clips
             
         except Exception as e:
             self.logger.error(f"Critical error in TTS processing: {e}")
@@ -680,11 +946,79 @@ class AudioProcessor:
             self.logger.warning(f"Error applying audio ducking: {e}")
             return music_clip
     
+    def _get_emotion_volume_factor(self, emotion: str) -> float:
+        """Get volume adjustment factor based on emotion"""
+        emotion_volumes = {
+            'excited': 1.1,
+            'dramatic': 1.2,
+            'calm': 0.9,
+            'neutral': 1.0
+        }
+        return emotion_volumes.get(emotion.lower(), 1.0)
+    
+    def add_sound_effects(self,
+                         base_audio: CompositeAudioClip,
+                         sound_effects: List[Dict[str, Any]],
+                         video_duration: float) -> CompositeAudioClip:
+        """Add sound effects to the composite audio"""
+        if not sound_effects:
+            return base_audio
+        
+        try:
+            audio_tracks = [base_audio] if base_audio else []
+            sound_effects_dir = Path("sound_effects")
+            
+            for effect in sound_effects:
+                try:
+                    effect_name = effect.get('effect_name', '')
+                    timestamp = effect.get('timestamp_seconds', 0)
+                    volume = effect.get('volume', 0.7)
+                    
+                    # Look for sound effect file
+                    possible_files = [
+                        sound_effects_dir / f"{effect_name}.wav",
+                        sound_effects_dir / f"{effect_name}.mp3",
+                        sound_effects_dir / f"{effect_name}.ogg"
+                    ]
+                    
+                    sound_file = None
+                    for file_path in possible_files:
+                        if file_path.exists():
+                            sound_file = file_path
+                            break
+                    
+                    if sound_file:
+                        sound_clip = AudioFileClip(str(sound_file))
+                        sound_clip = sound_clip.multiply_volume(volume)
+                        sound_clip = sound_clip.set_start(timestamp)
+                        
+                        # Ensure sound doesn't exceed video duration
+                        if timestamp + sound_clip.duration > video_duration:
+                            sound_clip = sound_clip.subclip(0, video_duration - timestamp)
+                        
+                        audio_tracks.append(sound_clip)
+                        self.logger.debug(f"Added sound effect '{effect_name}' at {timestamp}s")
+                    else:
+                        self.logger.warning(f"Sound effect file not found: {effect_name}")
+                        
+                except Exception as e:
+                    self.logger.warning(f"Failed to add sound effect: {e}")
+                    continue
+            
+            if len(audio_tracks) > 1:
+                return CompositeAudioClip(audio_tracks)
+            elif audio_tracks:
+                return audio_tracks[0]
+            else:
+                return base_audio
+                
+        except Exception as e:
+            self.logger.error(f"Error adding sound effects: {e}")
+            return base_audio
+    
     def _process_narrative_segments(self, segments: List[NarrativeSegment]) -> List[AudioFileClip]:
-        """Process TTS narrative segments (placeholder for TTS integration)"""
-        # This would integrate with TTS service to generate audio
-        # For now, return empty list
-        return []
+        """Process TTS narrative segments (deprecated - use _process_narrative_segments_safe)"""
+        return self._process_narrative_segments_safe(segments)
 
 
 class TemporaryFileManager:
@@ -756,53 +1090,101 @@ class VideoProcessor:
         self.text_processor = TextOverlayProcessor()
         self.audio_processor = AudioProcessor()
         self.advanced_enhancer = AdvancedVideoEnhancer()
+        self.cta_processor = CTAProcessor()
+        self.thumbnail_generator = ThumbnailGenerator()
     
     def process_video(self,
                       video_path: Path,
                       output_path: Path,
                       analysis: VideoAnalysis,
-                      background_music_path: Optional[Path] = None) -> bool:
+                      background_music_path: Optional[Path] = None,
+                      generate_thumbnail: bool = True) -> Dict[str, Any]:
         """
-        Main video processing pipeline with enhanced error handling
+        Enhanced video processing pipeline with AI-powered narrative, CTAs, and thumbnail generation
         
         Args:
             video_path: Input video path
             output_path: Output video path
             analysis: AI analysis results (validated Pydantic model)
             background_music_path: Optional background music
+            generate_thumbnail: Whether to generate thumbnail
         
         Returns:
-            True if processing successful, False otherwise
+            Dict with processing results including video_path, thumbnail_path, and success status
         """
+        result = {
+            'success': False,
+            'video_path': None,
+            'thumbnail_path': None,
+            'processing_stats': {
+                'tts_segments': 0,
+                'visual_effects': 0,
+                'cta_elements': 0,
+                'duration': 0.0
+            }
+        }
+        
         with ResourceManager() as resource_manager, TemporaryFileManager() as temp_manager:
             try:
-                self.logger.info(f"Starting video processing: {video_path}")
+                self.logger.info(f"Starting enhanced video processing: {video_path}")
                 
                 # Stage 1: Input Validation and Preparation
                 video_clip = self._load_source_clip(video_path, output_path, analysis, resource_manager)
                 if not video_clip:
-                    return False
+                    return result
                 
-                # Stage 2: Audio Synthesis and Composition
-                composite_audio = self._synthesize_audio(video_clip.audio, analysis, background_music_path, resource_manager, temp_manager)
+                # Stage 2: Enhanced Audio Synthesis with TTS and Sound Effects
+                composite_audio = self._synthesize_audio(video_clip, analysis, background_music_path, resource_manager, temp_manager)
                 
-                # Stage 3: Visual Effects and Composition
-                final_visuals = self._compose_visuals(video_clip, analysis, resource_manager)
+                # Stage 3: Advanced Visual Effects and Composition
+                enhanced_visuals = self._compose_visuals(video_clip, analysis, resource_manager)
                 
-                # Stage 4: Combine and Render
-                final_clip = final_visuals.set_audio(composite_audio) if composite_audio else final_visuals
-                success = self._render_video(final_clip, output_path, temp_manager)
+                # Stage 4: Add Call-to-Action Elements for Maximum Engagement
+                final_visuals = self._add_engagement_elements(enhanced_visuals, analysis, resource_manager)
                 
-                if success:
-                    self.logger.info(f"Video processing completed: {output_path}")
+                # Stage 5: Final Audio Enhancement with Auditory CTAs
+                if composite_audio:
+                    final_audio = self.cta_processor.add_auditory_ctas(
+                        composite_audio, analysis, final_visuals.duration
+                    )
+                    resource_manager.register_clip(final_audio)
+                else:
+                    final_audio = composite_audio
+                
+                # Stage 6: Combine and Render Final Video
+                final_clip = final_visuals.set_audio(final_audio) if final_audio else final_visuals
+                video_success = self._render_video(final_clip, output_path, temp_manager)
+                
+                if video_success:
+                    result['video_path'] = output_path
+                    result['processing_stats']['duration'] = final_clip.duration
+                    
+                    # Stage 7: Generate Enhanced Thumbnail
+                    if generate_thumbnail:
+                        thumbnail_path = output_path.with_suffix('.jpg')
+                        thumbnail_success = self.thumbnail_generator.generate_thumbnail(
+                            video_path, analysis, thumbnail_path
+                        )
+                        if thumbnail_success:
+                            result['thumbnail_path'] = thumbnail_path
+                    
+                    # Update processing stats
+                    result['processing_stats'].update({
+                        'tts_segments': len(analysis.narrative_script_segments) if analysis.narrative_script_segments else 0,
+                        'visual_effects': len(analysis.visual_cues) if analysis.visual_cues else 0,
+                        'cta_elements': 1 if analysis.call_to_action else 0
+                    })
+                    
+                    result['success'] = True
+                    self.logger.info(f"Enhanced video processing completed: {output_path}")
                 else:
                     self.logger.error("Failed to render final video")
                 
-                return success
+                return result
                 
             except Exception as e:
                 self.logger.error(f"Critical error in video processing: {e}", exc_info=True)
-                return False
+                return result
             finally:
                 self._cleanup()
     
@@ -861,39 +1243,51 @@ class VideoProcessor:
             Composite audio clip or None if failed
         """
         try:
-            self.logger.info("Starting audio synthesis")
+            self.logger.info("Starting enhanced audio synthesis with TTS and sound effects")
             
-            # Process TTS narration if needed
+            # Calculate video duration for audio processing
+            video_duration = source_audio.duration if source_audio else 60
+            
+            # Process TTS narration with enhanced integration
             narrative_clips = []
-            if analysis.narrative_script_segments and not analysis.original_audio_is_key:
+            if analysis.narrative_script_segments:
                 try:
-                    narrative_clips = self._process_tts_segments(analysis.narrative_script_segments)
+                    narrative_clips = self.audio_processor._process_narrative_segments_safe(
+                        analysis.narrative_script_segments
+                    )
                     self.logger.info(f"Generated {len(narrative_clips)} TTS segments")
+                    for clip in narrative_clips:
+                        resource_manager.register_clip(clip)
                 except Exception as e:
                     self.logger.warning(f"TTS processing failed, continuing without narration: {e}")
             
-            # Add background music if available
+            # Add background music with intelligent ducking
             music_clip = None
             if background_music_path and background_music_path.exists():
                 try:
-                    music_clip = self._add_background_music(
+                    music_clip = self.audio_processor._add_background_music_safe(
                         background_music_path,
-                        source_audio.duration if source_audio else 60,
+                        video_duration,
                         analysis.narrative_script_segments
                     )
                     if music_clip:
                         resource_manager.register_clip(music_clip)
-                        self.logger.info("Added background music with ducking")
+                        self.logger.info("Added background music with intelligent ducking")
                 except Exception as e:
                     self.logger.warning(f"Background music processing failed: {e}")
             
-            # Composite all audio elements
+            # Composite base audio elements
             audio_elements = []
             
             # Add original audio if it's important
             if analysis.original_audio_is_key and source_audio:
-                audio_elements.append(source_audio)
-                self.logger.info("Preserved original audio")
+                # Apply volume adjustment for original audio
+                original_audio = self.audio_processor._process_original_audio(
+                    type('MockClip', (), {'audio': source_audio})()
+                )
+                if original_audio:
+                    audio_elements.append(original_audio)
+                    self.logger.info("Preserved original audio with volume adjustment")
             
             # Add background music
             if music_clip:
@@ -902,20 +1296,35 @@ class VideoProcessor:
             # Add TTS narration
             if narrative_clips:
                 audio_elements.extend(narrative_clips)
-                for clip in narrative_clips:
-                    resource_manager.register_clip(clip)
             
-            # Create composite audio
+            # Create base composite audio
+            base_composite = None
             if len(audio_elements) > 1:
-                composite_audio = CompositeAudioClip(audio_elements)
-                resource_manager.register_clip(composite_audio)
-                self.logger.info(f"Created composite audio with {len(audio_elements)} elements")
-                return composite_audio
+                base_composite = CompositeAudioClip(audio_elements)
+                resource_manager.register_clip(base_composite)
+                self.logger.info(f"Created base composite audio with {len(audio_elements)} elements")
             elif audio_elements:
-                self.logger.info("Using single audio element")
-                return audio_elements[0]
+                base_composite = audio_elements[0]
+                self.logger.info("Using single audio element as base")
+            
+            # Add sound effects to the composite
+            if base_composite and analysis.sound_effects:
+                try:
+                    final_audio = self.audio_processor.add_sound_effects(
+                        base_composite,
+                        [effect.dict() for effect in analysis.sound_effects],
+                        video_duration
+                    )
+                    resource_manager.register_clip(final_audio)
+                    self.logger.info(f"Added {len(analysis.sound_effects)} sound effects")
+                    return final_audio
+                except Exception as e:
+                    self.logger.warning(f"Sound effects processing failed: {e}")
+                    return base_composite
+            elif base_composite:
+                return base_composite
             else:
-                self.logger.warning("No audio elements available, using silent audio")
+                self.logger.warning("No audio elements available")
                 return None
             
         except Exception as e:
@@ -939,25 +1348,121 @@ class VideoProcessor:
             Final composited video with all visual effects
         """
         try:
-            self.logger.info("Starting visual composition")
+            self.logger.info("Starting enhanced visual composition with focus points and effects")
             video_clip = source_clip
+            
+            # Apply advanced video enhancement filters first
+            if self.config.video.video_quality_profile == 'high':
+                try:
+                    video_clip = self.advanced_enhancer.apply_enhancement_filters(
+                        video_clip,
+                        enable_denoising=True,
+                        enable_sharpening=True
+                    )
+                    self.logger.info("Applied advanced enhancement filters")
+                except Exception as e:
+                    self.logger.warning(f"Advanced enhancement failed: {e}")
+            
+            # Apply adaptive color grading
+            try:
+                video_clip = self.advanced_enhancer.apply_adaptive_color_grading(video_clip)
+                self.logger.info("Applied adaptive color grading")
+            except Exception as e:
+                self.logger.warning(f"Color grading failed: {e}")
+            
+            # Apply intelligent focus and panning based on AI focus points
+            if analysis.key_focus_points:
+                try:
+                    focus_data = [point.dict() for point in analysis.key_focus_points]
+                    video_clip = self.effects.apply_intelligent_focus(video_clip, focus_data)
+                    self.logger.info(f"Applied intelligent focus for {len(analysis.key_focus_points)} focus points")
+                except Exception as e:
+                    self.logger.warning(f"Intelligent focus failed: {e}")
             
             # Apply visual effects with graceful error handling
             video_clip = self._apply_visual_effects(video_clip, analysis, resource_manager)
             
-            # Add text overlays with error handling
-            video_clip = self._add_text_overlays(video_clip, analysis)
+            # Add enhanced text overlays with dynamic animations
+            if analysis.text_overlays:
+                try:
+                    video_clip = self.text_processor.add_text_overlays(video_clip, analysis.text_overlays)
+                    self.logger.info(f"Added {len(analysis.text_overlays)} text overlays with animations")
+                except Exception as e:
+                    self.logger.warning(f"Text overlay processing failed: {e}")
+            
+            # Apply speed effects for dynamic pacing
+            if analysis.speed_effects:
+                try:
+                    speed_data = [effect.dict() for effect in analysis.speed_effects]
+                    video_clip = self.effects.apply_speed_effects(video_clip, speed_data)
+                    self.logger.info(f"Applied {len(analysis.speed_effects)} speed effects")
+                except Exception as e:
+                    self.logger.warning(f"Speed effects failed: {e}")
+            
+            # Apply visual cues for engagement
+            if analysis.visual_cues:
+                try:
+                    video_clip = self.effects.add_visual_cues(video_clip, analysis.visual_cues)
+                    self.logger.info(f"Added {len(analysis.visual_cues)} visual cues")
+                except Exception as e:
+                    self.logger.warning(f"Visual cues failed: {e}")
             
             # Apply duration constraints
             video_clip = self._apply_duration_constraints(video_clip)
             
-            self.logger.info("Visual composition completed")
+            # Register the final clip for cleanup
+            resource_manager.register_clip(video_clip)
+            
+            self.logger.info("Enhanced visual composition completed")
             return video_clip
             
         except Exception as e:
             self.logger.error(f"Error in visual composition: {e}")
             # Return source clip as fallback
             return source_clip
+    
+    def _add_engagement_elements(self,
+                                video_clip: VideoFileClip,
+                                analysis: VideoAnalysis,
+                                resource_manager: ResourceManager) -> VideoFileClip:
+        """
+        Stage 4: Add engagement elements including CTAs, hooks, and interactive elements
+        
+        Args:
+            video_clip: Enhanced video with visual effects
+            analysis: AI analysis with engagement requirements
+            resource_manager: Resource manager for cleanup
+        
+        Returns:
+            Video with all engagement elements added
+        """
+        try:
+            self.logger.info("Adding engagement elements and CTAs")
+            enhanced_video = video_clip
+            
+            # Add visual CTAs (subscribe buttons, like reminders, etc.)
+            try:
+                enhanced_video = self.cta_processor.add_visual_ctas(enhanced_video, analysis)
+                self.logger.info("Added visual call-to-action elements")
+            except Exception as e:
+                self.logger.warning(f"Visual CTA processing failed: {e}")
+            
+            # Add engagement hooks throughout the video
+            try:
+                enhanced_video = self.cta_processor.create_engagement_hooks(enhanced_video, analysis)
+                self.logger.info("Added engagement hooks and curiosity gaps")
+            except Exception as e:
+                self.logger.warning(f"Engagement hooks processing failed: {e}")
+            
+            # Register the final enhanced video for cleanup
+            resource_manager.register_clip(enhanced_video)
+            
+            self.logger.info("Engagement elements processing completed")
+            return enhanced_video
+            
+        except Exception as e:
+            self.logger.error(f"Error adding engagement elements: {e}")
+            return video_clip
     
     def _render_video(self,
                       final_clip: VideoFileClip,

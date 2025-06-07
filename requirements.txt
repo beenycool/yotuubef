@@ -23,5 +23,29 @@ requests
 pydantic>=2.0.0
 pytest>=7.0.0
 pytest-asyncio
-# Add specific versions if needed, e.g., moviepy==1.0.3
 jupyter
+
+# Enhanced TTS and Audio Processing
+git+https://github.com/nari-labs/dia.git
+scipy
+
+# Enhanced Image Processing for Thumbnails
+imageio
+imageio-ffmpeg
+
+# Additional AI/ML Dependencies
+scikit-learn
+librosa  # For advanced audio analysis
+
+# Enhanced Video Processing
+ffmpeg-python
+av  # Alternative video processing library
+
+# Performance and Memory Management
+memory-profiler
+objgraph
+
+# Development and Testing
+black
+flake8
+mypy

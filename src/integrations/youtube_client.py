@@ -24,13 +24,14 @@ from src.config.settings import get_config
 
 @dataclass
 class VideoMetadata:
-    """Video metadata for YouTube uploads"""
+    """Video metadata for YouTube uploads with enhanced CTA support"""
     title: str
     description: str
     tags: List[str]
     category_id: str = "24"  # Entertainment
     privacy_status: str = "public"  # public, private, unlisted
     thumbnail_path: Optional[Path] = None
+    call_to_action: Optional[str] = None
     
     def to_youtube_body(self) -> Dict[str, Any]:
         """Convert to YouTube API request body format"""
@@ -48,6 +49,76 @@ class VideoMetadata:
         }
         
         return body
+
+def create_enhanced_description(summary: str,
+                              call_to_action: str,
+                              hashtags: List[str],
+                              channel_branding: Optional[str] = None) -> str:
+    """
+    Create an enhanced YouTube description with strong CTAs and engagement tactics
+    
+    Args:
+        summary: Main video description
+        call_to_action: Primary CTA text
+        hashtags: List of hashtags
+        channel_branding: Optional channel branding text
+    
+    Returns:
+        Formatted description with CTAs and engagement elements
+    """
+    description_parts = []
+    
+    # Main content description
+    description_parts.append(summary)
+    description_parts.append("")  # Blank line
+    
+    # Strong call-to-action section
+    cta_section = f"""🔥 {call_to_action}
+    
+👍 SMASH that LIKE button if you enjoyed this!
+🔔 SUBSCRIBE for more amazing content!
+💬 What was your favorite moment? Let us know in the comments!
+📤 SHARE this with friends who need to see this!"""
+    
+    description_parts.append(cta_section)
+    description_parts.append("")  # Blank line
+    
+    # Engagement questions to boost comments
+    engagement_questions = [
+        "🤔 What did you think would happen?",
+        "📊 Rate this from 1-10 in the comments!",
+        "🎯 Tag someone who needs to see this!",
+        "💭 What would you do in this situation?"
+    ]
+    
+    description_parts.append("💬 ENGAGE WITH US:")
+    description_parts.extend(engagement_questions[:2])  # Use first 2 questions
+    description_parts.append("")  # Blank line
+    
+    # Channel branding if provided
+    if channel_branding:
+        description_parts.append(f"🎬 {channel_branding}")
+        description_parts.append("")  # Blank line
+    
+    # Social media and discovery
+    description_parts.append("🔍 DISCOVER MORE:")
+    description_parts.append("✨ Turn on notifications to never miss a video!")
+    description_parts.append("🌟 Check out our other viral content!")
+    description_parts.append("")  # Blank line
+    
+    # Hashtags section
+    if hashtags:
+        # Ensure hashtags are properly formatted
+        formatted_hashtags = []
+        for tag in hashtags:
+            if not tag.startswith('#'):
+                tag = f'#{tag}'
+            formatted_hashtags.append(tag)
+        
+        hashtags_text = " ".join(formatted_hashtags)
+        description_parts.append(f"📈 {hashtags_text}")
+    
+    return "\n".join(description_parts)
 
 
 @dataclass
