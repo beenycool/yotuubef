@@ -9,99 +9,20 @@ import base64
 import time
 from typing import Dict, Any, List, Optional, Union
 from pathlib import Path
-from dataclasses import dataclass, asdict
 
 import google.generativeai as genai
 from google.generativeai.types import HarmCategory, HarmBlockThreshold
 import cv2
 import numpy as np
+from pydantic import ValidationError
 
 from src.config.settings import get_config
 from src.integrations.reddit_client import RedditPost
-
-
-@dataclass
-class VisualCue:
-    """Visual cue for video enhancement"""
-    timestamp_seconds: float
-    description: str
-    effect_type: str  # "zoom", "highlight", "text_overlay", "color_grade"
-    intensity: float = 1.0
-    duration: float = 1.0
-
-
-@dataclass
-class TextOverlay:
-    """Text overlay information"""
-    text: str
-    timestamp_seconds: float
-    duration: float
-    position: str = "center"  # "center", "top", "bottom", "left", "right"
-    style: str = "default"  # "default", "bold", "highlight", "dramatic"
-
-
-@dataclass
-class NarrativeSegment:
-    """TTS narrative segment"""
-    text: str
-    time_seconds: float
-    intended_duration_seconds: float
-    emotion: str = "neutral"  # "excited", "calm", "dramatic", "neutral"
-    pacing: str = "normal"  # "slow", "normal", "fast"
-
-
-@dataclass
-class VideoAnalysis:
-    """Complete video analysis result from AI"""
-    # Basic info
-    suggested_title: str
-    summary_for_description: str
-    mood: str
-    has_clear_narrative: bool
-    original_audio_is_key: bool
-    
-    # Content elements
-    hook_text: str
-    hook_variations: List[str]
-    visual_hook_moment: Dict[str, Union[float, str]]
-    audio_hook: Dict[str, Union[str, float]]
-    best_segment: Dict[str, Union[float, str]]
-    segments: List[Dict[str, Union[float, str]]]
-    
-    # Enhancement elements
-    key_focus_points: List[Dict[str, float]]
-    text_overlays: List[TextOverlay]
-    narrative_script_segments: List[NarrativeSegment]
-    visual_cues: List[VisualCue]
-    speed_effects: List[Dict[str, Union[float, str]]]
-    
-    # Metadata
-    music_genres: List[str]
-    sound_effects: List[Dict[str, Union[float, str]]]
-    hashtags: List[str]
-    original_duration: float
-    tts_pacing: str
-    emotional_keywords: List[str]
-    
-    # Thumbnail and engagement
-    thumbnail_info: Dict[str, Union[float, str]]
-    call_to_action: Dict[str, str]
-    retention_tactics: List[str]
-    
-    # Content safety
-    is_explicitly_age_restricted: bool
-    fallback: bool = False
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for JSON serialization"""
-        result = asdict(self)
-        
-        # Convert dataclass objects to dicts
-        result['text_overlays'] = [asdict(overlay) for overlay in self.text_overlays]
-        result['narrative_script_segments'] = [asdict(segment) for segment in self.narrative_script_segments]
-        result['visual_cues'] = [asdict(cue) for cue in self.visual_cues]
-        
-        return result
+from src.models import (
+    VideoAnalysis, TextOverlay, NarrativeSegment, VisualCue,
+    HookMoment, AudioHook, VideoSegment, ThumbnailInfo, CallToAction,
+    FocusPoint, SpeedEffect, SoundEffect
+)
 
 
 class SafetyChecker:
@@ -406,7 +327,7 @@ Ensure all suggestions enhance viewer retention and engagement.
 """
     
     def _parse_analysis_response(self, response_text: str, post: RedditPost) -> VideoAnalysis:
-        """Parse Gemini response into VideoAnalysis object"""
+        """Parse Gemini response into VideoAnalysis object with robust validation"""
         try:
             # Extract JSON from response
             json_start = response_text.find('{')
@@ -418,60 +339,224 @@ Ensure all suggestions enhance viewer retention and engagement.
             json_text = response_text[json_start:json_end]
             data = json.loads(json_text)
             
-            # Convert to VideoAnalysis object
-            text_overlays = [
-                TextOverlay(**overlay) for overlay in data.get('text_overlays', [])
-            ]
+            # Prepare validated nested objects
+            validated_data = self._prepare_validated_data(data, post)
             
-            narrative_segments = [
-                NarrativeSegment(**segment) for segment in data.get('narrative_script_segments', [])
-            ]
+            # Create VideoAnalysis with Pydantic validation
+            try:
+                analysis = VideoAnalysis(**validated_data)
+                self.logger.info("Successfully created validated VideoAnalysis")
+                return analysis
+                
+            except ValidationError as ve:
+                self.logger.warning(f"Validation errors in AI response: {ve}")
+                # Try to create with fallback values for invalid fields
+                return self._create_analysis_with_fallbacks(data, post, ve)
             
-            visual_cues = [
-                VisualCue(**cue) for cue in data.get('visual_cues', [])
-            ]
-            
-            analysis = VideoAnalysis(
-                suggested_title=data.get('suggested_title', f"Amazing {post.subreddit} Video"),
-                summary_for_description=data.get('summary_for_description', "Check out this incredible video!"),
-                mood=data.get('mood', 'exciting'),
-                has_clear_narrative=data.get('has_clear_narrative', False),
-                original_audio_is_key=data.get('original_audio_is_key', True),
-                
-                hook_text=data.get('hook_text', 'Watch this!'),
-                hook_variations=data.get('hook_variations', ['Amazing!', 'Incredible!', 'Must see!']),
-                visual_hook_moment=data.get('visual_hook_moment', {'timestamp_seconds': 0.0, 'description': 'Opening moment'}),
-                audio_hook=data.get('audio_hook', {'type': 'sound_effect', 'sound_name': 'whoosh', 'timestamp_seconds': 0.0}),
-                
-                best_segment=data.get('best_segment', {'start_seconds': 0, 'end_seconds': 30, 'reason': 'Main content'}),
-                segments=data.get('segments', [{'start_seconds': 0, 'end_seconds': 59, 'reason': 'Full video'}]),
-                
-                key_focus_points=data.get('key_focus_points', []),
-                text_overlays=text_overlays,
-                narrative_script_segments=narrative_segments,
-                visual_cues=visual_cues,
-                speed_effects=data.get('speed_effects', []),
-                
-                music_genres=data.get('music_genres', ['upbeat']),
-                sound_effects=data.get('sound_effects', []),
-                hashtags=data.get('hashtags', ['#shorts', '#viral']),
-                original_duration=0.0,  # Will be set by video processor
-                tts_pacing=data.get('tts_pacing', 'normal'),
-                emotional_keywords=data.get('emotional_keywords', ['interesting']),
-                
-                thumbnail_info=data.get('thumbnail_info', {'timestamp_seconds': 0.0, 'reason': 'Default', 'headline_text': ''}),
-                call_to_action=data.get('call_to_action', {'text': 'Subscribe!', 'type': 'subscribe'}),
-                retention_tactics=data.get('retention_tactics', ['Engaging visuals']),
-                
-                is_explicitly_age_restricted=data.get('is_explicitly_age_restricted', False),
-                fallback=False
-            )
-            
-            return analysis
-            
+        except json.JSONDecodeError as je:
+            self.logger.error(f"Invalid JSON in AI response: {je}")
+            return self._get_fallback_analysis(post)
         except Exception as e:
             self.logger.error(f"Error parsing analysis response: {e}")
             return self._get_fallback_analysis(post)
+    
+    def _prepare_validated_data(self, data: Dict[str, Any], post: RedditPost) -> Dict[str, Any]:
+        """Prepare and validate data structure for VideoAnalysis creation"""
+        validated = {}
+        
+        # Basic fields with defaults
+        validated['suggested_title'] = data.get('suggested_title', f"Amazing {post.subreddit} Video")[:100]
+        validated['summary_for_description'] = data.get('summary_for_description', "Check out this incredible video!")[:500]
+        validated['mood'] = data.get('mood', 'exciting')
+        validated['has_clear_narrative'] = bool(data.get('has_clear_narrative', False))
+        validated['original_audio_is_key'] = bool(data.get('original_audio_is_key', True))
+        
+        # Hook elements
+        validated['hook_text'] = data.get('hook_text', 'Watch this!')[:200]
+        validated['hook_variations'] = data.get('hook_variations', ['Amazing!', 'Incredible!', 'Must see!'])[:10]
+        
+        # Visual hook moment
+        visual_hook_data = data.get('visual_hook_moment', {})
+        validated['visual_hook_moment'] = HookMoment(
+            timestamp_seconds=max(0, float(visual_hook_data.get('timestamp_seconds', 0))),
+            description=visual_hook_data.get('description', 'Opening moment')
+        )
+        
+        # Audio hook
+        audio_hook_data = data.get('audio_hook', {})
+        validated['audio_hook'] = AudioHook(
+            type=audio_hook_data.get('type', 'sound_effect'),
+            sound_name=audio_hook_data.get('sound_name', 'whoosh'),
+            timestamp_seconds=max(0, float(audio_hook_data.get('timestamp_seconds', 0)))
+        )
+        
+        # Segments
+        best_segment_data = data.get('best_segment', {})
+        validated['best_segment'] = VideoSegment(
+            start_seconds=max(0, float(best_segment_data.get('start_seconds', 0))),
+            end_seconds=max(1, float(best_segment_data.get('end_seconds', 30))),
+            reason=best_segment_data.get('reason', 'Main content')
+        )
+        
+        segments_data = data.get('segments', [])
+        validated_segments = []
+        for seg in segments_data:
+            try:
+                segment = VideoSegment(
+                    start_seconds=max(0, float(seg.get('start_seconds', 0))),
+                    end_seconds=max(1, float(seg.get('end_seconds', 60))),
+                    reason=seg.get('reason', 'Video segment')
+                )
+                validated_segments.append(segment)
+            except (ValueError, TypeError):
+                continue
+        
+        if not validated_segments:
+            validated_segments = [VideoSegment(start_seconds=0, end_seconds=60, reason='Full video')]
+        validated['segments'] = validated_segments
+        
+        # Lists with validation
+        validated['key_focus_points'] = self._validate_focus_points(data.get('key_focus_points', []))
+        validated['text_overlays'] = self._validate_text_overlays(data.get('text_overlays', []))
+        validated['narrative_script_segments'] = self._validate_narrative_segments(data.get('narrative_script_segments', []))
+        validated['visual_cues'] = self._validate_visual_cues(data.get('visual_cues', []))
+        validated['speed_effects'] = self._validate_speed_effects(data.get('speed_effects', []))
+        validated['sound_effects'] = self._validate_sound_effects(data.get('sound_effects', []))
+        
+        # Simple lists
+        validated['music_genres'] = data.get('music_genres', ['upbeat'])
+        validated['hashtags'] = data.get('hashtags', ['#shorts', '#viral'])
+        validated['emotional_keywords'] = data.get('emotional_keywords', ['interesting'])
+        validated['retention_tactics'] = data.get('retention_tactics', ['Engaging visuals'])
+        
+        # Metadata
+        validated['original_duration'] = max(0, float(data.get('original_duration', 0)))
+        validated['tts_pacing'] = data.get('tts_pacing', 'normal')
+        
+        # Thumbnail and CTA
+        thumbnail_data = data.get('thumbnail_info', {})
+        validated['thumbnail_info'] = ThumbnailInfo(
+            timestamp_seconds=max(0, float(thumbnail_data.get('timestamp_seconds', 0))),
+            reason=thumbnail_data.get('reason', 'Default thumbnail'),
+            headline_text=thumbnail_data.get('headline_text', '')
+        )
+        
+        cta_data = data.get('call_to_action', {})
+        validated['call_to_action'] = CallToAction(
+            text=cta_data.get('text', 'Subscribe!')[:100],
+            type=cta_data.get('type', 'subscribe')
+        )
+        
+        # Safety
+        validated['is_explicitly_age_restricted'] = bool(data.get('is_explicitly_age_restricted', False))
+        validated['fallback'] = False
+        
+        return validated
+    
+    def _validate_focus_points(self, points: List[Dict]) -> List[FocusPoint]:
+        """Validate focus points data"""
+        validated = []
+        for point in points[:20]:  # Limit to 20 points
+            try:
+                fp = FocusPoint(
+                    x=max(0, min(1, float(point.get('x', 0.5)))),
+                    y=max(0, min(1, float(point.get('y', 0.5)))),
+                    timestamp_seconds=max(0, float(point.get('timestamp_seconds', 0))),
+                    description=point.get('description', 'Focus point')
+                )
+                validated.append(fp)
+            except (ValueError, TypeError):
+                continue
+        return validated
+    
+    def _validate_text_overlays(self, overlays: List[Dict]) -> List[TextOverlay]:
+        """Validate text overlays data"""
+        validated = []
+        for overlay in overlays[:15]:  # Limit to 15 overlays
+            try:
+                to = TextOverlay(
+                    text=overlay.get('text', 'Text')[:200],
+                    timestamp_seconds=max(0, float(overlay.get('timestamp_seconds', 0))),
+                    duration=max(0.1, min(10, float(overlay.get('duration', 2)))),
+                    position=overlay.get('position', 'center'),
+                    style=overlay.get('style', 'default')
+                )
+                validated.append(to)
+            except (ValueError, TypeError):
+                continue
+        return validated
+    
+    def _validate_narrative_segments(self, segments: List[Dict]) -> List[NarrativeSegment]:
+        """Validate narrative segments data"""
+        validated = []
+        for segment in segments[:20]:  # Limit to 20 segments
+            try:
+                ns = NarrativeSegment(
+                    text=segment.get('text', 'Narrative text')[:500],
+                    time_seconds=max(0, float(segment.get('time_seconds', 0))),
+                    intended_duration_seconds=max(0.1, min(30, float(segment.get('intended_duration_seconds', 2)))),
+                    emotion=segment.get('emotion', 'neutral'),
+                    pacing=segment.get('pacing', 'normal')
+                )
+                validated.append(ns)
+            except (ValueError, TypeError):
+                continue
+        return validated
+    
+    def _validate_visual_cues(self, cues: List[Dict]) -> List[VisualCue]:
+        """Validate visual cues data"""
+        validated = []
+        for cue in cues[:20]:  # Limit to 20 cues
+            try:
+                vc = VisualCue(
+                    timestamp_seconds=max(0, float(cue.get('timestamp_seconds', 0))),
+                    description=cue.get('description', 'Visual effect'),
+                    effect_type=cue.get('effect_type', 'zoom'),
+                    intensity=max(0.1, min(2.0, float(cue.get('intensity', 1.0)))),
+                    duration=max(0.1, min(10, float(cue.get('duration', 1.0))))
+                )
+                validated.append(vc)
+            except (ValueError, TypeError):
+                continue
+        return validated
+    
+    def _validate_speed_effects(self, effects: List[Dict]) -> List[SpeedEffect]:
+        """Validate speed effects data"""
+        validated = []
+        for effect in effects[:10]:  # Limit to 10 effects
+            try:
+                start = max(0, float(effect.get('start_seconds', 0)))
+                end = max(start + 0.1, float(effect.get('end_seconds', start + 1)))
+                se = SpeedEffect(
+                    start_seconds=start,
+                    end_seconds=end,
+                    speed_factor=max(0.1, min(5.0, float(effect.get('speed_factor', 1.0)))),
+                    effect_type=effect.get('effect_type', 'speed_change')
+                )
+                validated.append(se)
+            except (ValueError, TypeError):
+                continue
+        return validated
+    
+    def _validate_sound_effects(self, effects: List[Dict]) -> List[SoundEffect]:
+        """Validate sound effects data"""
+        validated = []
+        for effect in effects[:15]:  # Limit to 15 effects
+            try:
+                se = SoundEffect(
+                    timestamp_seconds=max(0, float(effect.get('timestamp_seconds', 0))),
+                    effect_name=effect.get('effect_name', 'sound'),
+                    volume=max(0, min(1, float(effect.get('volume', 0.7))))
+                )
+                validated.append(se)
+            except (ValueError, TypeError):
+                continue
+        return validated
+    
+    def _create_analysis_with_fallbacks(self, data: Dict[str, Any], post: RedditPost, validation_error: ValidationError) -> VideoAnalysis:
+        """Create analysis with fallback values for failed validations"""
+        self.logger.warning(f"Using fallback analysis due to validation errors: {validation_error}")
+        return self._get_fallback_analysis(post)
     
     def _analyze_text_only(self, post: RedditPost) -> VideoAnalysis:
         """Analyze based on text content only when video frames unavailable"""
@@ -494,49 +579,93 @@ Ensure all suggestions enhance viewer retention and engagement.
     
     def _get_fallback_analysis(self, post: RedditPost) -> VideoAnalysis:
         """Generate fallback analysis when AI is unavailable"""
-        return VideoAnalysis(
-            suggested_title=f"Amazing {post.subreddit} Video: {post.title[:50]}",
-            summary_for_description=f"Check out this incredible video from r/{post.subreddit}!",
-            mood='exciting',
-            has_clear_narrative=False,
-            original_audio_is_key=True,
-            
-            hook_text='Watch this amazing moment!',
-            hook_variations=['Incredible!', 'Must see!', 'Amazing!'],
-            visual_hook_moment={'timestamp_seconds': 0.0, 'description': 'Opening scene'},
-            audio_hook={'type': 'sound_effect', 'sound_name': 'whoosh', 'timestamp_seconds': 0.0},
-            
-            best_segment={'start_seconds': 0, 'end_seconds': 30, 'reason': 'Main content'},
-            segments=[{'start_seconds': 0, 'end_seconds': 59, 'reason': 'Full video'}],
-            
-            key_focus_points=[],
-            text_overlays=[],
-            narrative_script_segments=[
-                NarrativeSegment(
-                    text="Check out this amazing content!",
-                    time_seconds=1.0,
-                    intended_duration_seconds=2.0,
-                    emotion="excited",
-                    pacing="normal"
-                )
-            ],
-            visual_cues=[],
-            speed_effects=[],
-            
-            music_genres=['upbeat'],
-            sound_effects=[],
-            hashtags=['#shorts', '#viral', f'#{post.subreddit}'],
-            original_duration=0.0,
-            tts_pacing='normal',
-            emotional_keywords=['interesting', 'engaging'],
-            
-            thumbnail_info={'timestamp_seconds': 0.0, 'reason': 'Default thumbnail', 'headline_text': 'AMAZING'},
-            call_to_action={'text': 'Subscribe for more!', 'type': 'subscribe'},
-            retention_tactics=['Engaging content', 'Good pacing'],
-            
-            is_explicitly_age_restricted=False,
-            fallback=True
-        )
+        try:
+            return VideoAnalysis(
+                suggested_title=f"Amazing {post.subreddit} Video: {post.title[:50]}",
+                summary_for_description=f"Check out this incredible video from r/{post.subreddit}!",
+                mood='exciting',
+                has_clear_narrative=False,
+                original_audio_is_key=True,
+                
+                hook_text='Watch this amazing moment!',
+                hook_variations=['Incredible!', 'Must see!', 'Amazing!'],
+                visual_hook_moment=HookMoment(
+                    timestamp_seconds=0.0,
+                    description='Opening scene'
+                ),
+                audio_hook=AudioHook(
+                    type='sound_effect',
+                    sound_name='whoosh',
+                    timestamp_seconds=0.0
+                ),
+                
+                best_segment=VideoSegment(
+                    start_seconds=0,
+                    end_seconds=30,
+                    reason='Main content'
+                ),
+                segments=[VideoSegment(
+                    start_seconds=0,
+                    end_seconds=59,
+                    reason='Full video'
+                )],
+                
+                key_focus_points=[],
+                text_overlays=[],
+                narrative_script_segments=[
+                    NarrativeSegment(
+                        text="Check out this amazing content!",
+                        time_seconds=1.0,
+                        intended_duration_seconds=2.0,
+                        emotion="excited",
+                        pacing="normal"
+                    )
+                ],
+                visual_cues=[],
+                speed_effects=[],
+                
+                music_genres=['upbeat'],
+                sound_effects=[],
+                hashtags=['#shorts', '#viral', f'#{post.subreddit}'],
+                original_duration=0.0,
+                tts_pacing='normal',
+                emotional_keywords=['interesting', 'engaging'],
+                
+                thumbnail_info=ThumbnailInfo(
+                    timestamp_seconds=0.0,
+                    reason='Default thumbnail',
+                    headline_text='AMAZING'
+                ),
+                call_to_action=CallToAction(
+                    text='Subscribe for more!',
+                    type='subscribe'
+                ),
+                retention_tactics=['Engaging content', 'Good pacing'],
+                
+                is_explicitly_age_restricted=False,
+                fallback=True
+            )
+        except Exception as e:
+            self.logger.error(f"Error creating fallback analysis: {e}")
+            # Return absolute minimum fallback
+            return VideoAnalysis(
+                suggested_title="Video Content",
+                summary_for_description="Interesting video content",
+                mood="neutral",
+                has_clear_narrative=False,
+                original_audio_is_key=True,
+                hook_text="Watch this!",
+                hook_variations=["Amazing!"],
+                visual_hook_moment=HookMoment(timestamp_seconds=0.0, description="Start"),
+                audio_hook=AudioHook(type="none", sound_name="none", timestamp_seconds=0.0),
+                best_segment=VideoSegment(start_seconds=0, end_seconds=30, reason="Content"),
+                segments=[VideoSegment(start_seconds=0, end_seconds=60, reason="Full")],
+                music_genres=["background"],
+                hashtags=["#video"],
+                thumbnail_info=ThumbnailInfo(timestamp_seconds=0.0, reason="Default", headline_text=""),
+                call_to_action=CallToAction(text="Like and subscribe!", type="general"),
+                fallback=True
+            )
 
 
 def create_ai_client() -> GeminiClient:

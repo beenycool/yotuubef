@@ -20,5 +20,8 @@ pynvml; sys_platform == 'linux' and platform_machine == 'x86_64'
 ffmpeg-python
 python-dotenv>=1.0.0
 requests
+pydantic>=2.0.0
+pytest>=7.0.0
+pytest-asyncio
 # Add specific versions if needed, e.g., moviepy==1.0.3
 jupyter
