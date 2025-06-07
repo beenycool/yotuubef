@@ -10,20 +10,23 @@ video:
   max_retries: 3
   default_crop: [0.25, 0.25, 0.75, 0.75]  # default crop area [x1, y1, x2, y2]
   
-  # Audio settings
+  # Audio settings (enhanced for higher quality)
   audio_codec: 'aac'
-  audio_bitrate: '192k'
+  audio_bitrate: '256k'  # Increased from 192k for better audio quality
   loudness_target_lufs: -14.0
   default_audio_fps: 44100
   
-  # Video encoding
+  # Video encoding (optimized for quality)
   video_codec_cpu: 'libx264'
-  video_codec_gpu: 'h264_nvenc'
-  ffmpeg_cpu_preset: 'medium'
-  ffmpeg_gpu_preset: 'p5'
-  ffmpeg_crf_cpu: '23'
-  ffmpeg_cq_gpu: '23'
-  video_bitrate_high: '10M'
+  video_codec_gpu: 'h264_nvenc'  # Can use 'hevc_nvenc' for H.265 if supported
+  ffmpeg_cpu_preset: 'slow'  # Changed from 'medium' for better quality
+  ffmpeg_gpu_preset: 'p6'   # Changed from 'p5' for better quality
+  ffmpeg_crf_cpu: '20'      # Lowered from '23' for higher quality
+  ffmpeg_cq_gpu: '20'       # Lowered from '23' for higher quality
+  video_bitrate_high: '15M' # Increased from '10M' for 1080p quality
+  
+  # Quality profile for easy management
+  video_quality_profile: 'high'  # Options: 'standard', 'high', 'maximum'
   
   # Processing optimization
   chunk_size: 30  # seconds for chunked processing

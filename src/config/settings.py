@@ -39,6 +39,9 @@ class VideoConfig:
     ffmpeg_cq_gpu: str = '23'
     video_bitrate_high: str = '10M'
     
+    # Quality profile for easy management
+    video_quality_profile: str = 'standard'  # Options: 'standard', 'high', 'maximum'
+    
     # Processing
     chunk_size: int = 30  # seconds
     max_memory_usage: float = 0.8  # 80% of available memory

@@ -18,7 +18,7 @@ from src.config.settings import get_config
 
 @dataclass
 class RedditPost:
-    """Structured representation of a Reddit post"""
+    """Structured representation of a Reddit post with quality metrics"""
     id: str
     title: str
     url: str
@@ -34,14 +34,21 @@ class RedditPost:
     duration: Optional[float] = None
     nsfw: bool = False
     spoiler: bool = False
+    # Quality metrics for source filtering
+    width: int = 0
+    height: int = 0
+    fps: float = 0
     
     @classmethod
     def from_submission(cls, submission: Submission) -> 'RedditPost':
-        """Create RedditPost from praw Submission"""
+        """Create RedditPost from praw Submission with quality metrics"""
         # Determine if this is a video post
         is_video = False
         video_url = None
         duration = None
+        width = 0
+        height = 0
+        fps = 0
         
         if hasattr(submission, 'is_video') and submission.is_video:
             is_video = True
@@ -49,6 +56,17 @@ class RedditPost:
                 reddit_video = submission.media.get('reddit_video', {})
                 video_url = reddit_video.get('fallback_url') or reddit_video.get('hls_url')
                 duration = reddit_video.get('duration')
+                width = reddit_video.get('width', 0)
+                height = reddit_video.get('height', 0)
+                # Try to extract FPS if available
+                if hasattr(submission.media, 'reddit_video'):
+                    fps = reddit_video.get('fps', 0)
+                    # Estimate FPS from duration and frame count if available
+                    if not fps and reddit_video.get('duration') and reddit_video.get('scanned_size'):
+                        try:
+                            fps = reddit_video['scanned_size'] / reddit_video['duration']
+                        except (ZeroDivisionError, TypeError):
+                            fps = 0
         elif submission.url and any(submission.url.lower().endswith(ext) for ext in ['.mp4', '.webm', '.mov', '.avi']):
             is_video = True
             video_url = submission.url
@@ -74,7 +92,10 @@ class RedditPost:
             thumbnail_url=submission.thumbnail if hasattr(submission, 'thumbnail') else None,
             duration=duration,
             nsfw=submission.over_18,
-            spoiler=submission.spoiler
+            spoiler=submission.spoiler,
+            width=width,
+            height=height,
+            fps=fps
         )
 
 
@@ -104,7 +125,7 @@ class ContentFilter:
     
     def is_suitable_for_monetization(self, post: RedditPost) -> Dict[str, Any]:
         """
-        Comprehensive content suitability check for monetization
+        Comprehensive content suitability check for monetization, including quality.
         
         Returns:
             Dict with 'is_suitable', 'reason', and 'confidence' keys
@@ -137,11 +158,21 @@ class ContentFilter:
             reasons.append("Low upvote ratio (controversial content)")
         
         # Video-specific checks
-        if post.is_video and post.duration:
-            if post.duration < 5:
-                reasons.append("Video too short")
-            elif post.duration > 300:  # 5 minutes
-                reasons.append("Video too long")
+        if post.is_video:
+            if post.duration:
+                if post.duration < 5:
+                    reasons.append("Video too short")
+                elif post.duration > 300:  # 5 minutes
+                    reasons.append("Video too long")
+            
+            # Source Quality Checks
+            if post.width > 0 and post.height > 0:
+                min_resolution = min(post.width, post.height)
+                if min_resolution < 720:  # Minimum acceptable resolution for Shorts (720p vertical)
+                    reasons.append(f"Low source resolution ({post.width}x{post.height})")
+            
+            if post.fps > 0 and post.fps < 25:  # Minimum acceptable FPS
+                reasons.append(f"Low source FPS ({post.fps})")
         
         is_suitable = len(reasons) == 0
         confidence = 95 if is_suitable else max(60, 100 - len(reasons) * 15)
