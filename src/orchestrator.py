@@ -239,7 +239,12 @@ class VideoGenerationOrchestrator:
                            f"(priority: {video_metrics['processing_priority']})")
             
             # Validate and select video segments
-            valid_segments = select_and_validate_segments(analysis, self.config.model_dump())
+            valid_segments = select_and_validate_segments(analysis, {
+                'video': {
+                    'max_short_duration_seconds': self.config.video.target_duration,
+                    'min_short_duration_seconds': 15
+                }
+            })
             if not valid_segments:
                 raise ProcessingError("No valid video segments could be determined")
             
@@ -1044,7 +1049,11 @@ def main():
         logger.info(f"Videos uploaded: {results['videos_uploaded']}")
         logger.info(f"Processing errors: {results['processing_errors']}")
         logger.info(f"Success rate: {results['success_rate']:.1f}%")
-        logger.info(f"Total time: {results['total_processing_time_seconds']:.1f}s")
+        total_time = results.get('total_processing_time_seconds')
+        if total_time is not None:
+            logger.info(f"Total time: {total_time:.1f}s")
+        else:
+            logger.info("Total time: N/A")
         logger.info("====================")
         
         return 0

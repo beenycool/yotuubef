@@ -93,7 +93,12 @@ class DatabaseManager:
                     )
                 ''')
                 
-                # Create indexes for performance
+                conn.commit()
+                
+                # Check and perform migrations
+                self._migrate_database(cursor)
+                
+                # Create indexes for performance (after migrations)
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_uploads_reddit_url ON uploads(reddit_url)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_uploads_youtube_video_id ON uploads(youtube_video_id)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_uploads_subreddit ON uploads(subreddit)')
@@ -101,10 +106,6 @@ class DatabaseManager:
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_processing_history_upload_id ON processing_history(upload_id)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_analytics_date ON analytics(date)')
                 
-                conn.commit()
-                
-                # Check and perform migrations
-                self._migrate_database(cursor)
                 conn.commit()
                 
             self.logger.info(f"Database initialized at {self.db_path}")
@@ -132,8 +133,8 @@ class DatabaseManager:
                 ("error_message", "ALTER TABLE uploads ADD COLUMN error_message TEXT"),
                 ("thumbnail_uploaded", "ALTER TABLE uploads ADD COLUMN thumbnail_uploaded BOOLEAN DEFAULT FALSE"),
                 ("ai_analysis_used", "ALTER TABLE uploads ADD COLUMN ai_analysis_used BOOLEAN DEFAULT FALSE"),
-                ("created_at", "ALTER TABLE uploads ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP"),
-                ("updated_at", "ALTER TABLE uploads ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"),
+                ("created_at", "ALTER TABLE uploads ADD COLUMN created_at DATETIME"),
+                ("updated_at", "ALTER TABLE uploads ADD COLUMN updated_at DATETIME"),
                 # A/B Testing columns
                 ("thumbnail_ctr_a", "ALTER TABLE uploads ADD COLUMN thumbnail_ctr_a REAL"),
                 ("thumbnail_ctr_b", "ALTER TABLE uploads ADD COLUMN thumbnail_ctr_b REAL"),

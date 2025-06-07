@@ -7,8 +7,8 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
 import numpy as np
-from moviepy.editor import (
-    VideoFileClip, TextClip, CompositeVideoClip, ColorClip, 
+from moviepy import (
+    VideoFileClip, TextClip, CompositeVideoClip, ColorClip,
     ImageClip, AudioFileClip, concatenate_audioclips
 )
 from PIL import Image, ImageDraw, ImageFont

@@ -15,12 +15,11 @@ import psutil
 
 import cv2
 import numpy as np
-from moviepy.editor import (
+from moviepy import (
     VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip,
-    TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips
+    TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips,
+    vfx
 )
-import moviepy.video.fx.all as vfx
-from moviepy.video.fx import speedx
 import yt_dlp
 
 from src.config.settings import get_config

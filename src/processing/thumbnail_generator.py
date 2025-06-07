@@ -10,7 +10,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 
 from src.config.settings import get_config
 from src.models import VideoAnalysis

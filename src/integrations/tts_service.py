@@ -28,7 +28,7 @@ except ImportError:
     DIA_AVAILABLE = False
 
 import numpy as np
-from moviepy.editor import AudioFileClip
+from moviepy import AudioFileClip
 
 from src.config.settings import get_config
 from src.models import NarrativeSegment, EmotionType, PacingType
