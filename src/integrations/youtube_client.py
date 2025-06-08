@@ -34,12 +34,22 @@ class VideoMetadata:
     call_to_action: Optional[str] = None
     
     def to_youtube_body(self) -> Dict[str, Any]:
-        """Convert to YouTube API request body format"""
+        """Convert to YouTube API request body format with Shorts optimization"""
+        # Ensure Shorts-specific tags and title formatting
+        shorts_tags = ['#Shorts', '#YouTubeShorts', '#Viral', '#TikTok']
+        combined_tags = shorts_tags + [tag for tag in self.tags if tag not in shorts_tags]
+        
+        # Add #Shorts to title if not present
+        title = self.title[:100]
+        if '#Shorts' not in title and '#shorts' not in title.lower():
+            if len(title) <= 92:  # Leave room for " #Shorts"
+                title = f"{title} #Shorts"
+        
         body = {
             'snippet': {
-                'title': self.title[:100],  # YouTube title limit
+                'title': title,  # YouTube title limit with Shorts tag
                 'description': self.description[:5000],  # YouTube description limit
-                'tags': self.tags[:500],  # YouTube tags limit
+                'tags': combined_tags[:500],  # YouTube tags limit with Shorts tags
                 'categoryId': self.category_id
             },
             'status': {

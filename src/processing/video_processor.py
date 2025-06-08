@@ -28,6 +28,7 @@ from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
+from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 
 
 class ResourceManager:
@@ -188,7 +189,7 @@ class VideoEffects:
                 cropped = frame[y1:y2, x1:x2]
                 return cv2.resize(cropped, (w, h))
             
-            return clip.fl(zoom_effect)
+            return MoviePyCompat.apply_effect(clip, zoom_effect)
             
         except Exception as e:
             self.logger.warning(f"Error applying zoom effect: {e}")
@@ -201,8 +202,8 @@ class VideoEffects:
         
         try:
             # Apply brightness and contrast adjustments
-            clip = clip.fx(vfx.colorx, factor=1 + intensity * 0.1)  # Slight brightness
-            clip = clip.fx(vfx.lum_contrast, lum=0, contrast=intensity * 0.2)  # Contrast
+            clip = MoviePyCompat.apply_fx_effect(clip, vfx.colorx, factor=1 + intensity * 0.1)  # Slight brightness
+            clip = MoviePyCompat.apply_fx_effect(clip, vfx.lum_contrast, lum=0, contrast=intensity * 0.2)  # Contrast
             
             return clip
             
@@ -220,20 +221,20 @@ class VideoEffects:
             current_time = 0
             
             for effect in speed_effects:
-                start_time = effect.get('start_seconds', 0)
-                end_time = effect.get('end_seconds', clip.duration)
-                speed_factor = effect.get('speed_factor', 1.0)
+                start_time = getattr(effect, 'start_seconds', 0)
+                end_time = getattr(effect, 'end_seconds', clip.duration)
+                speed_factor = getattr(effect, 'speed_factor', 1.0)
                 
                 # Validate speed factor
                 speed_factor = max(0.5, min(2.0, speed_factor))  # Keep within reasonable bounds
                 
                 # Add normal segment before effect if needed
                 if current_time < start_time:
-                    normal_segment = clip.subclip(current_time, start_time)
+                    normal_segment = MoviePyCompat.subclip(clip, current_time, start_time)
                     segments.append(normal_segment)
                 
                 # Add speed-affected segment with transition
-                effect_segment = clip.subclip(start_time, end_time)
+                effect_segment = MoviePyCompat.subclip(clip, start_time, end_time)
                 if speed_factor != 1.0:
                     try:
                         effect_segment = effect_segment.with_fps(effect_segment.fps * speed_factor)
@@ -250,7 +251,7 @@ class VideoEffects:
             
             # Add remaining segment if any
             if current_time < clip.duration:
-                segments.append(clip.subclip(current_time, clip.duration))
+                segments.append(MoviePyCompat.subclip(clip, current_time, clip.duration))
             
             # Combine segments with transitions
             if len(segments) > 1:
@@ -307,8 +308,8 @@ class VideoEffects:
             
             # Create a translucent overlay
             overlay = ColorClip(size=(w, h), color=(255, 255, 255))
-            overlay = overlay.set_opacity(0.1 * intensity)
-            overlay = overlay.set_start(timestamp).set_duration(duration)
+            overlay = MoviePyCompat.with_opacity(overlay, 0.1 * intensity)
+            overlay = MoviePyCompat.with_start(MoviePyCompat.with_duration(overlay, duration), timestamp)
             
             return overlay
             
@@ -372,7 +373,7 @@ class VideoEffects:
                 return frame
             
             # Apply the transformation with optimized rendering
-            transformed_clip = clip.fl(make_dynamic_transform, apply_to=['mask'])
+            transformed_clip = MoviePyCompat.apply_effect(clip, make_dynamic_transform)
             
             # Add motion blur for smoother transitions
             if len(sorted_points) > 3:
@@ -514,7 +515,7 @@ class VideoEffects:
         # Only apply blur if significant movement
         if avg_vel > 0.01:
             blur_amount = min(1.5, avg_vel * 50)
-            return clip.fx(vfx.motion_blur, blur_amount, 0.5)
+            return MoviePyCompat.apply_fx_effect(clip, vfx.motion_blur, blur_amount, 0.5)
         return clip
 
     def _ease_in_out_quint(self, t: float) -> float:
@@ -548,7 +549,7 @@ class VideoEffects:
         """Create a focused segment with intelligent cropping and zooming"""
         try:
             # Extract the segment
-            segment = clip.subclip(timestamp, timestamp + duration)
+            segment = MoviePyCompat.subclip(clip, timestamp, timestamp + duration)
             
             # Calculate zoom and pan parameters
             zoom_factor = 1.2  # Moderate zoom
@@ -576,7 +577,7 @@ class VideoEffects:
             
             # Apply crop and resize back to original size
             focused_segment = segment.crop(x1=crop_x1, y1=crop_y1, x2=crop_x2, y2=crop_y2)
-            focused_segment = focused_segment.resize((w, h))
+            focused_segment = MoviePyCompat.resize(focused_segment, (w, h))
             
             # Add smooth transition at the beginning and end
             if duration > 1.0:
@@ -1928,8 +1929,14 @@ class VideoProcessor:
             video_clip = VideoFileClip(str(video_path))
             resource_manager.register_clip(video_clip)
             
-            # Prepare video for processing
+            # Prepare video for YouTube Shorts processing
             prepared_clip = self._prepare_video_clip(video_clip)
+            
+            # Ensure YouTube Shorts format (9:16, ≤60s)
+            shorts_clip = ensure_shorts_format(prepared_clip, target_duration=60.0)
+            if shorts_clip != prepared_clip:
+                resource_manager.register_clip(shorts_clip)
+                prepared_clip = shorts_clip
             if prepared_clip != video_clip:
                 resource_manager.register_clip(prepared_clip)
             
@@ -2062,7 +2069,7 @@ class VideoProcessor:
         try:
             target_duration = self.config.video.target_duration
             if video_clip.duration > target_duration:
-                trimmed_clip = video_clip.subclip(0, target_duration)
+                trimmed_clip = MoviePyCompat.subclip(video_clip, 0, target_duration)
                 return trimmed_clip
             return video_clip
             
@@ -2133,12 +2140,12 @@ class VideoProcessor:
                     clip = clip.crop(y1=y_offset, y2=y_offset + new_height)
                 
                 # Resize to exact target resolution
-                clip = clip.resize((target_width, target_height))
+                clip = MoviePyCompat.resize(clip, (target_width, target_height))
             except AttributeError as e:
                 self.logger.warning(f"Error with crop/resize methods: {e}")
                 # Fallback: use subclip if available, or return original clip
                 if hasattr(clip, 'subclip'):
-                    clip = clip.subclip(0, min(clip.duration, 60))  # Limit duration
+                    clip = MoviePyCompat.subclip(clip, 0, min(clip.duration, 60))  # Limit duration
             
             # Set target FPS
             if hasattr(clip, 'fps') and clip.fps:
