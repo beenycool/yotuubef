@@ -18,7 +18,7 @@ import numpy as np
 from moviepy import (
     VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip,
     TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips,
-    vfx
+    vfx, afx
 )
 import yt_dlp
 
@@ -27,6 +27,7 @@ from src.models import VideoAnalysis, TextOverlay, NarrativeSegment, VisualCue
 from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
+from src.processing.sound_effects_manager import SoundEffectsManager
 
 
 class ResourceManager:
@@ -234,7 +235,10 @@ class VideoEffects:
                 # Add speed-affected segment with transition
                 effect_segment = clip.subclip(start_time, end_time)
                 if speed_factor != 1.0:
-                    effect_segment = effect_segment.fx(speedx, speed_factor)
+                    try:
+                        effect_segment = effect_segment.with_fps(effect_segment.fps * speed_factor)
+                    except Exception as e:
+                        self.logger.warning(f"Error applying speed effect: {e}")
                     
                     # Add transition if this isn't the first segment
                     if segments and speed_factor > 1.0:  # Only for speed-ups
@@ -696,44 +700,103 @@ class AdvancedVideoEnhancer:
             return None
     
     def apply_adaptive_color_grading(self, clip: VideoFileClip) -> VideoFileClip:
-        """Apply adaptive color grading based on video analysis"""
+        """Apply enhanced adaptive color grading to make colors pop and increase contrast"""
         try:
-            # Sample a few frames to analyze overall brightness/contrast
-            sample_times = [clip.duration * 0.25, clip.duration * 0.5, clip.duration * 0.75]
+            # Sample more frames for better analysis
+            sample_times = [clip.duration * i / 6 for i in range(1, 6)]  # 5 samples across the video
             brightness_samples = []
+            contrast_samples = []
+            saturation_samples = []
             
             for t in sample_times:
                 if t < clip.duration:
                     frame = clip.get_frame(t)
-                    # Calculate average brightness
+                    
+                    # Calculate brightness (luminance)
                     brightness = np.mean(frame)
                     brightness_samples.append(brightness)
+                    
+                    # Calculate contrast (standard deviation of luminance)
+                    gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+                    contrast = np.std(gray)
+                    contrast_samples.append(contrast)
+                    
+                    # Calculate saturation
+                    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
+                    saturation = np.mean(hsv[:, :, 1])
+                    saturation_samples.append(saturation)
             
             if brightness_samples:
-                avg_brightness = np.mean(brightness_samples)
-                normalized_brightness = avg_brightness / 255.0
+                avg_brightness = np.mean(brightness_samples) / 255.0
+                avg_contrast = np.mean(contrast_samples) / 127.5  # Normalize to 0-2 range
+                avg_saturation = np.mean(saturation_samples) / 255.0
                 
-                # Adaptive adjustments based on brightness
-                if normalized_brightness < 0.3:  # Dark video
-                    # Increase brightness and contrast more aggressively
-                    clip = clip.fx(vfx.colorx, factor=1.2)
-                    clip = clip.fx(vfx.lum_contrast, lum=0.1, contrast=0.3)
-                    self.logger.info("Applied dark video enhancement")
-                elif normalized_brightness > 0.7:  # Bright video
-                    # Reduce brightness slightly, increase contrast
-                    clip = clip.fx(vfx.colorx, factor=0.9)
-                    clip = clip.fx(vfx.lum_contrast, lum=-0.05, contrast=0.2)
-                    self.logger.info("Applied bright video enhancement")
-                else:  # Normal brightness
-                    # Standard enhancement
-                    clip = clip.fx(vfx.colorx, factor=1.05)
-                    clip = clip.fx(vfx.lum_contrast, lum=0, contrast=0.15)
-                    self.logger.info("Applied standard video enhancement")
+                self.logger.info(f"Video analysis - Brightness: {avg_brightness:.2f}, Contrast: {avg_contrast:.2f}, Saturation: {avg_saturation:.2f}")
+                
+                # Enhanced adaptive adjustments for viral video aesthetics
+                if avg_brightness < 0.3:  # Dark video - make it pop
+                    # Aggressive brightness and contrast boost for dark videos
+                    clip = clip.fx(vfx.colorx, factor=1.3)  # Boost overall exposure
+                    clip = clip.fx(vfx.lum_contrast, lum=0.15, contrast=0.4)  # High contrast
+                    self.logger.info("Applied dark video enhancement with aggressive pop")
+                    
+                elif avg_brightness > 0.75:  # Very bright video
+                    # Reduce overexposure while maintaining pop
+                    clip = clip.fx(vfx.colorx, factor=0.85)
+                    clip = clip.fx(vfx.lum_contrast, lum=-0.1, contrast=0.35)  # Still high contrast
+                    self.logger.info("Applied bright video enhancement with contrast boost")
+                    
+                else:  # Normal brightness - standard pop enhancement
+                    # Make colors more vibrant and punchy
+                    clip = clip.fx(vfx.colorx, factor=1.15)  # Slight exposure boost
+                    clip = clip.fx(vfx.lum_contrast, lum=0.05, contrast=0.3)  # Good contrast boost
+                    self.logger.info("Applied standard pop enhancement")
+                
+                # Additional saturation boost for viral appeal
+                if avg_saturation < 0.4:  # Low saturation - boost colors significantly
+                    def saturation_boost(get_frame, t):
+                        frame = get_frame(t)
+                        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV).astype(np.float32)
+                        hsv[:, :, 1] *= 1.4  # 40% saturation boost
+                        hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+                        return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+                    
+                    clip = clip.fl(saturation_boost)
+                    self.logger.info("Applied saturation boost for color pop")
+                    
+                elif avg_saturation < 0.6:  # Moderate saturation - mild boost
+                    def mild_saturation_boost(get_frame, t):
+                        frame = get_frame(t)
+                        hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV).astype(np.float32)
+                        hsv[:, :, 1] *= 1.2  # 20% saturation boost
+                        hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+                        return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
+                    
+                    clip = clip.fl(mild_saturation_boost)
+                    self.logger.info("Applied mild saturation boost")
+                
+                # Shadow/highlight enhancement for better dynamic range
+                if avg_contrast < 0.8:  # Low contrast - enhance shadows and highlights
+                    def shadow_highlight_enhancement(get_frame, t):
+                        frame = get_frame(t)
+                        # Convert to float for processing
+                        frame_float = frame.astype(np.float32) / 255.0
+                        
+                        # Enhance shadows (brighten dark areas)
+                        shadows = np.where(frame_float < 0.3, frame_float * 1.3, frame_float)
+                        
+                        # Enhance highlights (slightly darken very bright areas)
+                        enhanced = np.where(shadows > 0.85, shadows * 0.95, shadows)
+                        
+                        return (np.clip(enhanced, 0, 1) * 255).astype(np.uint8)
+                    
+                    clip = clip.fl(shadow_highlight_enhancement)
+                    self.logger.info("Applied shadow/highlight enhancement")
             
             return clip
             
         except Exception as e:
-            self.logger.warning(f"Error applying adaptive color grading: {e}")
+            self.logger.warning(f"Error applying enhanced color grading: {e}")
             return clip
 
 
@@ -745,7 +808,7 @@ class TextOverlayProcessor:
         self.logger = logging.getLogger(__name__)
     
     def add_text_overlays(self, clip: VideoFileClip, overlays: List[TextOverlay]) -> VideoFileClip:
-        """Add text overlays to video"""
+        """Add text overlays to video with enhanced hook support"""
         if not overlays:
             return clip
         
@@ -766,6 +829,85 @@ class TextOverlayProcessor:
         except Exception as e:
             self.logger.warning(f"Error adding text overlays: {e}")
             return clip
+    
+    def add_hook_text(self, clip: VideoFileClip, analysis: VideoAnalysis) -> VideoFileClip:
+        """Add powerful hook text immediately at the start of the video"""
+        try:
+            if not analysis.hook_text:
+                self.logger.info("No hook text provided, skipping hook overlay")
+                return clip
+            
+            # Create hook text overlay that appears immediately (0-3 seconds)
+            hook_overlay = TextOverlay(
+                text=analysis.hook_text,
+                timestamp_seconds=0.0,
+                duration=min(3.0, clip.duration * 0.15),  # Show for 3 seconds or 15% of video
+                position="center",
+                style="dramatic"
+            )
+            
+            hook_clip = self._create_hook_text_clip(clip, hook_overlay)
+            if hook_clip:
+                self.logger.info(f"Added hook text: '{analysis.hook_text}'")
+                return CompositeVideoClip([clip, hook_clip])
+            else:
+                return clip
+                
+        except Exception as e:
+            self.logger.warning(f"Error adding hook text: {e}")
+            return clip
+    
+    def _create_hook_text_clip(self, video_clip: VideoFileClip, overlay: TextOverlay) -> Optional[TextClip]:
+        """Create special hook text clip with maximum impact styling"""
+        try:
+            # Hook text gets special treatment - larger, more dramatic
+            font_path = self.config.get_font_path('BebasNeue-Regular.ttf')  # Use dramatic font
+            video_height = video_clip.h
+            
+            # Larger font size for hooks
+            font_size = int(video_height * 0.08)  # 8% of video height
+            
+            # Create dramatic hook text
+            text_clip = TextClip(
+                overlay.text.upper(),  # Convert to uppercase for impact
+                fontsize=font_size,
+                font=font_path,
+                color='#FFFF00',  # Bright yellow for attention
+                stroke_color='#000000',
+                stroke_width=4,  # Thicker stroke for readability
+                method='label',
+                align='center'
+            )
+            
+            # Position in center for maximum impact
+            text_clip = text_clip.set_position('center')
+            
+            # Set timing
+            text_clip = text_clip.set_start(overlay.timestamp_seconds)
+            text_clip = text_clip.set_duration(overlay.duration)
+            
+            # Apply dramatic animation - zoom in + pulsing
+            def hook_animation(t):
+                # Zoom in effect from 0.8 to 1.2 over the duration
+                zoom_progress = min(1.0, t / (overlay.duration * 0.3))  # Zoom in first 30%
+                zoom_factor = 0.8 + (0.4 * zoom_progress)  # 0.8 to 1.2
+                
+                # Add pulsing effect
+                pulse = 1 + 0.1 * np.sin(t * 6)  # Subtle pulse
+                
+                return zoom_factor * pulse
+            
+            text_clip = text_clip.resize(hook_animation)
+            
+            # Add fade in/out for smooth transitions
+            fade_duration = min(0.5, overlay.duration * 0.2)
+            text_clip = text_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+            
+            return text_clip
+            
+        except Exception as e:
+            self.logger.warning(f"Error creating hook text clip: {e}")
+            return None
     
     def _create_text_clip(self, video_clip: VideoFileClip, overlay: TextOverlay) -> Optional[TextClip]:
         """Create a single text clip with dynamic animations and adaptive sizing"""
@@ -903,6 +1045,7 @@ class AudioProcessor:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
+        self.sound_effects_manager = SoundEffectsManager()
         self.tts_service = TTSService()
     
     def process_audio(self,
@@ -961,9 +1104,11 @@ class AudioProcessor:
         """Process original video audio with error handling"""
         try:
             if video_clip.audio and self.config.audio.original_audio_mix_volume > 0:
-                original_audio = video_clip.audio.multiply_volume(
-                    self.config.audio.original_audio_mix_volume
-                )
+                try:
+                    original_audio = video_clip.audio.with_volume_scaled(self.config.audio.original_audio_mix_volume)
+                except Exception as e:
+                    self.logger.warning(f"Error applying volume to original audio: {e}")
+                    original_audio = video_clip.audio
                 self.logger.debug("Successfully processed original audio")
                 return original_audio
             else:
@@ -1037,7 +1182,10 @@ class AudioProcessor:
                     # Apply emotional volume adjustments
                     volume_factor = self._get_emotion_volume_factor(segment.emotion)
                     if volume_factor != 1.0:
-                        audio_clip = audio_clip.multiply_volume(volume_factor)
+                        try:
+                            audio_clip = audio_clip.with_volume_scaled(volume_factor)
+                        except Exception as e:
+                            self.logger.warning(f"Error applying volume factor: {e}")
                     
                     successful_audio_clips.append(audio_clip)
                     
@@ -1072,7 +1220,10 @@ class AudioProcessor:
             music_clip = music_clip.subclip(0, video_duration)
             
             # Apply base volume
-            music_clip = music_clip.multiply_volume(self.config.audio.background_music_volume)
+            try:
+                music_clip = music_clip.with_volume_scaled(self.config.audio.background_music_volume)
+            except Exception as e:
+                self.logger.warning(f"Error applying base volume to music: {e}")
             
             # Duck music during narration
             if narrative_segments:
@@ -1107,7 +1258,10 @@ class AudioProcessor:
                 if start_time < music_clip.duration:
                     duck_end = min(end_time, music_clip.duration)
                     ducked_segment = music_clip.subclip(start_time, duck_end)
-                    ducked_segment = ducked_segment.multiply_volume(duck_factor)
+                    try:
+                        ducked_segment = ducked_segment.with_volume_scaled(duck_factor)
+                    except Exception as e:
+                        self.logger.warning(f"Error applying ducking volume: {e}")
                     segments.append(ducked_segment)
                 
                 current_time = end_time
@@ -1139,50 +1293,91 @@ class AudioProcessor:
                          base_audio: CompositeAudioClip,
                          sound_effects: List[Dict[str, Any]],
                          video_duration: float) -> CompositeAudioClip:
-        """Add sound effects to the composite audio"""
+        """Add sound effects to the composite audio using enhanced SoundEffectsManager"""
         if not sound_effects:
+            self.logger.debug("No sound effects to add")
             return base_audio
         
         try:
             audio_tracks = [base_audio] if base_audio else []
-            sound_effects_dir = Path("sound_effects")
+            effects_added = 0
+            effects_failed = 0
             
             for effect in sound_effects:
                 try:
-                    effect_name = effect.get('effect_name', '')
-                    timestamp = effect.get('timestamp_seconds', 0)
-                    volume = effect.get('volume', 0.7)
+                    effect_name = effect.get('effect_name', '').lower()
+                    timestamp = max(0, float(effect.get('timestamp_seconds', 0)))
+                    volume = max(0.1, min(1.0, float(effect.get('volume', 0.7))))
+                    preferred_category = effect.get('category')  # Optional category hint
                     
-                    # Look for sound effect file
-                    possible_files = [
-                        sound_effects_dir / f"{effect_name}.wav",
-                        sound_effects_dir / f"{effect_name}.mp3",
-                        sound_effects_dir / f"{effect_name}.ogg"
-                    ]
+                    # Skip if timestamp is beyond video duration
+                    if timestamp >= video_duration:
+                        self.logger.debug(f"Skipping sound effect '{effect_name}' - timestamp beyond video duration")
+                        continue
                     
-                    sound_file = None
-                    for file_path in possible_files:
-                        if file_path.exists():
-                            sound_file = file_path
-                            break
+                    # Use enhanced sound effects manager to find the best match
+                    sound_file = self.sound_effects_manager.find_sound_effect(
+                        effect_name,
+                        preferred_category=preferred_category
+                    )
                     
                     if sound_file:
+                        # Validate the sound file before using
+                        is_valid, validation_msg = self.sound_effects_manager.validate_sound_effect(sound_file)
+                        if not is_valid:
+                            self.logger.warning(f"Invalid sound effect file '{sound_file}': {validation_msg}")
+                            effects_failed += 1
+                            continue
+                        
+                        # Load and process the sound effect
                         sound_clip = AudioFileClip(str(sound_file))
-                        sound_clip = sound_clip.multiply_volume(volume)
+                        
+                        # Adjust volume and timing
+                        try:
+                            sound_clip = sound_clip.with_volume_scaled(volume)
+                        except Exception as e:
+                            self.logger.warning(f"Error applying volume to sound effect: {e}")
                         sound_clip = sound_clip.set_start(timestamp)
                         
                         # Ensure sound doesn't exceed video duration
                         if timestamp + sound_clip.duration > video_duration:
-                            sound_clip = sound_clip.subclip(0, video_duration - timestamp)
+                            max_duration = video_duration - timestamp
+                            if max_duration > 0.1:  # Only add if at least 0.1 seconds remaining
+                                sound_clip = sound_clip.subclip(0, max_duration)
+                            else:
+                                self.logger.debug(f"Skipping sound effect '{effect_name}' - insufficient time remaining")
+                                sound_clip.close()
+                                continue
+                        
+                        # Apply fade in/out for smoother integration (enhanced)
+                        fade_duration = min(0.05, sound_clip.duration * 0.1)
+                        if sound_clip.duration > fade_duration * 2:
+                            sound_clip = sound_clip.audio_fadein(fade_duration).audio_fadeout(fade_duration)
                         
                         audio_tracks.append(sound_clip)
-                        self.logger.debug(f"Added sound effect '{effect_name}' at {timestamp}s")
+                        effects_added += 1
+                        self.logger.info(f"Added sound effect '{effect_name}' at {timestamp:.1f}s (volume: {volume:.1f}, file: {sound_file.name})")
+                        
+                        # Log validation warnings if any
+                        if validation_msg:
+                            self.logger.info(f"Sound effect note: {validation_msg}")
                     else:
-                        self.logger.warning(f"Sound effect file not found: {effect_name}")
+                        self.logger.warning(f"Sound effect file not found for: {effect_name}")
+                        effects_failed += 1
                         
                 except Exception as e:
-                    self.logger.warning(f"Failed to add sound effect: {e}")
+                    self.logger.warning(f"Failed to add sound effect '{effect.get('effect_name', 'unknown')}': {e}")
+                    effects_failed += 1
                     continue
+            
+            # Log comprehensive statistics
+            total_requested = len(sound_effects)
+            success_rate = (effects_added / total_requested * 100) if total_requested > 0 else 0
+            self.logger.info(f"Sound effects summary: {effects_added}/{total_requested} added successfully ({success_rate:.1f}% success rate)")
+            
+            if effects_failed > 0:
+                cache_status = self.sound_effects_manager.get_cache_status()
+                self.logger.info(f"Available sound effects: {cache_status['total_effects']} across {cache_status['categories']} categories")
             
             if len(audio_tracks) > 1:
                 return CompositeAudioClip(audio_tracks)
@@ -1192,8 +1387,9 @@ class AudioProcessor:
                 return base_audio
                 
         except Exception as e:
-            self.logger.error(f"Error adding sound effects: {e}")
+            self.logger.error(f"Critical error adding sound effects: {e}")
             return base_audio
+    
     
     def _process_narrative_segments(self, segments: List[NarrativeSegment]) -> List[AudioFileClip]:
         """Process TTS narrative segments (deprecated - use _process_narrative_segments_safe)"""
@@ -1542,21 +1738,44 @@ class VideoProcessor:
                 except Exception as e:
                     self.logger.warning(f"Advanced enhancement failed: {e}")
             
-            # Apply adaptive color grading
+            # CRITICAL: Add hook text IMMEDIATELY as first visual element (3-second rule)
+            try:
+                video_clip = self.text_processor.add_hook_text(video_clip, analysis)
+                self.logger.info("Added hook text for immediate viewer engagement")
+            except Exception as e:
+                self.logger.warning(f"Hook text processing failed: {e}")
+            
+            # Apply adaptive color grading for viral aesthetics
             try:
                 video_clip = self.advanced_enhancer.apply_adaptive_color_grading(video_clip)
-                self.logger.info("Applied adaptive color grading")
+                self.logger.info("Applied enhanced color grading for visual pop")
             except Exception as e:
                 self.logger.warning(f"Color grading failed: {e}")
             
-            # Apply intelligent focus and panning based on AI focus points
+            # Apply dynamic pan & zoom to guide viewer's eye
             if analysis.key_focus_points:
                 try:
                     focus_data = [point.dict() for point in analysis.key_focus_points]
-                    video_clip = self.effects.apply_intelligent_focus(video_clip, focus_data)
-                    self.logger.info(f"Applied intelligent focus for {len(analysis.key_focus_points)} focus points")
+                    video_clip = self.effects.apply_dynamic_pan_zoom(video_clip, focus_data)
+                    self.logger.info(f"Applied dynamic pan/zoom for {len(analysis.key_focus_points)} focus points")
                 except Exception as e:
-                    self.logger.warning(f"Intelligent focus failed: {e}")
+                    self.logger.warning(f"Dynamic pan/zoom failed: {e}")
+            else:
+                # Fallback: Apply subtle zoom for static videos
+                try:
+                    video_clip = self.effects.apply_subtle_zoom(video_clip)
+                    self.logger.info("Applied subtle zoom as fallback for engagement")
+                except Exception as e:
+                    self.logger.warning(f"Subtle zoom failed: {e}")
+            
+            # Apply speed ramping for dramatic effect
+            if analysis.speed_effects:
+                try:
+                    speed_data = [effect.dict() for effect in analysis.speed_effects]
+                    video_clip = self.effects.apply_speed_effects(video_clip, speed_data)
+                    self.logger.info(f"Applied {len(analysis.speed_effects)} speed effects for drama")
+                except Exception as e:
+                    self.logger.warning(f"Speed effects failed: {e}")
             
             # Apply visual effects with graceful error handling
             video_clip = self._apply_visual_effects(video_clip, analysis, resource_manager)
@@ -1568,15 +1787,6 @@ class VideoProcessor:
                     self.logger.info(f"Added {len(analysis.text_overlays)} text overlays with animations")
                 except Exception as e:
                     self.logger.warning(f"Text overlay processing failed: {e}")
-            
-            # Apply speed effects for dynamic pacing
-            if analysis.speed_effects:
-                try:
-                    speed_data = [effect.dict() for effect in analysis.speed_effects]
-                    video_clip = self.effects.apply_speed_effects(video_clip, speed_data)
-                    self.logger.info(f"Applied {len(analysis.speed_effects)} speed effects")
-                except Exception as e:
-                    self.logger.warning(f"Speed effects failed: {e}")
             
             # Apply visual cues for engagement
             if analysis.visual_cues:
@@ -1910,19 +2120,25 @@ class VideoProcessor:
             current_aspect = current_width / current_height
             target_aspect = target_width / target_height
             
-            if current_aspect > target_aspect:
-                # Video is wider - crop width
-                new_width = int(current_height * target_aspect)
-                x_offset = (current_width - new_width) // 2
-                clip = clip.crop(x1=x_offset, x2=x_offset + new_width)
-            elif current_aspect < target_aspect:
-                # Video is taller - crop height
-                new_height = int(current_width / target_aspect)
-                y_offset = (current_height - new_height) // 2
-                clip = clip.crop(y1=y_offset, y2=y_offset + new_height)
-            
-            # Resize to exact target resolution
-            clip = clip.resize((target_width, target_height))
+            try:
+                if current_aspect > target_aspect:
+                    # Video is wider - crop width
+                    new_width = int(current_height * target_aspect)
+                    x_offset = (current_width - new_width) // 2
+                    clip = clip.crop(x1=x_offset, x2=x_offset + new_width)
+                elif current_aspect < target_aspect:
+                    # Video is taller - crop height
+                    new_height = int(current_width / target_aspect)
+                    y_offset = (current_height - new_height) // 2
+                    clip = clip.crop(y1=y_offset, y2=y_offset + new_height)
+                
+                # Resize to exact target resolution
+                clip = clip.resize((target_width, target_height))
+            except AttributeError as e:
+                self.logger.warning(f"Error with crop/resize methods: {e}")
+                # Fallback: use subclip if available, or return original clip
+                if hasattr(clip, 'subclip'):
+                    clip = clip.subclip(0, min(clip.duration, 60))  # Limit duration
             
             # Set target FPS
             if hasattr(clip, 'fps') and clip.fps:

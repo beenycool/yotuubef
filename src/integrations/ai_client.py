@@ -414,80 +414,105 @@ class GeminiClient:
             return self._get_fallback_analysis(post)
     
     def _create_analysis_prompt(self, post: RedditPost, num_frames: int) -> str:
-        """Create comprehensive analysis prompt for Gemini"""
+        """Create comprehensive analysis prompt for Gemini with enhanced audio and engagement focus"""
         return f"""
-Analyze this Reddit video content for creating an engaging YouTube Shorts video. 
+Analyze this Reddit video content for creating an VIRAL YouTube Shorts video that maximizes engagement and retention.
 Title: "{post.title}"
 Subreddit: r/{post.subreddit}
 Video has {num_frames} frames provided for analysis.
 
-Please provide a comprehensive JSON response with the following structure:
+🎯 PRIMARY OBJECTIVE: Create a video that hooks viewers in the first 3 seconds and keeps them watching until the end.
+
+Please provide a comprehensive JSON response following this EXACT structure:
+
 {{
-    "suggested_title": "Engaging title under 100 characters",
-    "summary_for_description": "Brief engaging description",
-    "mood": "overall mood (exciting, funny, dramatic, educational, etc.)",
+    "suggested_title": "Compelling title under 100 characters that creates curiosity",
+    "summary_for_description": "Brief engaging description with hook and context",
+    "mood": "Choose from: intense, dramatic, uplifting, funny, satisfying, educational, mysterious",
     "has_clear_narrative": boolean,
-    "original_audio_is_key": boolean,
+    "original_audio_is_key": boolean - consider if natural sounds (crowd, machinery, nature) add authenticity,
     
-    "hook_text": "Attention-grabbing text for the opening",
-    "hook_variations": ["Alternative hook 1", "Alternative hook 2", "Alternative hook 3"],
-    "visual_hook_moment": {{"timestamp_seconds": 0.0, "description": "Most engaging visual moment"}},
-    "audio_hook": {{"type": "sound_effect", "sound_name": "whoosh", "timestamp_seconds": 0.0}},
+    "hook_text": "POWERFUL opening text that creates immediate FOMO (3-5 words max)",
+    "hook_variations": ["This is an F1 pit stop... for a bike race", "Wait until you see this technique", "You'll never guess what happens next"],
+    "visual_hook_moment": {{"timestamp_seconds": 0.0, "description": "Most visually striking opening moment"}},
+    "audio_hook": {{"type": "sound_effect", "sound_name": "impact", "timestamp_seconds": 0.0}},
     
-    "best_segment": {{"start_seconds": 0, "end_seconds": 30, "reason": "Why this segment is best"}},
+    "best_segment": {{"start_seconds": 0, "end_seconds": 30, "reason": "Most engaging continuous sequence"}},
     "segments": [
-        {{"start_seconds": 0, "end_seconds": 59, "reason": "Main content segment"}}
+        {{"start_seconds": 0, "end_seconds": 59, "reason": "Complete narrative arc"}}
     ],
     
     "key_focus_points": [
-        {{"x": 0.5, "y": 0.3, "timestamp_seconds": 5.0, "description": "Main subject"}}
+        {{"x": 0.5, "y": 0.3, "timestamp_seconds": 5.0, "description": "Critical action moment"}},
+        {{"x": 0.7, "y": 0.6, "timestamp_seconds": 15.0, "description": "Secondary focus point"}}
     ],
     
     "text_overlays": [
-        {{"text": "AMAZING!", "timestamp_seconds": 2.0, "duration": 1.5, "position": "center", "style": "dramatic"}}
+        {{"text": "THIS IS INSANE", "timestamp_seconds": 1.0, "duration": 2.0, "position": "center", "style": "dramatic"}},
+        {{"text": "👍 Like if this is crazy!", "timestamp_seconds": 10.0, "duration": 3.0, "position": "bottom", "style": "highlight"}}
     ],
     
     "narrative_script_segments": [
-        {{"text": "Watch this incredible moment that will blow your mind!", "time_seconds": 1.0, "intended_duration_seconds": 2.5, "emotion": "excited", "pacing": "normal"}},
-        {{"text": "You won't believe what happens next...", "time_seconds": 15.0, "intended_duration_seconds": 2.0, "emotion": "dramatic", "pacing": "slow"}},
-        {{"text": "This is why the internet loves this!", "time_seconds": 45.0, "intended_duration_seconds": 2.0, "emotion": "excited", "pacing": "fast"}}
+        {{"text": "After 100 miles of brutal conditions...", "time_seconds": 0.5, "intended_duration_seconds": 2.0, "emotion": "excited", "pacing": "normal"}},
+        {{"text": "...a quick refuel is the only way to survive", "time_seconds": 5.0, "intended_duration_seconds": 2.5, "emotion": "dramatic", "pacing": "slow"}},
+        {{"text": "Water, food, and back on the road in under 20 seconds!", "time_seconds": 15.0, "intended_duration_seconds": 3.0, "emotion": "excited", "pacing": "fast"}}
     ],
     
     "visual_cues": [
-        {{"timestamp_seconds": 3.0, "description": "Zoom on main action", "effect_type": "zoom", "intensity": 1.2, "duration": 1.0}}
+        {{"timestamp_seconds": 3.0, "description": "Dynamic pan to follow cyclist approach", "effect_type": "zoom", "intensity": 1.1, "duration": 2.0}},
+        {{"timestamp_seconds": 12.0, "description": "Zoom in on water pour for dramatic effect", "effect_type": "zoom", "intensity": 1.3, "duration": 1.5}},
+        {{"timestamp_seconds": 8.0, "description": "Color grade to enhance mud contrast", "effect_type": "color_grade", "intensity": 1.2, "duration": 3.0}}
     ],
     
     "speed_effects": [
-        {{"start_seconds": 10, "end_seconds": 15, "speed_factor": 0.5, "effect_type": "slowdown"}}
+        {{"start_seconds": 10, "end_seconds": 13, "speed_factor": 0.5, "effect_type": "slowdown - water dousing for drama"}},
+        {{"start_seconds": 18, "end_seconds": 22, "speed_factor": 1.5, "effect_type": "speed_up - quick departure"}}
     ],
     
-    "music_genres": ["upbeat", "energetic"],
+    "music_genres": ["intense", "dramatic", "uplifting"],
     "sound_effects": [
-        {{"timestamp_seconds": 5.0, "effect_name": "impact", "volume": 0.7}}
+        {{"timestamp_seconds": 2.0, "effect_name": "whoosh", "volume": 0.8}},
+        {{"timestamp_seconds": 8.0, "effect_name": "splash", "volume": 0.9}},
+        {{"timestamp_seconds": 15.0, "effect_name": "pop", "volume": 0.7}},
+        {{"timestamp_seconds": 20.0, "effect_name": "swoosh", "volume": 0.6}}
     ],
     
-    "hashtags": ["#viral", "#shorts", "#amazing"],
-    "tts_pacing": "normal",
-    "emotional_keywords": ["exciting", "amazing"],
+    "hashtags": ["#shorts", "#cycling", "#sports", "#viral", "#amazing"],
+    "tts_pacing": "varied for engagement",
+    "emotional_keywords": ["intense", "dramatic", "survival", "teamwork"],
     
-    "thumbnail_info": {{"timestamp_seconds": 5.0, "reason": "Most visually striking moment", "headline_text": "INCREDIBLE"}},
-    "call_to_action": {{"text": "Subscribe for more!", "type": "subscribe"}},
-    "retention_tactics": ["Hook within 3 seconds", "Visual variety", "Text overlays"],
+    "thumbnail_info": {{"timestamp_seconds": 8.0, "reason": "Water being poured - most dramatic visual", "headline_text": "INTENSE REFUEL"}},
+    "call_to_action": {{"text": "Subscribe for more epic race moments!", "type": "subscribe"}},
+    "retention_tactics": ["3-second hook", "Speed variation", "Strategic text overlays", "Audio enhancement", "Color grading"],
     
     "is_explicitly_age_restricted": false
 }}
 
-Focus on creating engaging, family-friendly content suitable for YouTube monetization.
-Ensure all suggestions enhance viewer retention and engagement.
+🎵 CRITICAL AUDIO ANALYSIS INSTRUCTIONS:
+- If you detect slow, detailed actions → suggest "speed_up" effect
+- If you detect fast, impactful moments (splash, exchange, collision) → suggest "slowdown" effect
+- For steady shots with little movement → suggest "dynamic_pan_zoom" to create visual interest
+- SOUND EFFECTS: Identify specific moments that need audio enhancement:
+  * Hand-offs: "whoosh" or "swoosh"
+  * Water/liquid: "splash", "pour", or "glug"
+  * Food/gel grabs: "pop", "click", or "snap"
+  * Impact moments: "thud", "bang", or "impact"
+  * Transitions: "swoosh" or "zip"
 
-IMPORTANT GUIDELINES FOR NARRATIVE SEGMENTS:
-- Create 2-4 narrative segments that add VALUE and CONTEXT, not just transcription
-- Use engaging language that builds anticipation ("You won't believe...", "Wait for it...", "This is insane...")
-- Time segments strategically: hook (0-3s), mid-video retention (15-30s), and conclusion (45-55s)
-- Match emotion to video content: "excited" for amazing moments, "dramatic" for suspenseful content, "calm" for educational
-- Vary pacing: "fast" for action sequences, "slow" for dramatic reveals, "normal" for general content
-- Keep segments concise (1.5-3 seconds each) to maintain engagement
-- Focus on FOMO (fear of missing out) and curiosity gaps
+🎬 ENGAGEMENT MAXIMIZATION:
+- Hook Text: Must create immediate curiosity or surprise (example: "This is an F1 pit stop... for a bike race")
+- Visual Storytelling: Guide viewer's eye through strategic focus points and effects
+- Retention Hooks: Build anticipation with "Wait for it...", "You won't believe...", "This is why..."
+- Call-to-Actions: Integrated naturally into content flow, not just end-screen
+
+🎯 MOOD-BASED MUSIC SELECTION GUIDE:
+- "intense/dramatic" → suspenseful category music
+- "uplifting/amazing" → upbeat category music
+- "funny/quirky" → funny category music
+- "educational/informative" → informative category music
+- "satisfying/calm" → relaxing category music
+
+Focus on creating content that viewers CANNOT scroll past. Every element should serve engagement and retention.
 """
     
     def _parse_analysis_response(self, response_text: str, post: RedditPost) -> VideoAnalysis:
@@ -595,7 +620,13 @@ IMPORTANT GUIDELINES FOR NARRATIVE SEGMENTS:
         
         # Metadata
         validated['original_duration'] = max(0, float(data.get('original_duration', 0)))
-        validated['tts_pacing'] = data.get('tts_pacing', 'normal')
+        
+        # Validate and normalize tts_pacing
+        tts_pacing = data.get('tts_pacing', 'normal')
+        if tts_pacing not in ['slow', 'normal', 'fast']:
+            self.logger.warning(f"Invalid tts_pacing '{tts_pacing}', defaulting to 'normal'")
+            tts_pacing = 'normal'
+        validated['tts_pacing'] = tts_pacing
         
         # Thumbnail and CTA
         thumbnail_data = data.get('thumbnail_info', {})

@@ -264,10 +264,11 @@ class VideoGenerationOrchestrator:
             processed_path = self.config.paths.temp_dir / f"processed_{post.id}.mp4"
             temp_files.append(processed_path)
             
-            # Select background music based on mood
+            # CRITICAL: Select background music based on AI-analyzed mood immediately
             background_music_path = self._select_background_music(analysis.mood)
+            self.logger.info(f"Selected background music for mood '{analysis.mood}': {background_music_path.name if background_music_path else 'None'}")
             
-            # Enhanced video processing with thumbnails and CTAs
+            # Enhanced video processing with comprehensive audio processing
             processing_result = self.video_processor.process_video(
                 download_path, processed_path, analysis, background_music_path, generate_thumbnail=True
             )
@@ -400,35 +401,87 @@ class VideoGenerationOrchestrator:
             self._cleanup_temp_files(temp_files)
     
     def _select_background_music(self, mood: str) -> Optional[Path]:
-        """Select appropriate background music based on mood"""
+        """Select appropriate background music based on AI-analyzed mood with enhanced mapping"""
         try:
-            # Map moods to music categories
+            # Enhanced mood to music category mapping based on config
             mood_to_category = {
+                # High energy moods
                 'exciting': 'upbeat',
-                'funny': 'funny',
+                'intense': 'suspenseful',
                 'dramatic': 'suspenseful',
+                'uplifting': 'upbeat',
+                'amazing': 'upbeat',
+                
+                # Emotional moods
+                'funny': 'funny',
+                'satisfying': 'relaxing',
                 'educational': 'informative',
                 'relaxing': 'relaxing',
-                'emotional': 'emotional'
+                'emotional': 'emotional',
+                'mysterious': 'suspenseful',
+                
+                # Fallback mappings
+                'happy': 'upbeat',
+                'positive': 'upbeat',
+                'energetic': 'upbeat',
+                'calm': 'relaxing',
+                'peaceful': 'relaxing',
+                'tense': 'suspenseful',
+                'action': 'suspenseful'
             }
             
-            category = mood_to_category.get(mood.lower(), 'upbeat')
+            # Get primary category
+            primary_category = mood_to_category.get(mood.lower(), 'upbeat')
             
             # Look for music files in the category
             music_dir = self.config.paths.music_folder
-            if music_dir.exists():
-                music_files = list(music_dir.glob('*.mp3')) + list(music_dir.glob('*.wav'))
+            if not music_dir.exists():
+                self.logger.warning(f"Music directory does not exist: {music_dir}")
+                return None
                 
-                # Try to find music matching the category
-                for music_file in music_files:
-                    if category.lower() in music_file.name.lower():
-                        return music_file
-                
-                # Fallback to any music file
-                if music_files:
-                    return music_files[0]
+            music_files = list(music_dir.glob('*.mp3')) + list(music_dir.glob('*.wav'))
             
-            return None
+            if not music_files:
+                self.logger.warning("No music files found in music directory")
+                return None
+            
+            self.logger.info(f"Selecting music for mood '{mood}' -> category '{primary_category}'")
+            
+            # Strategy 1: Try to find music matching the primary category
+            category_matches = []
+            for music_file in music_files:
+                file_name_lower = music_file.name.lower()
+                if primary_category.lower() in file_name_lower:
+                    category_matches.append(music_file)
+            
+            if category_matches:
+                selected = category_matches[0]  # Take first match
+                self.logger.info(f"Selected music by category match: {selected.name}")
+                return selected
+            
+            # Strategy 2: Try to find music matching related keywords from config
+            if primary_category in self.config.audio.music_categories:
+                related_keywords = self.config.audio.music_categories[primary_category]
+                for keyword in related_keywords:
+                    for music_file in music_files:
+                        if keyword.lower() in music_file.name.lower():
+                            self.logger.info(f"Selected music by keyword '{keyword}': {music_file.name}")
+                            return music_file
+            
+            # Strategy 3: Smart fallback based on mood intensity
+            if mood.lower() in ['intense', 'dramatic', 'exciting', 'amazing']:
+                # Prefer files with energetic keywords
+                energetic_keywords = ['funk', 'beat', 'energy', 'power', 'strong']
+                for keyword in energetic_keywords:
+                    for music_file in music_files:
+                        if keyword.lower() in music_file.name.lower():
+                            self.logger.info(f"Selected music by energetic fallback: {music_file.name}")
+                            return music_file
+            
+            # Strategy 4: Final fallback - select first available file
+            selected = music_files[0]
+            self.logger.info(f"Selected music by final fallback: {selected.name}")
+            return selected
             
         except Exception as e:
             self.logger.warning(f"Error selecting background music: {e}")

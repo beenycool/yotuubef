@@ -164,35 +164,56 @@ class CTAProcessor:
             self.logger.warning(f"Error creating subscribe button: {e}")
             return None
     
-    def _create_like_reminder(self, 
-                             video_clip: VideoFileClip, 
+    def _create_like_reminder(self,
+                             video_clip: VideoFileClip,
                              analysis: VideoAnalysis) -> Optional[TextClip]:
-        """Create like reminder overlay"""
+        """Create engaging like reminder overlay at strategic moment"""
         try:
-            # Show like reminder early in video
-            start_time = min(8.0, video_clip.duration * 0.15)
-            duration = 2.5
+            # Show like reminder at around 10-second mark as suggested
+            start_time = min(10.0, video_clip.duration * 0.2)
+            duration = 3.0
             
             if start_time + duration > video_clip.duration:
                 return None
             
+            # Create more engaging like reminder text based on content mood
+            like_texts = {
+                'intense': "👍 Like if this is INSANE!",
+                'dramatic': "👍 Like if this gave you chills!",
+                'funny': "👍 Like if this made you laugh!",
+                'amazing': "👍 Like if this blew your mind!",
+                'satisfying': "👍 Like if this was satisfying!",
+                'educational': "👍 Like if you learned something!",
+                'uplifting': "👍 Like if this made your day!"
+            }
+            
+            # Get appropriate text based on mood
+            mood = analysis.mood.lower() if analysis.mood else 'amazing'
+            like_text = like_texts.get(mood, "👍 Like if this is crazy!")
+            
             text_clip = TextClip(
-                "👍 LIKE if you're enjoying this!",
-                fontsize=35,
-                color='yellow',
-                stroke_color='black',
-                stroke_width=2,
+                like_text,
+                fontsize=38,
+                color='#FFD700',  # Gold color for more impact
+                stroke_color='#000000',
+                stroke_width=3,
                 font=str(self.config.get_font_path('Montserrat-Bold.ttf'))
             )
             
-            # Position at top of screen
-            text_clip = text_clip.set_position(('center', 0.1), relative=True)
+            # Position at bottom for better visibility without blocking action
+            text_clip = text_clip.set_position(('center', 0.85), relative=True)
             text_clip = text_clip.set_start(start_time).set_duration(duration)
             
-            # Add bounce animation
-            text_clip = text_clip.resize(lambda t: 1 + 0.15 * np.sin(t * 6))
-            text_clip = text_clip.crossfadein(0.3).crossfadeout(0.3)
+            # Enhanced animation: pulse + slight bounce
+            def like_animation(t):
+                pulse = 1 + 0.2 * np.sin(t * 8)  # Faster pulse
+                bounce = 1 + 0.05 * np.sin(t * 3)  # Subtle bounce
+                return pulse * bounce
             
+            text_clip = text_clip.resize(like_animation)
+            text_clip = text_clip.crossfadein(0.4).crossfadeout(0.4)
+            
+            self.logger.info(f"Created like reminder for mood '{mood}': {like_text}")
             return text_clip
             
         except Exception as e:
@@ -242,13 +263,13 @@ class CTAProcessor:
             self.logger.warning(f"Error creating comment reminder: {e}")
             return None
     
-    def _create_end_screen(self, 
-                          video_clip: VideoFileClip, 
+    def _create_end_screen(self,
+                          video_clip: VideoFileClip,
                           analysis: VideoAnalysis) -> Optional[CompositeVideoClip]:
-        """Create comprehensive end screen with multiple CTAs"""
+        """Create comprehensive end screen with contextual CTAs"""
         try:
-            # End screen in last 5 seconds
-            end_duration = min(5.0, video_clip.duration * 0.15)
+            # End screen in last 4 seconds as suggested
+            end_duration = min(4.0, video_clip.duration * 0.12)
             start_time = video_clip.duration - end_duration
             
             if end_duration < 2.0:  # Not enough time for end screen
@@ -256,59 +277,111 @@ class CTAProcessor:
             
             end_elements = []
             
-            # Background overlay
+            # Background overlay with gradient effect
             overlay = ColorClip(size=video_clip.size, color=(0, 0, 0))
-            overlay = overlay.set_opacity(0.7)
+            overlay = overlay.set_opacity(0.75)  # Slightly more opaque for better text visibility
             overlay = overlay.set_start(start_time).set_duration(end_duration)
             end_elements.append(overlay)
             
-            # Main CTA text
+            # Create contextual main CTA based on content type and mood
+            main_cta_text = self._generate_contextual_cta(analysis)
+            
             main_cta = TextClip(
-                analysis.call_to_action.text if analysis.call_to_action else "Subscribe for more amazing content!",
-                fontsize=50,
-                color='white',
-                stroke_color='red',
+                main_cta_text,
+                fontsize=46,
+                color='#FF4444',  # YouTube red
+                stroke_color='white',
                 stroke_width=3,
-                font=str(self.config.get_font_path('BebasNeue-Regular.ttf'))
+                font=str(self.config.get_font_path('BebasNeue-Regular.ttf')),
+                method='caption',
+                size=(video_clip.w * 0.9, None)  # Allow text wrapping
             )
             
-            main_cta = main_cta.set_position(('center', 0.3), relative=True)
+            main_cta = main_cta.set_position(('center', 0.25), relative=True)
             main_cta = main_cta.set_start(start_time).set_duration(end_duration)
             main_cta = main_cta.crossfadein(0.5)
+            
+            # Add pulsing animation to main CTA
+            main_cta = main_cta.resize(lambda t: 1 + 0.05 * np.sin(t * 4))
             end_elements.append(main_cta)
             
-            # Secondary CTAs
+            # Enhanced secondary CTAs with icons and better spacing
             secondary_ctas = [
-                "👍 LIKE this video",
-                "🔔 SUBSCRIBE & hit the bell",
-                "💬 COMMENT your thoughts",
-                "📤 SHARE with friends"
+                "👍 LIKE for more epic content",
+                "🔔 SUBSCRIBE & never miss out",
+                "💬 COMMENT what you want to see next",
+                "📤 SHARE with your friends"
             ]
             
             for i, cta_text in enumerate(secondary_ctas):
                 cta_clip = TextClip(
                     cta_text,
-                    fontsize=28,
-                    color='lightgray',
-                    font=str(self.config.get_font_path('Montserrat-Regular.ttf'))
+                    fontsize=24,
+                    color='#FFFFFF',
+                    stroke_color='#333333',
+                    stroke_width=1,
+                    font=str(self.config.get_font_path('Montserrat-Bold.ttf'))
                 )
                 
-                # Stagger appearance
-                cta_start = start_time + (i * 0.3)
-                cta_duration = end_duration - (i * 0.3)
+                # Stagger appearance with faster timing
+                cta_start = start_time + (i * 0.2)
+                cta_duration = end_duration - (i * 0.2)
                 
                 if cta_duration > 0.5:
-                    y_position = 0.5 + (i * 0.08)  # Stack vertically
+                    y_position = 0.55 + (i * 0.06)  # Better spacing
                     cta_clip = cta_clip.set_position(('center', y_position), relative=True)
                     cta_clip = cta_clip.set_start(cta_start).set_duration(cta_duration)
                     cta_clip = cta_clip.crossfadein(0.3)
+                    
+                    # Add subtle slide-in animation
+                    cta_clip = cta_clip.set_position(lambda t: ('center', y_position + 20*(1-min(1, t*3))))
+                    
                     end_elements.append(cta_clip)
             
+            self.logger.info(f"Created end screen with contextual CTA: {main_cta_text[:50]}...")
             return CompositeVideoClip(end_elements)
             
         except Exception as e:
             self.logger.warning(f"Error creating end screen: {e}")
             return None
+    
+    def _generate_contextual_cta(self, analysis: VideoAnalysis) -> str:
+        """Generate contextual CTA based on content analysis"""
+        try:
+            # Use AI-provided CTA if available
+            if analysis.call_to_action and analysis.call_to_action.text:
+                return analysis.call_to_action.text
+            
+            # Generate contextual CTA based on content mood and type
+            mood = analysis.mood.lower() if analysis.mood else 'amazing'
+            
+            # Context-specific CTAs
+            cta_templates = {
+                'sports': "Subscribe for more epic sports moments!",
+                'cycling': "Subscribe for more epic race moments!",
+                'racing': "Subscribe for more epic race moments!",
+                'intense': "Subscribe for more intense content!",
+                'dramatic': "Subscribe for more dramatic moments!",
+                'funny': "Subscribe for more hilarious content!",
+                'amazing': "Subscribe for more amazing content!",
+                'satisfying': "Subscribe for more satisfying videos!",
+                'educational': "Subscribe for more learning content!",
+                'uplifting': "Subscribe for more uplifting moments!"
+            }
+            
+            # Check for sports/racing context in title or subreddit
+            title_lower = analysis.suggested_title.lower() if analysis.suggested_title else ""
+            
+            if any(keyword in title_lower for keyword in ['race', 'racing', 'bike', 'cycling', 'cyclist']):
+                return cta_templates.get('cycling', cta_templates['amazing'])
+            elif any(keyword in title_lower for keyword in ['sport', 'athletic', 'competition']):
+                return cta_templates.get('sports', cta_templates['amazing'])
+            else:
+                return cta_templates.get(mood, cta_templates['amazing'])
+                
+        except Exception as e:
+            self.logger.warning(f"Error generating contextual CTA: {e}")
+            return "Subscribe for more amazing content!"
     
     def add_auditory_ctas(self, 
                          audio_clip: AudioFileClip, 
@@ -375,7 +448,10 @@ class CTAProcessor:
                         
                         # Set timing and volume
                         cta_audio = cta_audio.set_start(segment.time_seconds)
-                        cta_audio = cta_audio.multiply_volume(0.8)  # Slightly quieter than main content
+                        try:
+                            cta_audio = cta_audio.with_volume_scaled(0.8)  # Slightly quieter than main content
+                        except Exception as e:
+                            self.logger.warning(f"Error applying volume to CTA audio: {e}")
                         
                         audio_tracks.append(cta_audio)
                         
