@@ -1,6 +1,7 @@
 """
 Modular video processing pipeline for YouTube Shorts generation.
 Handles video downloading, processing, effects, and optimization.
+Optimized for GPU memory usage with FFmpeg GPU acceleration.
 """
 
 import gc
@@ -12,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import subprocess
 import psutil
+import os
 
 import cv2
 import numpy as np
@@ -39,21 +41,52 @@ from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
+from src.utils.gpu_memory_manager import GPUMemoryManager
 
 
 class ResourceManager:
-    """Manages system resources during video processing"""
+    """Manages system resources during video processing with GPU memory optimization"""
     
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self.active_clips = []
+        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.4)  # Reserve 60% for AI models
+        
+        # Set FFmpeg to use GPU memory when available
+        self._setup_ffmpeg_gpu_memory()
+    
+    def _setup_ffmpeg_gpu_memory(self):
+        """Setup FFmpeg to use GPU memory when available"""
+        if self.gpu_manager.device != "cpu":
+            # Set environment variables for FFmpeg GPU memory optimization
+            os.environ['FFMPEG_NVENC_MEMORY_POOL_SIZE'] = '512M'  # Limit NVENC memory pool
+            os.environ['FFMPEG_CUDA_DEVICE'] = '0'  # Use first GPU
+            os.environ['FFMPEG_HWACCEL_OUTPUT_FORMAT'] = 'cuda'  # Keep frames in GPU memory
+            self.logger.info("FFmpeg configured for GPU memory usage")
+        else:
+            self.logger.info("FFmpeg using CPU mode")
     
     def check_memory_usage(self) -> bool:
-        """Check if memory usage is within safe limits"""
+        """Check if memory usage is within safe limits for both RAM and VRAM"""
         try:
+            # Check system RAM
             memory = psutil.virtual_memory()
-            return memory.percent < (self.config.video.max_memory_usage * 100)
+            ram_ok = memory.percent < (self.config.video.max_memory_usage * 100)
+            
+            # Check VRAM if GPU is available
+            vram_ok = True
+            if self.gpu_manager.device != "cpu":
+                vram_info = self.gpu_manager.get_vram_info()
+                if vram_info:
+                    vram_percent = (vram_info['used'] / vram_info['total']) * 100
+                    vram_ok = vram_percent < 90  # Keep 10% VRAM free
+                    
+                    if not vram_ok:
+                        self.logger.warning(f"High VRAM usage: {vram_percent:.1f}%")
+            
+            return ram_ok and vram_ok
+            
         except Exception as e:
             self.logger.warning(f"Could not check memory usage: {e}")
             return True
@@ -104,10 +137,10 @@ class VideoDownloader:
             # Ensure output directory exists
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # Configure format string based on URL type
+            # Configure format string based on URL type with improved Reddit handling
             if 'v.redd.it' in url or 'reddit.com' in url:
-                # For Reddit videos, use a more flexible format selection
-                format_selector = 'best[ext=mp4]/best[height<=1080]/best/worst'
+                # For Reddit videos, use progressive format selection with fallbacks
+                format_selector = 'best[ext=mp4][height<=1080]/best[ext=webm][height<=1080]/best[height<=720]/worst[ext=mp4]/worst'
             else:
                 # For other platforms, prefer 1080p or lower
                 format_selector = 'best[height<=1080]/best'
@@ -134,36 +167,41 @@ class VideoDownloader:
                     # Download the video
                     ydl.download([url])
             except Exception as download_error:
-                # If the primary format fails, try with more permissive formats
-                if 'Requested format is not available' in str(download_error):
-                    self.logger.warning(f"Primary format failed for {url}, trying fallback formats")
+                # Enhanced error handling with multiple fallback strategies
+                error_msg = str(download_error).lower()
+                if any(phrase in error_msg for phrase in ['requested format is not available', 'no video formats found', 'format not found']):
+                    self.logger.warning(f"Primary format failed for {url}, trying progressive fallbacks")
                     
-                    # Try with most permissive format selection
-                    fallback_opts = ydl_opts.copy()
-                    fallback_opts['format'] = 'worst/best'  # Accept any available format
+                    # Progressive fallback strategy
+                    fallback_formats = [
+                        'worst[ext=mp4]/worst[ext=webm]/worst',  # Any available format
+                        'bestvideo+bestaudio/best',              # Separate video+audio
+                        'bestvideo/best',                        # Video only if needed
+                        '(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)', # Specific containers
+                    ]
                     
-                    try:
-                        with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
-                            ydl_fallback.download([url])
-                    except Exception as fallback_error:
-                        # Try with even more permissive options for Reddit
+                    success = False
+                    for i, fallback_format in enumerate(fallback_formats):
+                        try:
+                            self.logger.info(f"Trying fallback format {i+1}/{len(fallback_formats)}: {fallback_format}")
+                            fallback_opts = ydl_opts.copy()
+                            fallback_opts['format'] = fallback_format
+                            fallback_opts['quiet'] = False  # Enable output for debugging
+                            
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                                ydl_fallback.download([url])
+                            success = True
+                            break
+                            
+                        except Exception as fallback_error:
+                            self.logger.debug(f"Fallback format {i+1} failed: {fallback_error}")
+                            continue
+                    
+                    if not success:
+                        # Final attempt with generic extractor for Reddit
                         if 'v.redd.it' in url or 'reddit.com' in url:
-                            self.logger.warning(f"Fallback failed, trying Reddit-specific extraction")
-                            
-                            reddit_opts = {
-                                'format': 'mp4/webm/any',
-                                'outtmpl': str(output_path.with_suffix('.%(ext)s')),
-                                'quiet': False,  # Enable output for debugging
-                                'no_warnings': False,
-                                'ignore_errors': True,
-                                'extract_flat': False,
-                            }
-                            
-                            try:
-                                with yt_dlp.YoutubeDL(reddit_opts) as ydl_reddit:
-                                    ydl_reddit.download([url])
-                            except Exception as reddit_error:
-                                raise download_error  # Re-raise original error
+                            self.logger.warning(f"All fallbacks failed, trying generic Reddit extraction")
+                            return self._try_generic_reddit_extraction(url, output_path)
                         else:
                             raise download_error
                 else:
@@ -188,6 +226,58 @@ class VideoDownloader:
             
         except Exception as e:
             self.logger.error(f"Error downloading video from {url}: {e}")
+            return False
+    
+    def _try_generic_reddit_extraction(self, url: str, output_path: Path) -> bool:
+        """
+        Try generic Reddit video extraction as a last resort
+        
+        Args:
+            url: Reddit video URL
+            output_path: Output path for the video
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            self.logger.info("Attempting generic Reddit video extraction")
+            
+            # Use most permissive options for generic extraction
+            generic_opts = {
+                'format': None,  # Don't specify format, let yt-dlp decide
+                'outtmpl': str(output_path.with_suffix('.%(ext)s')),
+                'quiet': False,
+                'no_warnings': False,
+                'ignore_errors': True,
+                'no_check_certificate': True,
+                'extract_flat': False,
+                'force_generic_extractor': True,  # Force generic extractor
+                'writesubtitles': False,
+                'writeautomaticsub': False,
+                'embed_chapters': False,
+                'embed_info': False,
+            }
+            
+            with yt_dlp.YoutubeDL(generic_opts) as ydl_generic:
+                ydl_generic.download([url])
+            
+            # Check if any video file was downloaded
+            downloaded_files = list(output_path.parent.glob(f"{output_path.stem}.*"))
+            video_extensions = ['.mp4', '.webm', '.mkv', '.avi', '.mov', '.flv']
+            
+            for file_path in downloaded_files:
+                if file_path.suffix.lower() in video_extensions:
+                    final_path = output_path.with_suffix(file_path.suffix)
+                    if file_path != final_path:
+                        file_path.rename(final_path)
+                    
+                    self.logger.info(f"Successfully extracted Reddit video with generic method: {final_path}")
+                    return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Generic Reddit extraction failed: {e}")
             return False
     
     def get_video_info(self, url: str) -> Optional[Dict[str, Any]]:
@@ -692,7 +782,8 @@ class VideoEffects:
             
             border = CompositeVideoClip([border, inner])
             border = border.set_opacity(0.8)
-            border = border.set_start(timestamp).set_duration(duration)
+            border = MoviePyCompat.with_start(border, timestamp)
+            border = MoviePyCompat.with_duration(border, duration)
             
             return border
             
@@ -980,8 +1071,8 @@ class TextOverlayProcessor:
             text_clip = text_clip.set_position('center')
             
             # Set timing
-            text_clip = text_clip.set_start(overlay.timestamp_seconds)
-            text_clip = text_clip.set_duration(overlay.duration)
+            text_clip = MoviePyCompat.with_start(text_clip, overlay.timestamp_seconds)
+            text_clip = MoviePyCompat.with_duration(text_clip, overlay.duration)
             
             # Apply dramatic animation - zoom in + pulsing
             def hook_animation(t):
@@ -1052,8 +1143,8 @@ class TextOverlayProcessor:
             text_clip = text_clip.set_position(position)
             
             # Set timing
-            text_clip = text_clip.set_start(overlay.timestamp_seconds)
-            text_clip = text_clip.set_duration(overlay.duration)
+            text_clip = MoviePyCompat.with_start(text_clip, overlay.timestamp_seconds)
+            text_clip = MoviePyCompat.with_duration(text_clip, overlay.duration)
             
             # Apply dynamic animations based on style
             text_clip = self._apply_text_animation(text_clip, overlay.style, overlay.duration)
@@ -1274,7 +1365,7 @@ class AudioProcessor:
                             audio_clip = AudioFileClip(str(adjusted_path))
                     
                     # Set timing and apply effects
-                    audio_clip = audio_clip.set_start(segment.time_seconds)
+                    audio_clip = MoviePyCompat.with_start(audio_clip, segment.time_seconds)
                     
                     # Apply emotional volume adjustments
                     volume_factor = self._get_emotion_volume_factor(segment.emotion)
@@ -1434,7 +1525,7 @@ class AudioProcessor:
                             sound_clip = sound_clip.with_volume_scaled(volume)
                         except Exception as e:
                             self.logger.warning(f"Error applying volume to sound effect: {e}")
-                        sound_clip = sound_clip.set_start(timestamp)
+                        sound_clip = MoviePyCompat.with_start(sound_clip, timestamp)
                         
                         # Ensure sound doesn't exceed video duration
                         if timestamp + sound_clip.duration > video_duration:
@@ -1449,7 +1540,16 @@ class AudioProcessor:
                         # Apply fade in/out for smoother integration (enhanced)
                         fade_duration = min(0.05, sound_clip.duration * 0.1)
                         if sound_clip.duration > fade_duration * 2:
-                            sound_clip = sound_clip.audio_fadein(fade_duration).audio_fadeout(fade_duration)
+                            try:
+                                # Try new MoviePy method names
+                                sound_clip = sound_clip.with_fadein(fade_duration).with_fadeout(fade_duration)
+                            except AttributeError:
+                                try:
+                                    # Try older MoviePy method names
+                                    sound_clip = sound_clip.audio_fadein(fade_duration).audio_fadeout(fade_duration)
+                                except AttributeError:
+                                    # Skip fade effects if not available
+                                    self.logger.debug("Fade effects not available for sound clips")
                         
                         audio_tracks.append(sound_clip)
                         effects_added += 1

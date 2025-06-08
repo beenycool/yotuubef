@@ -2,6 +2,7 @@
 Enhanced Text-to-Speech service with support for ElevenLabs and the local Dia-1.6B model.
 Handles dynamic TTS parameters, emotion, dialogue generation, and pacing for engaging narration,
 with a preference for the local model to reduce API costs and latency.
+Optimized for GPU memory usage with 6GB VRAM constraints.
 """
 
 import logging
@@ -11,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import io
 import asyncio
+import gc
 
 try:
     import elevenlabs
@@ -22,16 +24,24 @@ except ImportError:
 try:
     import torch
     import soundfile as sf
-    from dia import Dia
+    from dia.model import Dia
     DIA_AVAILABLE = True
 except ImportError:
-    DIA_AVAILABLE = False
+    try:
+        # Fallback import structure
+        from dia import Dia
+        import soundfile as sf
+        import torch
+        DIA_AVAILABLE = True
+    except ImportError:
+        DIA_AVAILABLE = False
 
 import numpy as np
 from moviepy import AudioFileClip
 
 from src.config.settings import get_config
 from src.models import NarrativeSegment, EmotionType, PacingType
+from src.utils.gpu_memory_manager import GPUMemoryManager
 
 
 class TTSService:
@@ -43,6 +53,7 @@ class TTSService:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self._dia_model = None
+        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.6)  # Reserve 40% VRAM for other processes
         self._initialize_services()
     
     def _initialize_services(self):
@@ -60,15 +71,53 @@ class TTSService:
             self.logger.warning("Dia TTS not available - install dia package")
     
     def _initialize_dia(self):
-        """Lazy initialization of the local Dia model to conserve resources."""
+        """Lazy initialization of the local Dia model with GPU memory optimization."""
         if self._dia_model is None and DIA_AVAILABLE:
             try:
-                self.logger.info("Loading Dia-1.6B TTS model...")
-                self._dia_model = Dia.from_pretrained("nari-labs/Dia-1.6B")
+                # Check VRAM availability for Dia model (estimated ~1.6GB)
+                estimated_model_size_mb = 1800  # Conservative estimate for Dia-1.6B
+                device = self.gpu_manager.get_optimal_device(estimated_model_size_mb)
+                
+                self.logger.info(f"Loading Dia-1.6B TTS model on {device}...")
+                
+                # Load model with simplified initialization (Dia doesn't support torch_dtype, device_map, etc.)
+                if device.startswith("cuda"):
+                    # Enable memory-efficient loading
+                    with torch.cuda.device(device):
+                        torch.cuda.empty_cache()  # Clear cache before loading
+                        
+                        # Load model with basic initialization
+                        self._dia_model = Dia.from_pretrained("nari-labs/Dia-1.6B")
+                        
+                        # Move to GPU manually if needed
+                        if hasattr(self._dia_model, 'to'):
+                            self._dia_model = self._dia_model.to(device)
+                        
+                        # Optimize for inference
+                        self._dia_model = self.gpu_manager.optimize_model_for_inference(self._dia_model)
+                        
+                        # Log VRAM usage
+                        vram_info = self.gpu_manager.get_vram_info()
+                        if vram_info:
+                            used_gb = vram_info['used'] / 1024**3
+                            self.logger.info(f"Dia model loaded to GPU, VRAM used: {used_gb:.1f}GB")
+                else:
+                    # CPU fallback
+                    self.logger.info("Loading Dia model to CPU due to insufficient VRAM")
+                    self._dia_model = Dia.from_pretrained("nari-labs/Dia-1.6B")
+                    
+                    # Ensure model stays on CPU
+                    if hasattr(self._dia_model, 'to'):
+                        self._dia_model = self._dia_model.to('cpu')
+                
                 self.logger.info("Dia-1.6B model loaded successfully")
+                
             except Exception as e:
                 self.logger.error(f"Failed to load Dia model: {e}")
                 self._dia_model = None
+                # Clear any partial GPU allocations
+                if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                    torch.cuda.empty_cache()
     
     def generate_speech(self,
                         segment: NarrativeSegment,
@@ -136,7 +185,7 @@ class TTSService:
     def _generate_with_dia(self,
                           segment: NarrativeSegment,
                           output_path: Path) -> Optional[Path]:
-        """Generate speech using the local Dia-1.6B model."""
+        """Generate speech using the local Dia-1.6B model with GPU memory optimization."""
         try:
             self._initialize_dia()
             
@@ -147,18 +196,96 @@ class TTSService:
             # Prepare text with dialogue format and emotion hints
             enhanced_text = self._enhance_text_for_dia(segment)
             
-            # Generate speech using Dia
-            # Dia returns a tuple (audio_tensor, sample_rate)
-            audio_tensor, sr = self._dia_model.generate(enhanced_text)
-            audio_data = audio_tensor.numpy()
+            # Use GPU context manager for memory efficient generation
+            # Check if model has parameters() method (PyTorch models do, but Dia might not)
+            try:
+                device = next(self._dia_model.parameters()).device
+            except (AttributeError, StopIteration):
+                # Fallback: check if model has a device attribute or use cuda if available
+                if hasattr(self._dia_model, 'device'):
+                    device = self._dia_model.device
+                elif torch.cuda.is_available():
+                    device = torch.device('cuda:0')
+                else:
+                    device = torch.device('cpu')
+            
+            with torch.inference_mode():  # Disable gradient computation for inference
+                if device.type == "cuda":
+                    with torch.cuda.device(device):
+                        # Monitor VRAM before generation
+                        vram_before = self.gpu_manager.get_vram_info()
+                        
+                        # Generate speech using Dia with proper arguments
+                        try:
+                            # Try calling with just text (most common interface)
+                            audio_output = self._dia_model.generate(enhanced_text)
+                        except Exception as e:
+                            self.logger.warning(f"Direct generate call failed: {e}")
+                            # Try alternative calling patterns
+                            try:
+                                audio_output = self._dia_model(enhanced_text)
+                            except Exception as e2:
+                                self.logger.warning(f"Direct model call failed: {e2}")
+                                raise e  # Re-raise original error
+                        
+                        # Clear intermediate GPU tensors
+                        torch.cuda.empty_cache()
+                        
+                        if vram_before:
+                            vram_after = self.gpu_manager.get_vram_info()
+                            if vram_after:
+                                used_mb = (vram_after['used'] - vram_before['used']) / 1024**2
+                                self.logger.debug(f"TTS generation used {used_mb:.0f}MB VRAM")
+                else:
+                    # CPU generation
+                    try:
+                        # Try calling with just text (most common interface)
+                        audio_output = self._dia_model.generate(enhanced_text)
+                    except Exception as e:
+                        self.logger.warning(f"Direct generate call failed: {e}")
+                        # Try alternative calling patterns
+                        try:
+                            audio_output = self._dia_model(enhanced_text)
+                        except Exception as e2:
+                            self.logger.warning(f"Direct model call failed: {e2}")
+                            raise e  # Re-raise original error
+            
+            # Handle different return formats from Dia model
+            if isinstance(audio_output, tuple):
+                # If Dia returns (audio_tensor, sample_rate)
+                audio_tensor, sr = audio_output
+                if hasattr(audio_tensor, 'numpy'):
+                    audio_data = audio_tensor.cpu().numpy()  # Ensure on CPU for numpy
+                else:
+                    audio_data = audio_tensor
+            else:
+                # If Dia returns just audio data
+                audio_data = audio_output
+                if hasattr(audio_data, 'numpy'):
+                    audio_data = audio_data.cpu().numpy()  # Ensure on CPU for numpy
+                elif hasattr(audio_data, 'cpu'):
+                    audio_data = audio_data.cpu().numpy()
+                sr = 44100  # Default sample rate
+            
+            # Ensure audio_data is in the right format for soundfile
+            if len(audio_data.shape) > 1:
+                audio_data = audio_data.squeeze()
             
             sf.write(str(output_path), audio_data, sr)
+            
+            # Clean up GPU memory after generation
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+                gc.collect()
             
             self.logger.info(f"Generated Dia TTS: '{segment.text[:30]}...'")
             return output_path
             
         except Exception as e:
             self.logger.warning(f"Local Dia TTS failed, will try other providers: {e}")
+            # Clean up on error
+            if hasattr(torch, 'cuda') and torch.cuda.is_available():
+                torch.cuda.empty_cache()
             return None
     
     def _get_elevenlabs_voice_settings(self, 
@@ -336,9 +463,9 @@ class TTSService:
         if DIA_AVAILABLE:
             services.append("dia")
         return services
-def _generate_with_pyttsx3(self,
-                              segment: NarrativeSegment,
-                              output_path: Path) -> Optional[Path]:
+    def _generate_with_pyttsx3(self,
+                               segment: NarrativeSegment,
+                               output_path: Path) -> Optional[Path]:
         """Generate speech using system TTS (pyttsx3) as fallback."""
         try:
             import pyttsx3

@@ -9,14 +9,16 @@ moviepy
 Pillow
 opencv-python-headless
 numpy
-torch
+# Install PyTorch with CUDA support (run separately):
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
 transformers
 accelerate
 huggingface_hub
 soundfile
 ffmpeg-normalize
 psutil
-pynvml; sys_platform == 'linux' and platform_machine == 'x86_64'
+pynvml  # GPU memory monitoring (works on Windows, Linux, and macOS)
 ffmpeg-python
 python-dotenv>=1.0.0
 requests

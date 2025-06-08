@@ -1,0 +1,10 @@
+Requirement already satisfied: protobuf in c:\users\yaseen\.pyenv\pyenv-win\versions\3.12.8\lib\site-packages (3.19.6)
+Collecting protobuf
+  Using cached protobuf-6.31.1-cp310-abi3-win_amd64.whl.metadata (593 bytes)
+Using cached protobuf-6.31.1-cp310-abi3-win_amd64.whl (435 kB)
+Installing collected packages: protobuf
+  Attempting uninstall: protobuf
+    Found existing installation: protobuf 3.19.6
+    Uninstalling protobuf-3.19.6:
+      Successfully uninstalled protobuf-3.19.6
+Successfully installed protobuf-6.31.1

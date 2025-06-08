@@ -39,12 +39,18 @@ class VideoConfig:
     ffmpeg_cq_gpu: str = '23'
     video_bitrate_high: str = '10M'
     
+    # GPU Memory Optimization
+    gpu_memory_fraction: float = 0.6  # Use 60% of VRAM for video processing
+    enable_gpu_acceleration: bool = True
+    nvenc_memory_pool_size: str = '512M'  # Limit NVENC memory pool
+    
     # Quality profile for easy management
     video_quality_profile: str = 'standard'  # Options: 'standard', 'high', 'maximum'
     
     # Processing
     chunk_size: int = 30  # seconds
     max_memory_usage: float = 0.8  # 80% of available memory
+    max_vram_usage: float = 0.9  # 90% of available VRAM
 
 @dataclass
 class TextOverlayConfig:

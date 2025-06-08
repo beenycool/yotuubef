@@ -47,10 +47,21 @@ def select_and_validate_segments(analysis: VideoAnalysis, config: Dict[str, Any]
                 logger.warning(f"Segment has invalid end time: {segment.end_seconds} <= {segment.start_seconds}")
                 continue
             
-            # Check duration constraints
+            # Check duration constraints with intelligent handling for very short videos
             if segment_duration < min_short_duration:
-                logger.warning(f"Segment too short: {segment_duration}s < {min_short_duration}s minimum")
-                continue
+                # For very short segments, check if this represents most of the available content
+                if hasattr(segment, 'end_seconds') and segment.end_seconds > 0:
+                    # If segment represents >70% of available content and is >2 seconds, accept it anyway
+                    coverage_ratio = segment_duration / segment.end_seconds
+                    if coverage_ratio > 0.7 and segment_duration > 2.0:
+                        logger.info(f"Accepting short segment due to high content coverage: {segment_duration:.1f}s "
+                                  f"({coverage_ratio:.1%} of content)")
+                    else:
+                        logger.warning(f"Segment too short: {segment_duration:.1f}s < {min_short_duration:.1f}s minimum")
+                        continue
+                else:
+                    logger.warning(f"Segment too short: {segment_duration:.1f}s < {min_short_duration:.1f}s minimum")
+                    continue
             
             if segment_duration > max_short_duration:
                 logger.warning(f"Segment too long: {segment_duration}s > {max_short_duration}s maximum")

@@ -238,11 +238,29 @@ class VideoGenerationOrchestrator:
             self.logger.info(f"Video complexity score: {video_metrics['complexity_score']} "
                            f"(priority: {video_metrics['processing_priority']})")
             
+            # Get actual video duration to determine appropriate minimum
+            actual_duration = self._get_video_duration(download_path)
+            if actual_duration is None:
+                actual_duration = 60  # Default fallback
+            
+            # Calculate dynamic minimum duration based on actual video length
+            if actual_duration < 15:
+                # For very short videos, allow segments as short as 80% of total duration or 3s minimum
+                min_duration = max(3.0, actual_duration * 0.8)
+            elif actual_duration < 30:
+                # For short videos, use 8 seconds minimum
+                min_duration = 8.0
+            else:
+                # For longer videos, use original 15 second minimum
+                min_duration = 15.0
+            
+            self.logger.info(f"Video duration: {actual_duration:.1f}s, using minimum segment duration: {min_duration:.1f}s")
+            
             # Validate and select video segments
             valid_segments = select_and_validate_segments(analysis, {
                 'video': {
                     'max_short_duration_seconds': self.config.video.target_duration,
-                    'min_short_duration_seconds': 15
+                    'min_short_duration_seconds': min_duration
                 }
             })
             if not valid_segments:

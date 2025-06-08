@@ -148,6 +148,37 @@ class MoviePyCompat:
                 return TextClip(text)
     
     @staticmethod
+    def crop(clip, x1=None, y1=None, x2=None, y2=None, width=None, height=None):
+        """Compatible crop method"""
+        try:
+            # Try new API first
+            if hasattr(clip, 'cropped'):
+                return clip.cropped(x1=x1, y1=y1, x2=x2, y2=y2, width=width, height=height)
+            # Fall back to old API
+            elif hasattr(clip, 'crop'):
+                return clip.crop(x1=x1, y1=y1, x2=x2, y2=y2, width=width, height=height)
+            else:
+                # Manual crop using subclip if direct crop not available
+                w, h = clip.size
+                x1 = x1 or 0
+                y1 = y1 or 0
+                x2 = x2 or w
+                y2 = y2 or h
+                
+                # Use resize to achieve crop effect
+                new_w = x2 - x1
+                new_h = y2 - y1
+                
+                def crop_frame(get_frame, t):
+                    frame = get_frame(t)
+                    return frame[y1:y2, x1:x2]
+                
+                return MoviePyCompat.apply_effect(clip, crop_frame).resize((new_w, new_h))
+        except Exception as e:
+            logging.warning(f"Error cropping clip: {e}")
+            return clip
+    
+    @staticmethod
     def get_audio_channels(clip):
         """Safely get number of audio channels"""
         try:
@@ -196,12 +227,12 @@ def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> 
         if current_aspect > target_aspect:  # Too wide, crop sides
             new_width = int(h * target_aspect)
             x1 = (w - new_width) // 2
-            clip = clip.crop(x1=x1, x2=x1 + new_width)
+            clip = MoviePyCompat.crop(clip, x1=x1, x2=x1 + new_width)
             logger.info(f"Cropped width from {w} to {new_width}")
         else:  # Too tall, crop top/bottom
             new_height = int(w / target_aspect)
             y1 = (h - new_height) // 2
-            clip = clip.crop(y1=y1, y2=y1 + new_height)
+            clip = MoviePyCompat.crop(clip, y1=y1, y2=y1 + new_height)
             logger.info(f"Cropped height from {h} to {new_height}")
     
     # Resize to target resolution
