@@ -28,6 +28,7 @@ jupyter
 # Enhanced TTS and Audio Processing
 git+https://github.com/nari-labs/dia.git
 scipy
+pyttsx3  # Fallback TTS service
 
 # Enhanced Image Processing for Thumbnails
 imageio

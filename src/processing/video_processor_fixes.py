@@ -78,14 +78,26 @@ class MoviePyCompat:
     def apply_effect(clip, effect_func):
         """Compatible effect application"""
         try:
-            # Try new API first
+            # Ensure effect_func is properly wrapped
+            if not callable(effect_func):
+                logging.warning(f"Effect function is not callable: {type(effect_func)}")
+                return clip
+            
+            # Try new API first - wrap function properly
             if hasattr(clip, 'with_effects'):
-                return clip.with_effects([effect_func])
+                # For newer MoviePy versions, need to wrap in proper effect format
+                def wrapped_effect(clip_inner):
+                    return clip_inner.fl(effect_func)
+                return clip.with_effects([wrapped_effect])
             # Fall back to old API
             elif hasattr(clip, 'fl'):
                 return clip.fl(effect_func)
+            elif hasattr(clip, 'fl_image'):
+                return clip.fl_image(effect_func)
             else:
-                raise AttributeError(f"No effect method found for {type(clip)}")
+                # Final fallback - return original clip if no effect methods work
+                logging.warning(f"No compatible effect method found for {type(clip)}, returning original")
+                return clip
         except Exception as e:
             logging.warning(f"Error applying effect: {e}")
             return clip
@@ -109,18 +121,49 @@ class MoviePyCompat:
     @staticmethod
     def create_text_clip(text, **kwargs):
         """Create text clip with compatible parameters"""
-        # Handle font parameter conflicts
-        if 'font' in kwargs and 'fontsize' in kwargs:
-            # Remove duplicate font specification
-            font_size = kwargs.pop('fontsize', 50)
-            kwargs['font_size'] = font_size
+        # Clean up parameter conflicts
+        clean_kwargs = {}
+        
+        # Handle font/fontsize conflicts
+        if 'fontsize' in kwargs:
+            clean_kwargs['fontsize'] = kwargs['fontsize']
+        elif 'font_size' in kwargs:
+            clean_kwargs['fontsize'] = kwargs['font_size']
+        
+        # Handle other parameters, avoiding conflicts
+        for key, value in kwargs.items():
+            if key not in ['font_size']:  # Skip conflicting parameters
+                clean_kwargs[key] = value
         
         try:
-            return TextClip(text, **kwargs)
+            return TextClip(text, **clean_kwargs)
         except Exception as e:
             logging.warning(f"Error creating text clip: {e}")
             # Try with minimal parameters
-            return TextClip(text, color='white', font_size=50)
+            try:
+                return TextClip(text, color='white', fontsize=50)
+            except Exception as e2:
+                logging.warning(f"Fallback text clip creation failed: {e2}")
+                # Last resort: basic text clip
+                return TextClip(text)
+    
+    @staticmethod
+    def get_audio_channels(clip):
+        """Safely get number of audio channels"""
+        try:
+            # Try different attribute names for channel count
+            if hasattr(clip, 'nchannels'):
+                return clip.nchannels
+            elif hasattr(clip, 'audio') and hasattr(clip.audio, 'nchannels'):
+                return clip.audio.nchannels
+            elif hasattr(clip, 'reader') and hasattr(clip.reader, 'nchannels'):
+                return clip.reader.nchannels
+            else:
+                # Default to stereo if can't determine
+                return 2
+        except Exception as e:
+            logging.warning(f"Could not determine audio channels: {e}")
+            return 2
 
 def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> VideoFileClip:
     """

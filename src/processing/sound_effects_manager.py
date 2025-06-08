@@ -348,7 +348,8 @@ class SoundEffectsManager:
                 if audio_clip.duration > 0:
                     try:
                         # Sample a small portion to estimate volume
-                        sample_audio = audio_clip.subclip(0, min(1.0, audio_clip.duration))
+                        from src.processing.video_processor_fixes import MoviePyCompat
+                        sample_audio = MoviePyCompat.subclip(audio_clip, 0, min(1.0, audio_clip.duration))
                         # This is a simplified analysis - could be enhanced with actual audio analysis
                         analysis['estimated_volume'] = 'medium'  # Placeholder
                     except Exception:

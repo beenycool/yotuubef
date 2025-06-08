@@ -17,9 +17,19 @@ import cv2
 import numpy as np
 from moviepy import (
     VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip,
-    TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips,
-    vfx, afx
+    TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips
 )
+
+# Import video effects with compatibility handling
+try:
+    from moviepy import vfx, afx
+except ImportError:
+    try:
+        from moviepy.video import fx as vfx
+        from moviepy.audio import fx as afx
+    except ImportError:
+        vfx = None
+        afx = None
 import yt_dlp
 
 from src.config.settings import get_config
@@ -94,9 +104,17 @@ class VideoDownloader:
             # Ensure output directory exists
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
+            # Configure format string based on URL type
+            if 'v.redd.it' in url or 'reddit.com' in url:
+                # For Reddit videos, use a more flexible format selection
+                format_selector = 'best[ext=mp4]/best[height<=1080]/best/worst'
+            else:
+                # For other platforms, prefer 1080p or lower
+                format_selector = 'best[height<=1080]/best'
+            
             # Configure yt-dlp options
             ydl_opts = {
-                'format': 'best[height<=1080]/best',  # Prefer 1080p or lower
+                'format': format_selector,
                 'outtmpl': str(output_path.with_suffix('.%(ext)s')),
                 'quiet': True,
                 'no_warnings': True,
@@ -106,11 +124,50 @@ class VideoDownloader:
                 'embed_info': False,
                 'writesubtitles': False,
                 'writeautomaticsub': False,
+                # Add Reddit-specific options
+                'ignore_errors': False,
+                'no_check_certificate': True,
             }
             
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Download the video
-                ydl.download([url])
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Download the video
+                    ydl.download([url])
+            except Exception as download_error:
+                # If the primary format fails, try with more permissive formats
+                if 'Requested format is not available' in str(download_error):
+                    self.logger.warning(f"Primary format failed for {url}, trying fallback formats")
+                    
+                    # Try with most permissive format selection
+                    fallback_opts = ydl_opts.copy()
+                    fallback_opts['format'] = 'worst/best'  # Accept any available format
+                    
+                    try:
+                        with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                            ydl_fallback.download([url])
+                    except Exception as fallback_error:
+                        # Try with even more permissive options for Reddit
+                        if 'v.redd.it' in url or 'reddit.com' in url:
+                            self.logger.warning(f"Fallback failed, trying Reddit-specific extraction")
+                            
+                            reddit_opts = {
+                                'format': 'mp4/webm/any',
+                                'outtmpl': str(output_path.with_suffix('.%(ext)s')),
+                                'quiet': False,  # Enable output for debugging
+                                'no_warnings': False,
+                                'ignore_errors': True,
+                                'extract_flat': False,
+                            }
+                            
+                            try:
+                                with yt_dlp.YoutubeDL(reddit_opts) as ydl_reddit:
+                                    ydl_reddit.download([url])
+                            except Exception as reddit_error:
+                                raise download_error  # Re-raise original error
+                        else:
+                            raise download_error
+                else:
+                    raise download_error
             
             # Find the downloaded file (yt-dlp may change the extension)
             downloaded_files = list(output_path.parent.glob(f"{output_path.stem}.*"))
@@ -151,12 +208,42 @@ class VideoDownloader:
                     'width': info.get('width', 0),
                     'height': info.get('height', 0),
                     'fps': info.get('fps', 30),
-                    'format': info.get('ext', 'unknown')
+                    'format': info.get('ext', 'unknown'),
+                    'formats': info.get('formats', [])  # Include available formats for debugging
                 }
                 
         except Exception as e:
             self.logger.error(f"Error getting video info from {url}: {e}")
             return None
+    
+    def list_available_formats(self, url: str) -> List[str]:
+        """List available formats for a video URL (useful for debugging)"""
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'listformats': True,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                formats = info.get('formats', [])
+                
+                format_list = []
+                for fmt in formats:
+                    format_str = f"{fmt.get('format_id', 'unknown')} - {fmt.get('ext', 'unknown')}"
+                    if fmt.get('height'):
+                        format_str += f" - {fmt.get('height')}p"
+                    if fmt.get('vcodec'):
+                        format_str += f" - {fmt.get('vcodec')}"
+                    format_list.append(format_str)
+                
+                return format_list
+                
+        except Exception as e:
+            self.logger.error(f"Error listing formats for {url}: {e}")
+            return []
 
 
 class VideoEffects:
@@ -663,7 +750,7 @@ class AdvancedVideoEnhancer:
             output_path = tempfile.mktemp(suffix='.mp4')
             
             # Write input clip to temporary file
-            clip.write_videofile(input_path, verbose=False, logger=None)
+            clip.write_videofile(input_path, logger=None)
             
             # Build FFmpeg command
             cmd = [
@@ -737,20 +824,29 @@ class AdvancedVideoEnhancer:
                 # Enhanced adaptive adjustments for viral video aesthetics
                 if avg_brightness < 0.3:  # Dark video - make it pop
                     # Aggressive brightness and contrast boost for dark videos
-                    clip = clip.fx(vfx.colorx, factor=1.3)  # Boost overall exposure
-                    clip = clip.fx(vfx.lum_contrast, lum=0.15, contrast=0.4)  # High contrast
+                    # Apply color and contrast adjustments with fallback
+                    if vfx and hasattr(vfx, 'colorx'):
+                        clip = MoviePyCompat.apply_fx_effect(clip, vfx.colorx, factor=1.3)
+                    if vfx and hasattr(vfx, 'lum_contrast'):
+                        clip = MoviePyCompat.apply_fx_effect(clip, vfx.lum_contrast, lum=0.15, contrast=0.4)
                     self.logger.info("Applied dark video enhancement with aggressive pop")
                     
                 elif avg_brightness > 0.75:  # Very bright video
                     # Reduce overexposure while maintaining pop
-                    clip = clip.fx(vfx.colorx, factor=0.85)
-                    clip = clip.fx(vfx.lum_contrast, lum=-0.1, contrast=0.35)  # Still high contrast
+                    # Apply color and contrast adjustments with fallback
+                    if vfx and hasattr(vfx, 'colorx'):
+                        clip = MoviePyCompat.apply_fx_effect(clip, vfx.colorx, factor=0.85)
+                    if vfx and hasattr(vfx, 'lum_contrast'):
+                        clip = MoviePyCompat.apply_fx_effect(clip, vfx.lum_contrast, lum=-0.1, contrast=0.35)
                     self.logger.info("Applied bright video enhancement with contrast boost")
                     
                 else:  # Normal brightness - standard pop enhancement
                     # Make colors more vibrant and punchy
-                    clip = clip.fx(vfx.colorx, factor=1.15)  # Slight exposure boost
-                    clip = clip.fx(vfx.lum_contrast, lum=0.05, contrast=0.3)  # Good contrast boost
+                    # Apply color and contrast adjustments with fallback
+                    if vfx and hasattr(vfx, 'colorx'):
+                        clip = MoviePyCompat.apply_fx_effect(clip, vfx.colorx, factor=1.15)
+                    if vfx and hasattr(vfx, 'lum_contrast'):
+                        clip = MoviePyCompat.apply_fx_effect(clip, vfx.lum_contrast, lum=0.05, contrast=0.3)
                     self.logger.info("Applied standard pop enhancement")
                 
                 # Additional saturation boost for viral appeal
@@ -762,7 +858,7 @@ class AdvancedVideoEnhancer:
                         hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
                         return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
                     
-                    clip = clip.fl(saturation_boost)
+                    clip = MoviePyCompat.apply_effect(clip, saturation_boost)
                     self.logger.info("Applied saturation boost for color pop")
                     
                 elif avg_saturation < 0.6:  # Moderate saturation - mild boost
@@ -773,7 +869,7 @@ class AdvancedVideoEnhancer:
                         hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
                         return cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2RGB)
                     
-                    clip = clip.fl(mild_saturation_boost)
+                    clip = MoviePyCompat.apply_effect(clip, mild_saturation_boost)
                     self.logger.info("Applied mild saturation boost")
                 
                 # Shadow/highlight enhancement for better dynamic range
@@ -791,7 +887,7 @@ class AdvancedVideoEnhancer:
                         
                         return (np.clip(enhanced, 0, 1) * 255).astype(np.uint8)
                     
-                    clip = clip.fl(shadow_highlight_enhancement)
+                    clip = MoviePyCompat.apply_effect(clip, shadow_highlight_enhancement)
                     self.logger.info("Applied shadow/highlight enhancement")
             
             return clip
@@ -869,7 +965,7 @@ class TextOverlayProcessor:
             font_size = int(video_height * 0.08)  # 8% of video height
             
             # Create dramatic hook text
-            text_clip = TextClip(
+            text_clip = MoviePyCompat.create_text_clip(
                 overlay.text.upper(),  # Convert to uppercase for impact
                 fontsize=font_size,
                 font=font_path,
@@ -1218,7 +1314,7 @@ class AudioProcessor:
                 music_clip = concatenate_audioclips(music_clips)
             
             # Trim to video duration
-            music_clip = music_clip.subclip(0, video_duration)
+            music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
             
             # Apply base volume
             try:
@@ -1253,12 +1349,12 @@ class AudioProcessor:
                 
                 # Add normal volume segment before narration
                 if current_time < start_time:
-                    segments.append(music_clip.subclip(current_time, start_time))
+                    segments.append(MoviePyCompat.subclip(music_clip, current_time, start_time))
                 
                 # Add ducked segment during narration
                 if start_time < music_clip.duration:
                     duck_end = min(end_time, music_clip.duration)
-                    ducked_segment = music_clip.subclip(start_time, duck_end)
+                    ducked_segment = MoviePyCompat.subclip(music_clip, start_time, duck_end)
                     try:
                         ducked_segment = ducked_segment.with_volume_scaled(duck_factor)
                     except Exception as e:
@@ -1269,7 +1365,7 @@ class AudioProcessor:
             
             # Add remaining segment
             if current_time < music_clip.duration:
-                segments.append(music_clip.subclip(current_time, music_clip.duration))
+                segments.append(MoviePyCompat.subclip(music_clip, current_time, music_clip.duration))
             
             if segments:
                 return concatenate_audioclips(segments)
@@ -1344,7 +1440,7 @@ class AudioProcessor:
                         if timestamp + sound_clip.duration > video_duration:
                             max_duration = video_duration - timestamp
                             if max_duration > 0.1:  # Only add if at least 0.1 seconds remaining
-                                sound_clip = sound_clip.subclip(0, max_duration)
+                                sound_clip = MoviePyCompat.subclip(sound_clip, 0, max_duration)
                             else:
                                 self.logger.debug(f"Skipping sound effect '{effect_name}' - insufficient time remaining")
                                 sound_clip.close()
@@ -1657,10 +1753,22 @@ class VideoProcessor:
             
             # Add original audio if it's important
             if analysis.original_audio_is_key and source_audio:
-                # Apply volume adjustment for original audio
-                original_audio = self.audio_processor._process_original_audio(
-                    type('MockClip', (), {'audio': source_audio})()
-                )
+                # Apply volume adjustment for original audio with safe access
+                if source_audio:
+                    try:
+                        # Create a proper mock video clip with audio
+                        class MockVideoClip:
+                            def __init__(self, audio_clip):
+                                self.audio = audio_clip
+                        
+                        original_audio = self.audio_processor._process_original_audio(
+                            MockVideoClip(source_audio)
+                        )
+                    except Exception as e:
+                        self.logger.warning(f"Error processing original audio: {e}")
+                        original_audio = source_audio
+                else:
+                    original_audio = None
                 if original_audio:
                     audio_elements.append(original_audio)
                     self.logger.info("Preserved original audio with volume adjustment")

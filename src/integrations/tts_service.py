@@ -98,6 +98,13 @@ class TTSService:
             if result:
                 return result
 
+        # Final fallback: try system TTS if available
+        try:
+            import pyttsx3
+            return self._generate_with_pyttsx3(segment, output_path)
+        except ImportError:
+            pass
+        
         self.logger.error("No TTS service available for speech generation")
         return None
     
@@ -329,3 +336,32 @@ class TTSService:
         if DIA_AVAILABLE:
             services.append("dia")
         return services
+def _generate_with_pyttsx3(self,
+                              segment: NarrativeSegment,
+                              output_path: Path) -> Optional[Path]:
+        """Generate speech using system TTS (pyttsx3) as fallback."""
+        try:
+            import pyttsx3
+            
+            engine = pyttsx3.init()
+            
+            # Configure voice settings based on emotion and pacing
+            rate = 200  # Default rate
+            if segment.pacing == PacingType.SLOW:
+                rate = 150
+            elif segment.pacing == PacingType.FAST:
+                rate = 250
+            
+            engine.setProperty('rate', rate)
+            engine.setProperty('volume', 0.9)
+            
+            # Save to file
+            engine.save_to_file(segment.text, str(output_path))
+            engine.runAndWait()
+            
+            self.logger.info(f"Generated pyttsx3 TTS: '{segment.text[:30]}...'")
+            return output_path
+            
+        except Exception as e:
+            self.logger.warning(f"pyttsx3 TTS failed: {e}")
+            return None
