@@ -15,7 +15,7 @@ from src.config.settings import get_config, init_config
 from src.integrations.reddit_client import RedditClient, RedditPost
 from src.integrations.youtube_client import YouTubeClient, VideoMetadata
 from src.processing.thumbnail_generator import ThumbnailGenerator
-from src.integrations.ai_client import GeminiClient, VideoAnalysis
+from src.integrations.ai_client import AIClient
 from src.processing.video_processor import VideoProcessor
 from src.database.db_manager import DatabaseManager
 from src.utils import (
@@ -44,7 +44,7 @@ class VideoGenerationOrchestrator:
         # Initialize components
         self.reddit_client = RedditClient()
         self.youtube_client = YouTubeClient()
-        self.ai_client = GeminiClient()
+        self.ai_client = AIClient()
         self.video_processor = VideoProcessor()
         self.db_manager = DatabaseManager()
         self.thumbnail_generator = ThumbnailGenerator()

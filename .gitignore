@@ -74,3 +74,6 @@ Thumb.db
 /temp_processing
 .roomodes
 aigi.md
+/.cursor
+engagement_metrics.json
+uploaded_videos.db

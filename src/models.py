@@ -3,9 +3,10 @@ Pydantic models for robust data validation and type checking.
 Replaces dataclasses with validated models for AI analysis results.
 """
 
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union, Any, Tuple
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from enum import Enum
+from datetime import datetime
 
 
 class PositionType(str, Enum):
@@ -291,4 +292,121 @@ class VideoAnalysis(BaseModel):
         use_enum_values=True,
         validate_assignment=True,
         extra="forbid"  # Don't allow extra fields
+    )
+
+
+class CameraMovement(BaseModel):
+    """AI-suggested camera movement for dynamic effects"""
+    start_time: float = Field(..., ge=0, description="Start time in seconds")
+    end_time: float = Field(..., ge=0, description="End time in seconds")
+    movement_type: str = Field(..., description="Type of movement (pan, zoom, pan_zoom)")
+    start_position: Tuple[float, float] = Field(..., description="Starting position (x, y) as ratios 0-1")
+    end_position: Tuple[float, float] = Field(..., description="Ending position (x, y) as ratios 0-1")
+    zoom_factor: float = Field(default=1.0, ge=0.5, le=3.0, description="Zoom factor (0.5-3.0)")
+    easing: str = Field(default="ease_in_out", description="Easing function for smooth movement")
+    intensity: float = Field(default=1.0, ge=0.1, le=2.0, description="Movement intensity")
+
+    @field_validator('end_time')
+    @classmethod
+    def validate_time_range(cls, v, info):
+        if hasattr(info, 'data') and 'start_time' in info.data and v <= info.data['start_time']:
+            raise ValueError('End time must be greater than start time')
+        return v
+
+
+class AudioDuckingConfig(BaseModel):
+    """Configuration for intelligent audio ducking during narration"""
+    duck_during_narration: bool = Field(default=True, description="Enable ducking during TTS")
+    duck_volume: float = Field(default=0.3, ge=0.0, le=1.0, description="Volume during ducking")
+    fade_duration: float = Field(default=0.5, ge=0.1, le=2.0, description="Fade duration in seconds")
+    smart_detection: bool = Field(default=True, description="Use AI to detect speech moments")
+    preserve_music_dynamics: bool = Field(default=True, description="Preserve music rhythm during ducking")
+
+
+class ThumbnailVariant(BaseModel):
+    """A/B test thumbnail variant configuration"""
+    variant_id: str = Field(..., description="Unique variant identifier")
+    headline_text: str = Field(..., description="Headline text for this variant")
+    timestamp_seconds: float = Field(..., ge=0, description="Frame timestamp for thumbnail")
+    text_style: str = Field(default="bold", description="Text styling approach")
+    color_scheme: str = Field(default="high_contrast", description="Color scheme for text")
+    emotional_tone: str = Field(default="exciting", description="Emotional tone of design")
+    click_through_rate: Optional[float] = Field(default=None, ge=0.0, le=1.0, description="Measured CTR")
+    performance_score: Optional[float] = Field(default=None, ge=0.0, le=100.0, description="Overall performance score")
+
+
+class EnhancementOptimization(BaseModel):
+    """Performance-based enhancement optimization settings"""
+    effect_type: str = Field(..., description="Type of enhancement effect")
+    current_intensity: float = Field(..., ge=0.0, le=2.0, description="Current intensity setting")
+    performance_score: float = Field(..., ge=0.0, le=100.0, description="Performance score (0-100)")
+    usage_frequency: float = Field(..., ge=0.0, le=1.0, description="How often this effect is used")
+    retention_impact: float = Field(default=0.0, description="Impact on viewer retention")
+    engagement_impact: float = Field(default=0.0, description="Impact on engagement metrics")
+    recommended_adjustment: float = Field(default=0.0, description="Recommended intensity adjustment")
+
+
+class CommentEngagement(BaseModel):
+    """AI-analyzed comment for engagement boosting"""
+    comment_id: str = Field(..., description="YouTube comment ID")
+    comment_text: str = Field(..., description="Comment content")
+    engagement_score: float = Field(..., ge=0.0, le=100.0, description="AI-calculated engagement potential")
+    sentiment: str = Field(..., description="Comment sentiment (positive, negative, neutral)")
+    reply_suggestion: Optional[str] = Field(default=None, description="AI-suggested reply")
+    should_pin: bool = Field(default=False, description="Whether to pin this comment")
+    interaction_type: str = Field(default="like", description="Recommended interaction type")
+
+
+class PerformanceMetrics(BaseModel):
+    """Enhanced performance tracking for optimization"""
+    video_id: str = Field(..., description="Video identifier")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Metrics timestamp")
+    
+    # Core metrics
+    views: int = Field(default=0, ge=0, description="View count")
+    likes: int = Field(default=0, ge=0, description="Like count")
+    comments: int = Field(default=0, ge=0, description="Comment count")
+    shares: int = Field(default=0, ge=0, description="Share count")
+    
+    # Advanced metrics
+    watch_time_percentage: float = Field(default=0.0, ge=0.0, le=100.0, description="Average watch percentage")
+    retention_curve: List[float] = Field(default_factory=list, description="Retention at each 10% of video")
+    click_through_rate: float = Field(default=0.0, ge=0.0, le=1.0, description="Thumbnail CTR")
+    audience_retention_peaks: List[float] = Field(default_factory=list, description="Timestamps of retention peaks")
+    
+    # Enhancement correlation
+    active_enhancements: List[str] = Field(default_factory=list, description="Enhancements used in this video")
+    enhancement_performance: Dict[str, float] = Field(default_factory=dict, description="Per-enhancement performance scores")
+
+
+# Enhanced VideoAnalysis with new AI-powered features
+class VideoAnalysisEnhanced(VideoAnalysis):
+    """Enhanced video analysis with AI-powered cinematic and engagement features"""
+    
+    # AI-powered cinematic editing
+    camera_movements: List[CameraMovement] = Field(default_factory=list, description="AI-suggested camera movements")
+    dynamic_focus_points: List[FocusPoint] = Field(default_factory=list, description="Dynamic focus points for attention")
+    cinematic_transitions: List[Dict[str, Any]] = Field(default_factory=list, description="Transition effects between segments")
+    
+    # Advanced audio processing
+    audio_ducking_config: AudioDuckingConfig = Field(default_factory=AudioDuckingConfig, description="Audio ducking settings")
+    voice_enhancement_params: Dict[str, float] = Field(default_factory=dict, description="Voice processing parameters")
+    background_audio_zones: List[Dict[str, Any]] = Field(default_factory=list, description="Background audio management zones")
+    
+    # Engagement-driven thumbnails
+    thumbnail_variants: List[ThumbnailVariant] = Field(default_factory=list, description="A/B test thumbnail variants")
+    optimal_thumbnail_elements: Dict[str, Any] = Field(default_factory=dict, description="AI-optimized thumbnail elements")
+    
+    # Performance optimization
+    enhancement_recommendations: List[EnhancementOptimization] = Field(default_factory=list, description="Performance-based recommendations")
+    predicted_performance: Dict[str, float] = Field(default_factory=dict, description="AI-predicted performance metrics")
+    
+    # Channel management
+    comment_engagement_targets: List[CommentEngagement] = Field(default_factory=list, description="Comments to engage with")
+    auto_response_triggers: List[str] = Field(default_factory=list, description="Trigger phrases for auto-responses")
+    
+    model_config = ConfigDict(
+        use_enum_values=True,
+        validate_assignment=True,
+        extra="forbid"
     )

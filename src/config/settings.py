@@ -144,7 +144,9 @@ class APIConfig:
     
     # Gemini
     gemini_api_key: str = ""
-    gemini_model_id: str = 'gemini-2.0-flash'
+    gemini_model: str = 'gemini-2.5-flash-preview-05-20'
+    gemini_rate_limit_rpm: int = 10
+    gemini_rate_limit_daily: int = 500
     gemini_max_frames: int = 20
     gemini_timeout: int = 30
     gemini_safety_threshold: str = 'medium'
