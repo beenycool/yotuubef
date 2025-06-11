@@ -5,13 +5,14 @@ Handles Reddit authentication, post fetching, and content validation.
 
 import re
 import logging
-from typing import List, Optional, Dict, Any, Generator
+import asyncio
+from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-import praw
-import prawcore
-from praw.models import Submission
+import asyncpraw
+import asyncprawcore
+from asyncpraw.models import Submission
 
 from src.config.settings import get_config
 
@@ -38,6 +39,8 @@ class RedditPost:
     width: int = 0
     height: int = 0
     fps: float = 0
+    # Reddit-specific URLs
+    reddit_url: Optional[str] = None  # Full Reddit submission URL for API access
     
     @classmethod
     def from_submission(cls, submission: Submission) -> 'RedditPost':
@@ -77,6 +80,9 @@ class RedditPost:
             is_video = True
             video_url = submission.url
         
+        # Generate the proper Reddit submission URL
+        reddit_url = f"https://www.reddit.com/r/{submission.subreddit.display_name}/comments/{submission.id}/"
+        
         return cls(
             id=submission.id,
             title=submission.title,
@@ -95,7 +101,8 @@ class RedditPost:
             spoiler=submission.spoiler,
             width=width,
             height=height,
-            fps=fps
+            fps=fps,
+            reddit_url=reddit_url
         )
 
 
@@ -200,24 +207,42 @@ class ContentFilter:
 
 
 class RedditClient:
-    """Reddit API client for fetching and managing posts"""
+    """Async Reddit API client for fetching and managing posts"""
     
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
-        self.reddit: Optional[praw.Reddit] = None
+        self.reddit: Optional[asyncpraw.Reddit] = None
         self.content_filter = ContentFilter()
-        
-        self._initialize_client()
+        self._initialized = False
     
-    def _initialize_client(self):
-        """Initialize the Reddit client"""
+    async def __aenter__(self):
+        """Async context manager entry"""
+        await self._initialize_client()
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit"""
+        await self.close()
+    
+    async def close(self):
+        """Close the Reddit client"""
+        if self.reddit:
+            await self.reddit.close()
+            self.reddit = None
+            self._initialized = False
+    
+    async def _initialize_client(self):
+        """Initialize the async Reddit client"""
+        if self._initialized:
+            return
+            
         if not all([self.config.api.reddit_client_id, self.config.api.reddit_client_secret]):
             self.logger.error("Reddit credentials not configured")
             return
         
         try:
-            self.reddit = praw.Reddit(
+            self.reddit = asyncpraw.Reddit(
                 client_id=self.config.api.reddit_client_id,
                 client_secret=self.config.api.reddit_client_secret,
                 user_agent=self.config.api.reddit_user_agent
@@ -225,13 +250,15 @@ class RedditClient:
             
             # Test the connection
             try:
-                user = self.reddit.user.me()
+                user = await self.reddit.user.me()
                 if user:
                     self.logger.info(f"Reddit client initialized, authenticated as: {user}")
                 else:
                     self.logger.info("Reddit client initialized (read-only mode)")
-            except prawcore.ResponseException:
+            except asyncprawcore.ResponseException:
                 self.logger.info("Reddit client initialized (read-only mode)")
+            
+            self._initialized = True
                 
         except Exception as e:
             self.logger.error(f"Failed to initialize Reddit client: {e}")
@@ -239,13 +266,13 @@ class RedditClient:
     
     def is_connected(self) -> bool:
         """Check if Reddit client is properly initialized"""
-        return self.reddit is not None
+        return self.reddit is not None and self._initialized
     
-    def fetch_posts_from_subreddit(self, 
-                                   subreddit_name: str, 
-                                   sort_method: str = 'hot',
-                                   time_filter: str = 'day',
-                                   limit: int = 10) -> List[RedditPost]:
+    async def fetch_posts_from_subreddit(self,
+                                        subreddit_name: str,
+                                        sort_method: str = 'hot',
+                                        time_filter: str = 'day',
+                                        limit: int = 10) -> List[RedditPost]:
         """
         Fetch posts from a specific subreddit
         
@@ -256,11 +283,13 @@ class RedditClient:
             limit: Maximum number of posts to fetch
         """
         if not self.is_connected():
-            self.logger.error("Reddit client not connected")
-            return []
+            await self._initialize_client()
+            if not self.is_connected():
+                self.logger.error("Reddit client not connected")
+                return []
         
         try:
-            subreddit = self.reddit.subreddit(subreddit_name)
+            subreddit = await self.reddit.subreddit(subreddit_name)
             posts = []
             
             # Get submissions based on sort method
@@ -276,7 +305,7 @@ class RedditClient:
                 self.logger.warning(f"Unknown sort method: {sort_method}, using 'hot'")
                 submissions = subreddit.hot(limit=limit)
             
-            for submission in submissions:
+            async for submission in submissions:
                 try:
                     post = RedditPost.from_submission(submission)
                     posts.append(post)
@@ -287,19 +316,19 @@ class RedditClient:
             self.logger.info(f"Fetched {len(posts)} posts from r/{subreddit_name}")
             return posts
             
-        except prawcore.NotFound:
+        except asyncprawcore.NotFound:
             self.logger.error(f"Subreddit r/{subreddit_name} not found")
             return []
-        except prawcore.Forbidden:
+        except asyncprawcore.Forbidden:
             self.logger.error(f"Access forbidden to r/{subreddit_name}")
             return []
         except Exception as e:
             self.logger.error(f"Error fetching posts from r/{subreddit_name}: {e}")
             return []
     
-    def fetch_posts_from_multiple_subreddits(self, 
-                                             subreddit_names: Optional[List[str]] = None,
-                                             posts_per_subreddit: int = 5) -> List[RedditPost]:
+    async def fetch_posts_from_multiple_subreddits(self,
+                                                  subreddit_names: Optional[List[str]] = None,
+                                                  posts_per_subreddit: int = 5) -> List[RedditPost]:
         """
         Fetch posts from multiple subreddits
         
@@ -313,8 +342,8 @@ class RedditClient:
         all_posts = []
         
         for subreddit_name in subreddit_names:
-            posts = self.fetch_posts_from_subreddit(
-                subreddit_name, 
+            posts = await self.fetch_posts_from_subreddit(
+                subreddit_name,
                 limit=posts_per_subreddit
             )
             all_posts.extend(posts)
@@ -322,9 +351,9 @@ class RedditClient:
         self.logger.info(f"Fetched {len(all_posts)} total posts from {len(subreddit_names)} subreddits")
         return all_posts
     
-    def get_filtered_video_posts(self, 
-                                 subreddit_names: Optional[List[str]] = None,
-                                 max_posts: Optional[int] = None) -> List[RedditPost]:
+    async def get_filtered_video_posts(self,
+                                      subreddit_names: Optional[List[str]] = None,
+                                      max_posts: Optional[int] = None) -> List[RedditPost]:
         """
         Get filtered video posts suitable for processing
         
@@ -339,8 +368,8 @@ class RedditClient:
             max_posts = self.config.content.max_reddit_posts_to_fetch
         
         # Fetch posts from multiple subreddits
-        all_posts = self.fetch_posts_from_multiple_subreddits(
-            subreddit_names, 
+        all_posts = await self.fetch_posts_from_multiple_subreddits(
+            subreddit_names,
             posts_per_subreddit=max(5, max_posts // len(subreddit_names or self.config.content.curated_subreddits))
         )
         
@@ -359,24 +388,46 @@ class RedditClient:
         self.logger.info(f"Returning top {len(result)} posts for processing")
         return result
     
-    def get_post_by_url(self, url: str) -> Optional[RedditPost]:
+    async def get_post_by_url(self, url: str) -> Optional[RedditPost]:
         """Get a specific post by Reddit URL"""
         if not self.is_connected():
-            return None
+            await self._initialize_client()
+            if not self.is_connected():
+                return None
         
         try:
-            submission = self.reddit.submission(url=url)
+            # Handle different URL formats
+            if 'reddit.com' in url and '/comments/' in url:
+                # This is a proper Reddit submission URL
+                submission = await self.reddit.submission(url=url)
+            elif url.startswith('https://v.redd.it/'):
+                # This is a direct video URL - we cannot fetch submission data from this
+                self.logger.error(f"Cannot fetch submission data from video URL: {url}")
+                return None
+            else:
+                # Try as submission URL anyway
+                submission = await self.reddit.submission(url=url)
+            
+            await submission.load()  # Ensure submission data is loaded
             return RedditPost.from_submission(submission)
+        except asyncprawcore.exceptions.NotFound:
+            self.logger.error(f"Reddit submission not found: {url}")
+            return None
         except Exception as e:
             self.logger.error(f"Error fetching post from URL {url}: {e}")
             return None
     
-    def search_posts(self, 
-                     query: str, 
-                     subreddit_names: Optional[List[str]] = None,
-                     sort: str = 'relevance',
-                     time_filter: str = 'week',
-                     limit: int = 10) -> List[RedditPost]:
+    async def get_post_by_url_async(self, url: str) -> Optional[RedditPost]:
+        """Get a specific post by Reddit URL using async context manager"""
+        async with self:
+            return await self.get_post_by_url(url)
+    
+    async def search_posts(self,
+                          query: str,
+                          subreddit_names: Optional[List[str]] = None,
+                          sort: str = 'relevance',
+                          time_filter: str = 'week',
+                          limit: int = 10) -> List[RedditPost]:
         """
         Search for posts matching a query
         
@@ -388,16 +439,18 @@ class RedditClient:
             limit: Maximum results to return
         """
         if not self.is_connected():
-            return []
+            await self._initialize_client()
+            if not self.is_connected():
+                return []
         
         try:
             if subreddit_names:
                 # Search in specific subreddits
                 subreddit_str = '+'.join(subreddit_names)
-                subreddit = self.reddit.subreddit(subreddit_str)
+                subreddit = await self.reddit.subreddit(subreddit_str)
             else:
                 # Search all of Reddit
-                subreddit = self.reddit.subreddit('all')
+                subreddit = await self.reddit.subreddit('all')
             
             submissions = subreddit.search(
                 query=query,
@@ -407,7 +460,7 @@ class RedditClient:
             )
             
             posts = []
-            for submission in submissions:
+            async for submission in submissions:
                 try:
                     post = RedditPost.from_submission(submission)
                     posts.append(post)
@@ -421,8 +474,9 @@ class RedditClient:
         except Exception as e:
             self.logger.error(f"Error searching posts: {e}")
             return []
-
-
-def create_reddit_client() -> RedditClient:
-    """Factory function to create a Reddit client"""
-    return RedditClient()
+    
+async def create_reddit_client() -> RedditClient:
+    """Factory function to create an async Reddit client"""
+    client = RedditClient()
+    await client._initialize_client()
+    return client

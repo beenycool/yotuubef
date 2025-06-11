@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 import subprocess
 import psutil
 import os
+import time
 
 import cv2
 import numpy as np
@@ -35,13 +36,14 @@ except ImportError:
 import yt_dlp
 
 from src.config.settings import get_config
-from src.models import VideoAnalysis, TextOverlay, NarrativeSegment, VisualCue
+from src.models import VideoAnalysis, TextOverlay, NarrativeSegment, VisualCue, CallToAction
 from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 from src.utils.gpu_memory_manager import GPUMemoryManager
+from src.processing.speed_optimizer import create_speed_optimizer
 
 
 class ResourceManager:
@@ -51,7 +53,7 @@ class ResourceManager:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self.active_clips = []
-        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.4)  # Reserve 60% for AI models
+        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)  # Use 85% VRAM for maximum performance
         
         # Set FFmpeg to use GPU memory when available
         self._setup_ffmpeg_gpu_memory()
@@ -60,10 +62,12 @@ class ResourceManager:
         """Setup FFmpeg to use GPU memory when available"""
         if self.gpu_manager.device != "cpu":
             # Set environment variables for FFmpeg GPU memory optimization
-            os.environ['FFMPEG_NVENC_MEMORY_POOL_SIZE'] = '512M'  # Limit NVENC memory pool
+            os.environ['FFMPEG_NVENC_MEMORY_POOL_SIZE'] = '1024M'  # Increased from 512M to 1024M
             os.environ['FFMPEG_CUDA_DEVICE'] = '0'  # Use first GPU
             os.environ['FFMPEG_HWACCEL_OUTPUT_FORMAT'] = 'cuda'  # Keep frames in GPU memory
-            self.logger.info("FFmpeg configured for GPU memory usage")
+            os.environ['FFMPEG_NVENC_PRESET'] = 'p5'  # Balanced preset
+            os.environ['FFMPEG_NVENC_RC'] = 'vbr'  # Variable bitrate for better quality
+            self.logger.info("FFmpeg configured for GPU memory usage with increased memory pool")
         else:
             self.logger.info("FFmpeg using CPU mode")
     
@@ -151,7 +155,7 @@ class VideoDownloader:
                 'outtmpl': str(output_path.with_suffix('.%(ext)s')),
                 'quiet': True,
                 'no_warnings': True,
-                'extractaudio': False,
+                'extractaudio': False,  # Keep as video download
                 'audioformat': 'mp3',
                 'embed_chapters': False,
                 'embed_info': False,
@@ -227,6 +231,153 @@ class VideoDownloader:
         except Exception as e:
             self.logger.error(f"Error downloading video from {url}: {e}")
             return False
+    
+    def download_audio(self, url: str, output_path: Path, audio_format: str = 'mp3') -> bool:
+        """
+        Download audio-only from URL using yt-dlp
+        
+        Args:
+            url: Video URL to extract audio from
+            output_path: Path where to save the audio file
+            audio_format: Audio format (mp3, wav, m4a, etc.)
+        
+        Returns:
+            True if download successful, False otherwise
+        """
+        try:
+            # Ensure output directory exists
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Configure yt-dlp options for audio extraction
+            ydl_opts = {
+                'format': 'bestaudio/best',  # Get best audio quality
+                'outtmpl': str(output_path.with_suffix(f'.%(ext)s')),
+                'quiet': True,
+                'no_warnings': True,
+                'extractaudio': True,  # Enable audio extraction
+                'audioformat': audio_format,
+                'audioquality': '0',  # Best quality
+                'embed_chapters': False,
+                'embed_info': False,
+                'writesubtitles': False,
+                'writeautomaticsub': False,
+                'ignore_errors': False,
+                'no_check_certificate': True,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': audio_format,
+                    'preferredquality': '192' if audio_format == 'mp3' else 'best',
+                }],
+            }
+            
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    # Download and extract audio
+                    self.logger.info(f"Extracting audio from {url} as {audio_format}")
+                    ydl.download([url])
+                    
+            except Exception as download_error:
+                # Fallback strategies for audio extraction
+                error_msg = str(download_error).lower()
+                if any(phrase in error_msg for phrase in ['requested format is not available', 'no audio formats found']):
+                    self.logger.warning(f"Primary audio format failed for {url}, trying fallbacks")
+                    
+                    # Try different audio extraction strategies
+                    fallback_strategies = [
+                        {
+                            'format': 'worst',  # Any available format
+                            'extractaudio': True,
+                            'audioformat': audio_format,
+                        },
+                        {
+                            'format': 'bestaudio[ext=m4a]/bestaudio',  # Prefer m4a, then any audio
+                            'extractaudio': True,
+                            'audioformat': audio_format,
+                        },
+                        {
+                            'format': 'best',  # Download full video then extract
+                            'extractaudio': True,
+                            'audioformat': audio_format,
+                        }
+                    ]
+                    
+                    success = False
+                    for i, strategy in enumerate(fallback_strategies):
+                        try:
+                            self.logger.info(f"Trying audio fallback strategy {i+1}/{len(fallback_strategies)}")
+                            fallback_opts = ydl_opts.copy()
+                            fallback_opts.update(strategy)
+                            fallback_opts['quiet'] = False  # Enable output for debugging
+                            
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                                ydl_fallback.download([url])
+                            success = True
+                            break
+                            
+                        except Exception as fallback_error:
+                            self.logger.debug(f"Audio fallback strategy {i+1} failed: {fallback_error}")
+                            continue
+                    
+                    if not success:
+                        raise download_error
+                else:
+                    raise download_error
+            
+            # Find the downloaded audio file
+            downloaded_files = list(output_path.parent.glob(f"{output_path.stem}.*"))
+            audio_extensions = [f'.{audio_format}', '.m4a', '.webm', '.opus', '.wav']
+            
+            for file_path in downloaded_files:
+                if file_path.suffix.lower() in audio_extensions:
+                    # Rename to expected output path with correct extension
+                    final_path = output_path.with_suffix(f'.{audio_format}')
+                    if file_path != final_path:
+                        file_path.rename(final_path)
+                    
+                    self.logger.info(f"Successfully downloaded audio to {final_path}")
+                    return True
+            
+            self.logger.error(f"No audio file found after download from {url}")
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"Error downloading audio from {url}: {e}")
+            return False
+    
+    def download_both(self, url: str, video_output_path: Path, audio_output_path: Path, 
+                     audio_format: str = 'mp3') -> Dict[str, bool]:
+        """
+        Download both video and audio from URL
+        
+        Args:
+            url: Video URL to download from
+            video_output_path: Path for video file
+            audio_output_path: Path for audio file
+            audio_format: Audio format for extraction
+        
+        Returns:
+            Dict with 'video' and 'audio' success status
+        """
+        results = {
+            'video': False,
+            'audio': False
+        }
+        
+        # Download video first
+        try:
+            results['video'] = self.download_video(url, video_output_path)
+            self.logger.info(f"Video download {'successful' if results['video'] else 'failed'}")
+        except Exception as e:
+            self.logger.error(f"Video download failed: {e}")
+        
+        # Download audio separately
+        try:
+            results['audio'] = self.download_audio(url, audio_output_path, audio_format)
+            self.logger.info(f"Audio download {'successful' if results['audio'] else 'failed'}")
+        except Exception as e:
+            self.logger.error(f"Audio download failed: {e}")
+        
+        return results
     
     def _try_generic_reddit_extraction(self, url: str, output_path: Path) -> bool:
         """
@@ -421,7 +572,7 @@ class VideoEffects:
                     # Add transition if this isn't the first segment
                     if segments and speed_factor > 1.0:  # Only for speed-ups
                         transition_duration = min(0.3, (end_time - start_time) * 0.2)
-                        effect_segment = effect_segment.crossfadein(transition_duration)
+                        effect_segment = MoviePyCompat.crossfadein(effect_segment, transition_duration)
                 
                 segments.append(effect_segment)
                 current_time = end_time
@@ -753,12 +904,13 @@ class VideoEffects:
                 crop_y1 = h - crop_h
             
             # Apply crop and resize back to original size
-            focused_segment = segment.crop(x1=crop_x1, y1=crop_y1, x2=crop_x2, y2=crop_y2)
+            focused_segment = MoviePyCompat.crop(segment, x1=crop_x1, y1=crop_y1, x2=crop_x2, y2=crop_y2)
             focused_segment = MoviePyCompat.resize(focused_segment, (w, h))
             
             # Add smooth transition at the beginning and end
             if duration > 1.0:
-                focused_segment = focused_segment.crossfadein(0.3).crossfadeout(0.3)
+                focused_segment = MoviePyCompat.crossfadein(focused_segment, 0.3)
+            focused_segment = MoviePyCompat.crossfadeout(focused_segment, 0.3)
             
             self.logger.debug(f"Created focus segment at ({x:.2f}, {y:.2f}): {description}")
             return focused_segment
@@ -1055,7 +1207,7 @@ class TextOverlayProcessor:
             # Larger font size for hooks
             font_size = int(video_height * 0.08)  # 8% of video height
             
-            # Create dramatic hook text
+            # Create dramatic hook text with proper error handling
             text_clip = MoviePyCompat.create_text_clip(
                 overlay.text.upper(),  # Convert to uppercase for impact
                 fontsize=font_size,
@@ -1068,7 +1220,7 @@ class TextOverlayProcessor:
             )
             
             # Position in center for maximum impact
-            text_clip = text_clip.set_position('center')
+            text_clip = MoviePyCompat.with_position(text_clip, 'center')
             
             # Set timing
             text_clip = MoviePyCompat.with_start(text_clip, overlay.timestamp_seconds)
@@ -1085,11 +1237,16 @@ class TextOverlayProcessor:
                 
                 return zoom_factor * pulse
             
-            text_clip = text_clip.resize(hook_animation)
-            
+            # Apply resize animation using compatibility layer
+            try:
+                text_clip = MoviePyCompat.resize(text_clip, hook_animation)
+            except Exception as e:
+                self.logger.warning(f"Skipping hook text animation due to resize issue: {e}")
+
             # Add fade in/out for smooth transitions
             fade_duration = min(0.5, overlay.duration * 0.2)
-            text_clip = text_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+            text_clip = MoviePyCompat.crossfadein(text_clip, fade_duration)
+            text_clip = MoviePyCompat.crossfadeout(text_clip, fade_duration)
             
             return text_clip
             
@@ -1126,8 +1283,8 @@ class TextOverlayProcessor:
             }
             font_size = int(font_size * style_multipliers.get(overlay.style, 1.0))
             
-            # Create text clip with enhanced styling
-            text_clip = TextClip(
+            # Create text clip with enhanced styling using compatibility layer
+            text_clip = MoviePyCompat.create_text_clip(
                 overlay.text,
                 fontsize=font_size,
                 font=font_path,
@@ -1140,7 +1297,7 @@ class TextOverlayProcessor:
             
             # Enhanced positioning with better placement
             position = self._calculate_text_position(overlay.position, video_clip.size, text_clip.size)
-            text_clip = text_clip.set_position(position)
+            text_clip = MoviePyCompat.with_position(text_clip, position)
             
             # Set timing
             text_clip = MoviePyCompat.with_start(text_clip, overlay.timestamp_seconds)
@@ -1193,9 +1350,10 @@ class TextOverlayProcessor:
             
             if style == "dramatic":
                 # Dramatic entrance with scale and fade
-                text_clip = text_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+                text_clip = MoviePyCompat.crossfadein(text_clip, fade_duration)
+                text_clip = MoviePyCompat.crossfadeout(text_clip, fade_duration)
                 # Add subtle zoom effect
-                text_clip = text_clip.resize(lambda t: 1 + 0.1 * (1 - abs(2*t/duration - 1)))
+                text_clip = MoviePyCompat.resize(text_clip, lambda t: 1 + 0.1 * (1 - abs(2*t/duration - 1)))
                 
             elif style == "highlight":
                 # Pop-in effect with bounce
@@ -1207,24 +1365,27 @@ class TextOverlayProcessor:
                     else:
                         return 1.0
                 
-                text_clip = text_clip.resize(bounce_scale)
-                text_clip = text_clip.crossfadeout(fade_duration)
+                text_clip = MoviePyCompat.resize(text_clip, bounce_scale)
+                text_clip = MoviePyCompat.crossfadeout(text_clip, fade_duration)
                 
             elif style == "bold":
                 # Quick fade with slight pulse
-                text_clip = text_clip.crossfadein(fade_duration * 0.5).crossfadeout(fade_duration)
+                text_clip = MoviePyCompat.crossfadein(text_clip, fade_duration * 0.5)
+                text_clip = MoviePyCompat.crossfadeout(text_clip, fade_duration)
                 # Subtle pulse effect
-                text_clip = text_clip.resize(lambda t: 1 + 0.05 * np.sin(t * 4))
+                text_clip = MoviePyCompat.resize(text_clip, lambda t: 1 + 0.05 * np.sin(t * 4))
                 
             else:  # default
                 # Standard fade in/out
-                text_clip = text_clip.crossfadein(fade_duration).crossfadeout(fade_duration)
+                text_clip = MoviePyCompat.crossfadein(text_clip, fade_duration)
+                text_clip = MoviePyCompat.crossfadeout(text_clip, fade_duration)
             
             return text_clip
             
         except Exception as e:
             self.logger.warning(f"Error applying text animation: {e}")
-            return text_clip.crossfadein(0.2).crossfadeout(0.2)  # Fallback animation
+            text_clip = MoviePyCompat.crossfadein(text_clip, 0.2)
+            return MoviePyCompat.crossfadeout(text_clip, 0.2)  # Fallback animation
 
 
 class AudioProcessor:
@@ -1664,6 +1825,7 @@ class VideoProcessor:
         self.advanced_enhancer = AdvancedVideoEnhancer()
         self.cta_processor = CTAProcessor()
         self.thumbnail_generator = ThumbnailGenerator()
+        self.speed_optimizer = create_speed_optimizer()
     
     def process_video(self,
                       video_path: Path,
@@ -2340,12 +2502,12 @@ class VideoProcessor:
                     # Video is wider - crop width
                     new_width = int(current_height * target_aspect)
                     x_offset = (current_width - new_width) // 2
-                    clip = clip.crop(x1=x_offset, x2=x_offset + new_width)
+                    clip = MoviePyCompat.crop(clip, x1=x_offset, x2=x_offset + new_width)
                 elif current_aspect < target_aspect:
                     # Video is taller - crop height
                     new_height = int(current_width / target_aspect)
                     y_offset = (current_height - new_height) // 2
-                    clip = clip.crop(y1=y_offset, y2=y_offset + new_height)
+                    clip = MoviePyCompat.crop(clip, y1=y_offset, y2=y_offset + new_height)
                 
                 # Resize to exact target resolution
                 clip = MoviePyCompat.resize(clip, (target_width, target_height))
@@ -2371,71 +2533,80 @@ class VideoProcessor:
         try:
             output_path.parent.mkdir(parents=True, exist_ok=True)
 
-            codec = self.config.video.video_codec_cpu
-            preset = self.config.video.ffmpeg_cpu_preset
-            crf = self.config.video.ffmpeg_crf_cpu
-            bitrate = self.config.video.video_bitrate_high
-            
-            # Determine quality parameters based on profile
+            # Get quality parameters from config
             quality_profile = getattr(self.config.video, 'video_quality_profile', 'standard').lower()
+            speed_optimization = getattr(self.config.video, 'enable_speed_optimization', True)
+            speed_level = getattr(self.config.video, 'speed_optimization_level', 'aggressive').lower()
             
-            if quality_profile == 'standard':
-                crf = '23'  # Default balance
-                bitrate = '10M'
-                preset = 'medium' if 'cpu' in codec else 'p5'
-            elif quality_profile == 'high':
-                crf = '20'  # Better quality
-                bitrate = '15M'
-                preset = 'slow' if 'cpu' in codec else 'p6'
-            elif quality_profile == 'maximum':
-                crf = '18'  # Very high quality
-                bitrate = '25M'  # Even higher bitrate
-                preset = 'veryslow' if 'cpu' in codec else 'p7'
-            else:
-                self.logger.warning(f"Unknown video_quality_profile '{quality_profile}', using default 'standard' settings.")
-                crf = '23'
-                bitrate = '10M'
-                preset = 'medium' if 'cpu' in codec else 'p5'
-
-            # Check for GPU encoding availability
-            gpu_available = False
-            try:
-                subprocess.run(['nvidia-smi'], capture_output=True, check=True)
-                codec = self.config.video.video_codec_gpu
-                gpu_available = True
+            # Use speed optimizer for optimal settings if enabled
+            if speed_optimization:
+                optimal_settings = self.speed_optimizer.get_optimal_settings(quality_profile, speed_level)
+                codec = optimal_settings['codec']
+                preset = optimal_settings['preset']
+                crf = optimal_settings['crf']
+                bitrate = optimal_settings['bitrate']
+                optimal_threads = optimal_settings['threads']
+                ffmpeg_extra_args = optimal_settings['ffmpeg_params']
+                additional_params = optimal_settings['additional_params']
                 
-                # Apply GPU-specific preset based on quality profile
-                if quality_profile == 'high':
-                    preset = 'p6'
-                elif quality_profile == 'maximum':
-                    preset = 'p7'
-                else:
-                    preset = getattr(self.config.video, 'ffmpeg_gpu_preset', 'p5')
-                    
-                self.logger.info(f"Using GPU encoding: codec={codec}, preset={preset}")
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                self.logger.info(f"Using CPU encoding: codec={codec}, preset={preset}")
-
-            # Prepare ffmpeg_extra_args based on codec
-            ffmpeg_extra_args = []
-            if gpu_available and 'nvenc' in codec:
-                # For NVENC (uses CQ for quality mode)
-                ffmpeg_extra_args.extend(['-cq', crf])
+                self.logger.info(f"Using speed-optimized settings: {codec}/{preset}, CRF={crf}, {optimal_threads} threads")
+            else:
+                # Fallback to original config-based settings
+                codec = self.config.video.video_codec_cpu
+                preset = self.config.video.ffmpeg_cpu_preset
+                crf = self.config.video.ffmpeg_crf_cpu
+                bitrate = self.config.video.video_bitrate_high
+                optimal_threads = psutil.cpu_count() or 4
+                ffmpeg_extra_args = []
+                additional_params = {}
+            
+            # GPU detection and codec validation
+            if 'nvenc' in codec:
+                try:
+                    subprocess.run(['nvidia-smi'], capture_output=True, check=True)
+                    self.logger.info(f"[SUCCESS] Using GPU encoding: {codec}/{preset}")
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    self.logger.warning("NVENC requested but GPU not available, falling back to CPU")
+                    codec = 'libx264'
+                    preset = 'ultrafast'
+                    # Update ffmpeg params for CPU fallback
+                    ffmpeg_extra_args = ['-crf', crf, '-tune', 'fastdecode,zerolatency']
+            else:
+                self.logger.info(f"Using CPU encoding: {codec}/{preset}")
+            
+            # Ensure CRF/CQ parameter is correctly set based on codec
+            if 'nvenc' in codec:
+                # NVENC uses -cq instead of -crf
+                if '-crf' in ffmpeg_extra_args:
+                    crf_index = ffmpeg_extra_args.index('-crf')
+                    ffmpeg_extra_args[crf_index] = '-cq'
+                elif '-cq' not in ffmpeg_extra_args:
+                    ffmpeg_extra_args.extend(['-cq', crf])
             elif '264' in codec or '265' in codec:
-                # For x264/x265 (uses CRF for quality mode)
-                ffmpeg_extra_args.extend(['-crf', crf])
+                # x264/x265 uses -crf
+                if '-cq' in ffmpeg_extra_args:
+                    cq_index = ffmpeg_extra_args.index('-cq')
+                    ffmpeg_extra_args[cq_index] = '-crf'
+                elif '-crf' not in ffmpeg_extra_args:
+                    ffmpeg_extra_args.extend(['-crf', crf])
             
             # Write video with enhanced settings
+            self.logger.info(f"Starting video encoding with profile: {quality_profile}, speed: {speed_level}")
+            start_time = time.time()
+            
             clip.write_videofile(
                 str(output_path),
                 codec=codec,
                 preset=preset,
                 audio_codec=self.config.video.audio_codec,
-                audio_bitrate=getattr(self.config.video, 'audio_bitrate', '256k'),
-                threads=psutil.cpu_count() or 4,  # Use all available CPU cores
+                threads=optimal_threads,
                 logger='bar',  # Shows progress bar
-                ffmpeg_params=ffmpeg_extra_args  # Pass extra FFmpeg parameters
+                ffmpeg_params=ffmpeg_extra_args,
+                **additional_params
             )
+            
+            encoding_time = time.time() - start_time
+            self.logger.info(f"Video encoding completed in {encoding_time:.2f} seconds")
             
         except Exception as e:
             self.logger.error(f"Error writing video: {e}")

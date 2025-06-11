@@ -53,7 +53,7 @@ class TTSService:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self._dia_model = None
-        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.6)  # Reserve 40% VRAM for other processes
+        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.75)  # Increased for better TTS performance
         self._initialize_services()
     
     def _initialize_services(self):

@@ -71,7 +71,7 @@ class GeminiAIClient:
         if GEMINI_AVAILABLE and hasattr(self.config.api, 'gemini_api_key'):
             genai.configure(api_key=self.config.api.gemini_api_key)
             self.model = genai.GenerativeModel(
-                model_name=getattr(self.config.api, 'gemini_model', 'gemini-2.5-flash-preview-05-20')
+                model_name=getattr(self.config.api, 'gemini_model', 'gemini-2.0-flash')
             )
             self.gemini_available = True
             
@@ -139,15 +139,15 @@ class GeminiAIClient:
         Comment Type: [question/praise/criticism/spam/other]
         """
     
-    async def analyze_video_content(self, 
-                                   video_path: Path, 
-                                   reddit_content: Dict[str, Any]) -> Optional[VideoAnalysisEnhanced]:
+    async def analyze_video_content(self,
+                                   video_path: Path,
+                                   reddit_content: Any) -> Optional[VideoAnalysisEnhanced]:
         """
         Analyze video content for optimization opportunities
         
         Args:
             video_path: Path to video file
-            reddit_content: Original Reddit content data
+            reddit_content: Original Reddit content data (RedditPost object or dict)
             
         Returns:
             Enhanced video analysis or None if failed
@@ -158,15 +158,27 @@ class GeminiAIClient:
             # Extract video metadata
             video_metadata = self._extract_video_metadata(video_path)
             
-            # Prepare analysis context
-            analysis_context = {
-                'title': reddit_content.get('title', ''),
-                'description': reddit_content.get('selftext', ''),
-                'duration': video_metadata.get('duration', 60),
-                'subreddit': reddit_content.get('subreddit', ''),
-                'score': reddit_content.get('score', 0),
-                'num_comments': reddit_content.get('num_comments', 0)
-            }
+            # Prepare analysis context - handle both RedditPost object and dict
+            if hasattr(reddit_content, '__dict__') and hasattr(reddit_content, 'title') and not hasattr(reddit_content, 'get'):
+                # RedditPost object (dataclass/object with attributes)
+                analysis_context = {
+                    'title': getattr(reddit_content, 'title', ''),
+                    'description': '',  # RedditPost doesn't have selftext, could use title as description
+                    'duration': video_metadata.get('duration', 60),
+                    'subreddit': getattr(reddit_content, 'subreddit', ''),
+                    'score': getattr(reddit_content, 'score', 0),
+                    'num_comments': getattr(reddit_content, 'num_comments', 0)
+                }
+            else:
+                # Dictionary format (legacy support)
+                analysis_context = {
+                    'title': reddit_content.get('title', '') if hasattr(reddit_content, 'get') else '',
+                    'description': reddit_content.get('selftext', '') if hasattr(reddit_content, 'get') else '',
+                    'duration': video_metadata.get('duration', 60),
+                    'subreddit': reddit_content.get('subreddit', '') if hasattr(reddit_content, 'get') else '',
+                    'score': reddit_content.get('score', 0) if hasattr(reddit_content, 'get') else 0,
+                    'num_comments': reddit_content.get('num_comments', 0) if hasattr(reddit_content, 'get') else 0
+                }
             
             # Perform AI analysis
             if self.gemini_available:
@@ -528,9 +540,9 @@ class GeminiAIClient:
             self.logger.error(f"Fallback comment analysis failed: {e}")
             return "Engagement Score: 50\nSentiment: neutral\nInteraction Priority: 5"
     
-    def _convert_to_enhanced_analysis(self, 
+    def _convert_to_enhanced_analysis(self,
                                     analysis_result: Dict[str, Any],
-                                    reddit_content: Dict[str, Any]) -> VideoAnalysisEnhanced:
+                                    reddit_content: Any) -> VideoAnalysisEnhanced:
         """Convert Gemini analysis result to VideoAnalysisEnhanced model"""
         try:
             from src.models import (
@@ -588,29 +600,33 @@ class GeminiAIClient:
                 type="subscribe"
             )
             
+            # Handle both RedditPost object and dict for content extraction
+            if hasattr(reddit_content, '__dict__') and hasattr(reddit_content, 'title') and not hasattr(reddit_content, 'get'):
+                # RedditPost object (dataclass/object with attributes)
+                title = getattr(reddit_content, 'title', 'Video')
+                description = getattr(reddit_content, 'title', 'Amazing content!')[:200]  # Use title as description since RedditPost doesn't have selftext
+            else:
+                # Dictionary format
+                title = reddit_content.get('title', 'Video') if hasattr(reddit_content, 'get') else 'Video'
+                description = (reddit_content.get('selftext', '') if hasattr(reddit_content, 'get') else '')[:200] or "Amazing content!"
+            
             # Create enhanced analysis
             enhanced_analysis = VideoAnalysisEnhanced(
-                suggested_title=analysis_result.get('suggested_title', reddit_content.get('title', 'Video')),
-                summary_for_description=reddit_content.get('selftext', '')[:200] or "Amazing content!",
+                suggested_title=analysis_result.get('suggested_title', title),
+                summary_for_description=description,
                 mood=analysis_result.get('mood', 'exciting'),
                 has_clear_narrative=True,
                 original_audio_is_key=False,
                 hook_text=analysis_result.get('hook_text', 'Must watch!'),
                 hook_variations=analysis_result.get('hook_variations', ['Amazing!', 'Incredible!', 'Must see!']),
+                best_segment=segments[0] if segments else VideoSegment(start_seconds=0, end_seconds=30, reason="Main content"),
                 segments=segments,
                 visual_hook_moment=visual_hook_moment,
                 audio_hook=audio_hook,
                 thumbnail_info=thumbnail_info,
                 call_to_action=call_to_action,
-                suggested_hashtags=analysis_result.get('suggested_hashtags', ['#shorts', '#viral']),
-                engagement_score=analysis_result.get('engagement_score', 75),
-                retention_predictions=analysis_result.get('retention_predictions', {
-                    'intro_retention': 85,
-                    'mid_retention': 70,
-                    'end_retention': 55
-                }),
-                content_style=analysis_result.get('content_style', 'entertainment'),
-                target_audience=analysis_result.get('target_audience', 'general'),
+                music_genres=analysis_result.get('music_genres', ['upbeat', 'electronic']),
+                hashtags=analysis_result.get('suggested_hashtags', ['#shorts', '#viral']),
                 audio_ducking_config=AudioDuckingConfig(
                     duck_during_narration=True,
                     duck_volume=0.3,
@@ -624,7 +640,7 @@ class GeminiAIClient:
             self.logger.error(f"Enhanced analysis conversion failed: {e}")
             return self._create_minimal_analysis(reddit_content)
     
-    def _create_minimal_analysis(self, reddit_content: Dict[str, Any]) -> VideoAnalysisEnhanced:
+    def _create_minimal_analysis(self, reddit_content: Any) -> VideoAnalysisEnhanced:
         """Create minimal analysis when full analysis fails"""
         try:
             from src.models import (
@@ -632,28 +648,34 @@ class GeminiAIClient:
                 AudioDuckingConfig
             )
             
+            # Handle both RedditPost object and dict
+            if hasattr(reddit_content, '__dict__') and hasattr(reddit_content, 'title') and not hasattr(reddit_content, 'get'):
+                # RedditPost object (dataclass/object with attributes)
+                title = getattr(reddit_content, 'title', 'Engaging Video')[:60]
+                description = "Check out this content!"
+            else:
+                # Dictionary format
+                title = (reddit_content.get('title', 'Engaging Video') if hasattr(reddit_content, 'get') else 'Engaging Video')[:60]
+                description = (reddit_content.get('selftext', '') if hasattr(reddit_content, 'get') else '')[:200] or "Check out this content!"
+            
+            main_segment = VideoSegment(start_seconds=0, end_seconds=30, reason="Main content")
+            
             return VideoAnalysisEnhanced(
-                suggested_title=reddit_content.get('title', 'Engaging Video')[:60],
-                summary_for_description=reddit_content.get('selftext', '')[:200] or "Check out this content!",
+                suggested_title=title,
+                summary_for_description=description,
                 mood="exciting",
                 has_clear_narrative=True,
                 original_audio_is_key=False,
                 hook_text="You won't believe this!",
                 hook_variations=["Amazing!", "Incredible!", "Must see!"],
-                segments=[VideoSegment(start_seconds=0, end_seconds=30, reason="Main content")],
+                best_segment=main_segment,
+                segments=[main_segment],
                 visual_hook_moment=HookMoment(timestamp_seconds=5.0, description="Opening moment"),
                 audio_hook=AudioHook(type="dramatic", sound_name="whoosh", timestamp_seconds=5.0),
                 thumbnail_info=ThumbnailInfo(timestamp_seconds=5.0, reason="Opening hook", headline_text="Must Watch!"),
                 call_to_action=CallToAction(text="Subscribe for more!", type="subscribe"),
-                suggested_hashtags=["#shorts", "#viral", "#trending"],
-                engagement_score=70,
-                retention_predictions={
-                    'intro_retention': 80,
-                    'mid_retention': 65,
-                    'end_retention': 50
-                },
-                content_style="entertainment",
-                target_audience="general",
+                music_genres=["upbeat", "electronic"],
+                hashtags=["#shorts", "#viral", "#trending"],
                 audio_ducking_config=AudioDuckingConfig(
                     duck_during_narration=True,
                     duck_volume=0.3,

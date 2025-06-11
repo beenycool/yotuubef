@@ -56,14 +56,22 @@ tmp/
 
 # Logs
 *.log
-logs/
+data/logs/
+
+# Data directories (keep structure but ignore contents)
+data/temp/*
+data/results/*
+data/databases/*
+data/logs/*
+!data/README.md
 
 # OS specific
 .DS_Store
 Thumb.db
 
-# Credentials
-*.json
+# Credentials (excluding config files we want to keep)
+config/client_secret_*.json
+config/optimal_parameters.json
 *.pem
 *.key
 *.cert
@@ -71,9 +79,6 @@ Thumb.db
 *.crt
 *.csr
 .roo
-/temp_processing
 .roomodes
 aigi.md
 /.cursor
-engagement_metrics.json
-uploaded_videos.db

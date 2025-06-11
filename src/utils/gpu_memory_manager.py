@@ -26,7 +26,7 @@ class GPUMemoryManager:
     Manages GPU memory allocation and optimization for AI models
     """
     
-    def __init__(self, max_vram_usage: float = 0.8):
+    def __init__(self, max_vram_usage: float = 0.85):
         """
         Initialize GPU memory manager
         
@@ -230,6 +230,7 @@ class GPUMemoryManager:
         vram_info = self.get_vram_info()
         if vram_info:
             summary['vram'] = {
+                'available': True,
                 'total_gb': vram_info['total'] / 1024**3,
                 'used_gb': vram_info['used'] / 1024**3,
                 'free_gb': vram_info['free'] / 1024**3,

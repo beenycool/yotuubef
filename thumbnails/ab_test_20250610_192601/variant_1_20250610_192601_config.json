@@ -1,0 +1,14 @@
+{
+  "variant_id": "variant_1_20250610_192601",
+  "config": {
+    "headline_text": "Check this out!",
+    "timestamp_seconds": 5.0,
+    "text_style": "compact_punch",
+    "color_scheme": "neon_pop",
+    "emotional_tone": "energetic",
+    "optimization_strategy": "best_known"
+  },
+  "file_path": "C:\\Users\\Yaseen\\Documents\\projects\\yotuube\\thumbnails\\ab_test_20250610_192601\\variant_1_20250610_192601.jpg",
+  "created_at": "2025-06-10T19:26:01.574498",
+  "performance_data": null
+}

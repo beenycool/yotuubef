@@ -117,7 +117,7 @@ class EngagementMetricsDB:
         if db_path:
             self.db_path = db_path
         else:
-            self.db_path = self.config.paths.base_dir / "engagement_metrics.db"
+            self.db_path = self.config.paths.base_dir / "data" / "databases" / "engagement_metrics.db"
         
         self._init_database()
     

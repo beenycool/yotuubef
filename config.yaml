@@ -1,343 +1,302 @@
-# Enhanced AI-Powered YouTube Shorts Generator Configuration
-
-# API Configuration
-api:
-  # Reddit API (Required)
-  reddit_client_id: "your_reddit_client_id"
-  reddit_client_secret: "your_reddit_client_secret"
-  reddit_user_agent: "YouTubeShorts:v2.0:enhanced (by u/yourusername)"
-  
-  # YouTube API (Required)
-  youtube_api_key: "your_youtube_api_key"
-  youtube_client_secrets_file: "youtube_credentials.json"
-  
-  # Google Gemini API (Required - for enhanced AI features)
-  gemini_api_key: "your_gemini_api_key"
-  gemini_model: "gemini-2.5-flash-preview-05-20"
-  gemini_rate_limit_rpm: 10      # 10 requests per minute
-  gemini_rate_limit_daily: 500   # 500 requests per day
-  
-
-# Enhanced AI Features Configuration
 ai_features:
-  # Core enhanced features
-  enable_cinematic_editing: true
+  enable_ab_testing: true
   enable_advanced_audio: true
-  enable_ab_testing: true
   enable_auto_optimization: true
+  enable_cinematic_editing: true
   enable_proactive_management: true
-  
-  # Fallback when AI APIs are unavailable
-  use_fallback_analysis: true
   fallback_confidence_threshold: 0.6
-
-# AI-Powered Cinematic Editor Configuration
-cinematic_editing:
-  # Scene analysis parameters
-  motion_threshold: 0.3                    # Threshold for detecting significant motion (0.0-1.0)
-  min_scene_duration: 2.0                  # Minimum scene duration for analysis (seconds)
-  visual_complexity_weight: 0.4            # Weight for visual complexity in analysis
-  
-  # Camera movement generation
-  enable_dynamic_movements: true
-  max_zoom_factor: 1.8                     # Maximum zoom factor for effects
-  movement_intensity_range: [0.3, 1.5]     # Range for movement intensity
-  
-  # Composition analysis
-  composition_analysis: true
-  rule_of_thirds_weight: 0.3              # Weight for rule of thirds in composition scoring
-  symmetry_weight: 0.2                    # Weight for symmetry analysis
-  contrast_weight: 0.3                    # Weight for contrast analysis
-  leading_lines_weight: 0.2               # Weight for leading lines detection
-  
-  # Transition effects
-  enable_cinematic_transitions: true
-  transition_duration_range: [0.5, 1.5]   # Range for transition durations (seconds)
-
-# Advanced Audio Processing Configuration
-audio_processing:
-  # Intelligent audio ducking
-  enable_smart_ducking: true
-  duck_during_narration: true
-  duck_volume: 0.3                         # Volume level during ducking (0.0-1.0)
-  fade_duration: 0.5                       # Fade in/out duration (seconds)
-  smart_detection: true                    # Use AI to detect speech moments
-  preserve_music_dynamics: true           # Preserve music rhythm during ducking
-  
-  # Voice enhancement
-  enable_voice_enhancement: true
-  noise_reduction_strength: 0.3           # Noise reduction strength (0.0-1.0)
-  clarity_boost: 0.2                      # High-frequency clarity boost (0.0-1.0)
-  compression_ratio: 0.4                  # Dynamic range compression (0.0-1.0)
-  
-  # Audio analysis
-  sample_rate: 44100                      # Audio sample rate
-  voice_frequency_range: [80, 8000]       # Human voice frequency range (Hz)
-  music_analysis_window: 2048             # Window size for music analysis
-
-# Thumbnail A/B Testing & Optimization
-thumbnail_optimization:
-  # A/B testing configuration
-  enable_ab_testing: true
-  ab_test_variants: 3                     # Number of variants to generate (2-5)
-  test_duration_hours: 24                 # Duration of A/B test (hours)
-  min_impressions_for_test: 1000          # Minimum impressions before switching variants
-  
-  # Thumbnail generation
-  max_variants: 5                         # Maximum variants to generate
-  performance_window_days: 7              # Performance analysis window (days)
-  
-  # Style configurations
-  color_schemes:
-    high_contrast: {text_color: "white", stroke_color: "black", bg_overlay: 0.3}
-    warm_bright: {text_color: "yellow", stroke_color: "red", bg_overlay: 0.2}
-    cool_dramatic: {text_color: "cyan", stroke_color: "blue", bg_overlay: 0.4}
-    classic_bold: {text_color: "white", stroke_color: "black", bg_overlay: 0.1}
-    neon_pop: {text_color: "lime", stroke_color: "magenta", bg_overlay: 0.25}
-  
-  # Text styles
-  text_styles:
-    bold_impact: {font_weight: "bold", size_factor: 1.2, spacing: 1.1}
-    dramatic_tall: {font_weight: "bold", size_factor: 1.0, spacing: 1.3}
-    compact_punch: {font_weight: "bold", size_factor: 0.9, spacing: 0.9}
-    elegant_modern: {font_weight: "normal", size_factor: 1.1, spacing: 1.0}
-    explosive_caps: {font_weight: "bold", size_factor: 1.3, spacing: 1.2}
-  
-  # Emotional tones
-  emotional_tones:
-    exciting: {saturation: 1.3, contrast: 1.2, brightness: 1.1}
-    dramatic: {saturation: 0.9, contrast: 1.4, brightness: 0.9}
-    mysterious: {saturation: 0.7, contrast: 1.3, brightness: 0.8}
-    energetic: {saturation: 1.4, contrast: 1.1, brightness: 1.2}
-    professional: {saturation: 1.0, contrast: 1.1, brightness: 1.0}
-
-# Enhancement Optimizer Configuration
-optimization:
-  # Automated optimization
-  enable_auto_optimization: true
-  confidence_threshold: 0.7               # Minimum confidence for auto-adjustment (0.0-1.0)
-  max_adjustment_per_cycle: 0.2           # Maximum parameter change per cycle (0.0-1.0)
-  optimization_cycle_days: 7              # Days between optimization cycles
-  min_sample_size: 10                     # Minimum videos for statistical significance
-  
-  # Parameter constraints
-  parameter_constraints:
-    sound_effects_volume: {min: 0.1, max: 1.0, step: 0.05}
-    visual_effects_intensity: {min: 0.3, max: 2.0, step: 0.1}
-    text_overlay_duration: {min: 1.0, max: 5.0, step: 0.2}
-    speed_effect_factor: {min: 0.5, max: 2.0, step: 0.1}
-    zoom_intensity: {min: 1.0, max: 1.8, step: 0.1}
-    color_grading_strength: {min: 0.0, max: 1.0, step: 0.05}
-    hook_text_font_size: {min: 40, max: 120, step: 5}
-    background_music_volume: {min: 0.1, max: 0.8, step: 0.05}
-
-# Proactive Channel Management Configuration
-channel_management:
-  # Comment analysis and interaction
-  enable_proactive_management: true
-  comment_analysis_interval: 300          # Comment analysis interval (seconds)
-  max_comments_per_analysis: 50           # Maximum comments to analyze per cycle
-  
-  # Automated interactions
-  auto_respond_to_comments: true
-  auto_pin_high_value_comments: true
-  auto_heart_positive_comments: true
-  
-  # Comment scoring thresholds
-  high_engagement_threshold: 80           # Score threshold for high engagement (0-100)
-  pin_comment_threshold: 85               # Score threshold for pinning comments (0-100)
-  heart_comment_threshold: 60             # Score threshold for hearting comments (0-100)
-  toxicity_threshold: 20                  # Toxicity threshold for filtering (0-100)
-  
-  # Response generation
-  enable_ai_responses: true
-  response_templates:
-    positive: "Thank you so much! Glad you enjoyed the content! 🙏"
-    question: "Great question! Let me think about doing a video on this topic!"
-    appreciation: "Really appreciate the positive feedback! 😊"
-    general: "Thanks for watching and commenting! 👍"
-
-# GPU and Performance Configuration
-performance:
-  # GPU settings
-  enable_gpu_acceleration: true
-  max_vram_usage: 0.7                     # Maximum VRAM usage ratio (0.0-1.0)
-  gpu_memory_management: true
-  clear_cache_between_videos: true
-  
-  # Processing optimization
-  max_concurrent_videos: 3                # Maximum concurrent video processing
-  chunk_size_mb: 100                      # Processing chunk size (MB)
-  
-  # Memory management
-  aggressive_memory_cleanup: true
-  memory_monitoring_interval: 30          # Memory monitoring interval (seconds)
-
-# Video Processing Configuration (Enhanced)
-video_processing:
-  # Core processing settings
-  default_output_resolution: [1080, 1920] # Vertical resolution for Shorts
-  target_fps: 30                          # Target frames per second
-  video_bitrate: "5M"                     # Video bitrate
-  audio_bitrate: "128k"                   # Audio bitrate
-  
-  # Enhanced effects
-  enable_dynamic_zoom: true
-  enable_speed_ramping: true
-  enable_auto_color_grading: true
-  enable_motion_blur_compensation: true
-  
-  # Quality settings
-  video_codec: "libx264"                  # Video codec
-  audio_codec: "aac"                      # Audio codec
-  pixel_format: "yuv420p"                 # Pixel format for compatibility
-  
-  # Processing limits
-  max_video_duration: 600                 # Maximum input video duration (seconds)
-  min_video_duration: 5                   # Minimum input video duration (seconds)
-  max_file_size_mb: 500                   # Maximum input file size (MB)
-
-# TTS and Audio Configuration (Enhanced)
-tts:
-  # Primary TTS service
-  primary_service: "elevenlabs"           # Primary TTS service
-  
-  # ElevenLabs configuration
-  elevenlabs:
-    voice_id: "21m00Tcm4TlvDq8ikWAM"     # Default voice ID
-    model_id: "eleven_monolingual_v1"     # Model ID
-    voice_stability: 0.75                 # Voice stability (0.0-1.0)
-    voice_similarity_boost: 0.75          # Similarity boost (0.0-1.0)
-    enable_voice_enhancement: true
-  
-  # Alternative TTS services
-  azure:
-    voice_name: "en-US-AriaNeural"
-    speaking_rate: "medium"
-    pitch: "medium"
-  
-  edge_tts:
-    voice: "en-US-AriaNeural"
-    rate: "+0%"
-    pitch: "+0Hz"
-
-# Music and Sound Effects (Enhanced)
+  use_fallback_analysis: true
+api:
+  gemini_api_key: your_gemini_api_key
+  gemini_model: gemini-2.0-flash
+  gemini_rate_limit_daily: 500
+  gemini_rate_limit_rpm: 10
+  reddit_client_id: your_reddit_client_id
+  reddit_client_secret: your_reddit_client_secret
+  reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
+  youtube_api_key: your_youtube_api_key
+  youtube_client_secrets_file: youtube_credentials.json
 audio:
-  # Background music
+  audio_enhancement:
+    enable_limiter: true
+    enable_noise_gate: true
+    limiter_threshold: -2
+    noise_gate_threshold: -40
   background_music:
     enable: true
-    volume: 0.4                           # Background music volume (0.0-1.0)
-    fade_in_duration: 2.0                 # Fade in duration (seconds)
-    fade_out_duration: 2.0                # Fade out duration (seconds)
-    loop_if_short: true                   # Loop music if shorter than video
-  
-  # Sound effects
+    fade_in_duration: 2.0
+    fade_out_duration: 2.0
+    loop_if_short: true
+    volume: 0.4
   sound_effects:
+    apply_reverb: false
     enable: true
-    volume: 0.7                           # Sound effects volume (0.0-1.0)
-    apply_reverb: false                   # Apply reverb to sound effects
-    normalize_levels: true                # Normalize sound effect levels
-  
-  # Audio enhancement
-  audio_enhancement:
-    enable_noise_gate: true               # Enable noise gate for cleaner audio
-    noise_gate_threshold: -40             # Noise gate threshold (dB)
-    enable_limiter: true                  # Enable audio limiter
-    limiter_threshold: -2                 # Limiter threshold (dB)
-
-# File Paths and Storage
-paths:
-  base_dir: "."
-  downloads_dir: "downloads"
-  processed_dir: "processed"
-  thumbnails_dir: "thumbnails"
-  temp_dir: "temp"
-  logs_dir: "logs"
-  music_dir: "music"
-  sound_effects_dir: "sound_effects"
-  fonts_dir: "fonts"
-  
-  # Enhanced storage paths
-  ab_test_results_dir: "ab_test_results"
-  optimization_data_dir: "optimization_data"
-  performance_metrics_dir: "performance_metrics"
-  ai_models_cache_dir: "ai_models_cache"
-
-# Logging Configuration (Enhanced)
-logging:
-  level: "INFO"                           # Logging level
-  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-  file_logging: true
-  console_logging: true
-  
-  # Enhanced logging
-  log_rotation: true                      # Enable log rotation
-  max_log_size_mb: 10                     # Maximum log file size (MB)
-  backup_count: 5                         # Number of backup log files
-  
-  # Component-specific logging
-  component_levels:
-    cinematic_editor: "INFO"
-    audio_processor: "INFO"
-    thumbnail_generator: "INFO"
-    enhancement_optimizer: "INFO"
-    channel_manager: "INFO"
-    ai_client: "DEBUG"                    # More verbose for AI debugging
-
-# Database Configuration
+    normalize_levels: true
+    volume: 0.7
+audio_processing:
+  clarity_boost: 0.2
+  compression_ratio: 0.4
+  duck_during_narration: true
+  duck_volume: 0.3
+  enable_smart_ducking: true
+  enable_voice_enhancement: true
+  fade_duration: 0.5
+  music_analysis_window: 2048
+  noise_reduction_strength: 0.3
+  preserve_music_dynamics: true
+  sample_rate: 44100
+  smart_detection: true
+  voice_frequency_range:
+  - 80
+  - 8000
+channel_management:
+  auto_heart_positive_comments: true
+  auto_pin_high_value_comments: true
+  auto_respond_to_comments: true
+  comment_analysis_interval: 300
+  enable_ai_responses: true
+  enable_proactive_management: true
+  heart_comment_threshold: 60
+  high_engagement_threshold: 80
+  max_comments_per_analysis: 50
+  pin_comment_threshold: 85
+  response_templates:
+    appreciation: "Really appreciate the positive feedback! \U0001F60A"
+    general: "Thanks for watching and commenting! \U0001F44D"
+    positive: "Thank you so much! Glad you enjoyed the content! \U0001F64F"
+    question: Great question! Let me think about doing a video on this topic!
+  toxicity_threshold: 20
+cinematic_editing:
+  composition_analysis: true
+  contrast_weight: 0.3
+  enable_cinematic_transitions: true
+  enable_dynamic_movements: true
+  leading_lines_weight: 0.2
+  max_zoom_factor: 1.8
+  min_scene_duration: 2.0
+  motion_threshold: 0.3
+  movement_intensity_range:
+  - 0.3
+  - 1.5
+  rule_of_thirds_weight: 0.3
+  symmetry_weight: 0.2
+  transition_duration_range:
+  - 0.5
+  - 1.5
+  visual_complexity_weight: 0.4
 database:
-  # SQLite database for local storage
-  sqlite_db_path: "data/youtube_shorts.db"
-  
-  # Performance metrics storage
-  metrics_retention_days: 90              # Days to retain performance metrics
-  cleanup_interval_hours: 24              # Cleanup interval (hours)
-  
-  # A/B testing data
-  ab_test_retention_days: 30              # Days to retain A/B testing data
-  
-  # Optimization history
-  optimization_history_retention: 50      # Number of optimization cycles to retain
-
-# YouTube Upload Configuration (Enhanced)
+  ab_test_retention_days: 30
+  cleanup_interval_hours: 24
+  metrics_retention_days: 90
+  optimization_history_retention: 50
+  sqlite_db_path: data/youtube_shorts.db
+development:
+  debug_mode: false
+  enable_profiling: false
+  mock_api_calls: false
+  save_intermediate_files: false
+  skip_upload_in_test_mode: true
+  test_video_duration_limit: 60
+  use_sample_data: false
+feature_flags:
+  enable_advanced_analytics: true
+  enable_auto_captions: true
+  enable_auto_publishing: false
+  enable_experimental_ai: false
+  enable_real_time_monitoring: true
+  enable_style_transfer: false
+  enable_voice_cloning: false
+logging:
+  backup_count: 5
+  component_levels:
+    ai_client: DEBUG
+    audio_processor: INFO
+    channel_manager: INFO
+    cinematic_editor: INFO
+    enhancement_optimizer: INFO
+    thumbnail_generator: INFO
+  console_logging: true
+  file_logging: true
+  format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+  level: INFO
+  log_rotation: true
+  max_log_size_mb: 10
+optimization:
+  confidence_threshold: 0.7
+  enable_auto_optimization: true
+  max_adjustment_per_cycle: 0.2
+  min_sample_size: 10
+  optimization_cycle_days: 7
+  parameter_constraints:
+    background_music_volume:
+      max: 0.8
+      min: 0.1
+      step: 0.05
+    color_grading_strength:
+      max: 1.0
+      min: 0.0
+      step: 0.05
+    hook_text_font_size:
+      max: 120
+      min: 40
+      step: 5
+    sound_effects_volume:
+      max: 1.0
+      min: 0.1
+      step: 0.05
+    speed_effect_factor:
+      max: 2.0
+      min: 0.5
+      step: 0.1
+    text_overlay_duration:
+      max: 5.0
+      min: 1.0
+      step: 0.2
+    visual_effects_intensity:
+      max: 2.0
+      min: 0.3
+      step: 0.1
+    zoom_intensity:
+      max: 1.8
+      min: 1.0
+      step: 0.1
+paths:
+  ab_test_results_dir: ab_test_results
+  ai_models_cache_dir: ai_models_cache
+  base_dir: .
+  downloads_dir: downloads
+  fonts_dir: fonts
+  logs_dir: logs
+  music_dir: music
+  optimization_data_dir: optimization_data
+  performance_metrics_dir: performance_metrics
+  processed_dir: processed
+  sound_effects_dir: sound_effects
+  temp_dir: temp
+  thumbnails_dir: thumbnails
+performance:
+  aggressive_memory_cleanup: true
+  chunk_size_mb: 100
+  clear_cache_between_videos: true
+  enable_gpu_acceleration: true
+  gpu_memory_management: true
+  max_concurrent_videos: 3
+  max_vram_usage: 0.7
+  memory_monitoring_interval: 30
+thumbnail_optimization:
+  ab_test_variants: 3
+  color_schemes:
+    classic_bold:
+      bg_overlay: 0.1
+      stroke_color: black
+      text_color: white
+    cool_dramatic:
+      bg_overlay: 0.4
+      stroke_color: blue
+      text_color: cyan
+    high_contrast:
+      bg_overlay: 0.3
+      stroke_color: black
+      text_color: white
+    neon_pop:
+      bg_overlay: 0.25
+      stroke_color: magenta
+      text_color: lime
+    warm_bright:
+      bg_overlay: 0.2
+      stroke_color: red
+      text_color: yellow
+  emotional_tones:
+    dramatic:
+      brightness: 0.9
+      contrast: 1.4
+      saturation: 0.9
+    energetic:
+      brightness: 1.2
+      contrast: 1.1
+      saturation: 1.4
+    exciting:
+      brightness: 1.1
+      contrast: 1.2
+      saturation: 1.3
+    mysterious:
+      brightness: 0.8
+      contrast: 1.3
+      saturation: 0.7
+    professional:
+      brightness: 1.0
+      contrast: 1.1
+      saturation: 1.0
+  enable_ab_testing: true
+  max_variants: 5
+  min_impressions_for_test: 1000
+  performance_window_days: 7
+  test_duration_hours: 24
+  text_styles:
+    bold_impact:
+      font_weight: bold
+      size_factor: 1.2
+      spacing: 1.1
+    compact_punch:
+      font_weight: bold
+      size_factor: 0.9
+      spacing: 0.9
+    dramatic_tall:
+      font_weight: bold
+      size_factor: 1.0
+      spacing: 1.3
+    elegant_modern:
+      font_weight: normal
+      size_factor: 1.1
+      spacing: 1.0
+    explosive_caps:
+      font_weight: bold
+      size_factor: 1.3
+      spacing: 1.2
+tts:
+  azure:
+    pitch: medium
+    speaking_rate: medium
+    voice_name: en-US-AriaNeural
+  edge_tts:
+    pitch: +0Hz
+    rate: +0%
+    voice: en-US-AriaNeural
+  elevenlabs:
+    enable_voice_enhancement: true
+    model_id: eleven_monolingual_v1
+    voice_id: 21m00Tcm4TlvDq8ikWAM
+    voice_similarity_boost: 0.75
+    voice_stability: 0.75
+  primary_service: elevenlabs
+video_processing:
+  audio_bitrate: 128k
+  audio_codec: aac
+  default_output_resolution:
+  - 1080
+  - 1920
+  enable_auto_color_grading: true
+  enable_dynamic_zoom: true
+  enable_motion_blur_compensation: true
+  enable_speed_optimization: true
+  enable_speed_ramping: true
+  max_file_size_mb: 500
+  max_video_duration: 600
+  min_video_duration: 5
+  pixel_format: yuv420p
+  speed_optimization_level: aggressive
+  target_fps: 30
+  video_bitrate: 5M
+  video_codec: libx264
+  video_quality_profile: speed
 youtube:
-  # Default upload settings
-  default_privacy: "public"               # Default privacy setting
-  default_category: "22"                  # People & Blogs category
+  add_performance_hashtags: true
+  auto_generate_description: true
+  default_category: '22'
+  default_privacy: public
   enable_comments: true
   enable_ratings: true
-  
-  # Enhanced metadata
-  auto_generate_description: true
   include_enhancement_credits: true
-  add_performance_hashtags: true
-  
-  # Upload optimization
-  thumbnail_quality: 95                   # Thumbnail JPEG quality (1-100)
-  upload_retry_count: 3                   # Number of upload retries
-  upload_timeout_minutes: 10              # Upload timeout (minutes)
-
-# Development and Testing
-development:
-  debug_mode: false                       # Enable debug mode
-  mock_api_calls: false                   # Mock API calls for testing
-  save_intermediate_files: false          # Save intermediate processing files
-  enable_profiling: false                 # Enable performance profiling
-  
-  # Testing configuration
-  test_video_duration_limit: 60           # Limit test video duration (seconds)
-  skip_upload_in_test_mode: true          # Skip actual upload in test mode
-  use_sample_data: false                  # Use sample data for testing
-
-# Feature Flags
-feature_flags:
-  # Experimental features
-  enable_experimental_ai: false           # Enable experimental AI features
-  enable_advanced_analytics: true         # Enable advanced analytics
-  enable_real_time_monitoring: true       # Enable real-time performance monitoring
-  enable_auto_publishing: false           # Enable automatic publishing (be careful!)
-  
-  # Beta features
-  enable_voice_cloning: false             # Enable voice cloning (requires additional setup)
-  enable_style_transfer: false            # Enable video style transfer
-  enable_auto_captions: true              # Enable automatic caption generation
+  thumbnail_quality: 95
+  upload_retry_count: 3
+  upload_timeout_minutes: 10

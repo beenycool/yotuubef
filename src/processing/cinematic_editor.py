@@ -39,7 +39,7 @@ class CinematicEditor:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
-        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.3)  # Conservative for video processing
+        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.6)  # Increased for video processing
         
         # Cinematic parameters
         self.min_scene_duration = 2.0  # Minimum scene duration for analysis
@@ -403,8 +403,8 @@ class CinematicEditor:
             zoom_factor = 1.0
             easing = "linear"
         
-        # Calculate intensity based on scene energy
-        intensity = min((avg_motion + avg_emotion) / 2, 1.0)
+        # Calculate intensity based on scene energy with minimum threshold
+        intensity = max(min((avg_motion + avg_emotion) / 2, 1.0), 0.1)
         
         return CameraMovement(
             start_time=start_scene.timestamp,
@@ -437,7 +437,7 @@ class CinematicEditor:
             end_position=target_position,
             zoom_factor=1.5 + (scene.emotional_weight * 0.5),
             easing="ease_in_out",
-            intensity=scene.emotional_weight
+            intensity=max(scene.emotional_weight, 0.1)  # Ensure minimum intensity
         )
     
     def _suggest_speed_effects(self, scenes: List[SceneAnalysis]) -> List[SpeedEffect]:

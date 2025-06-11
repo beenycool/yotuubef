@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+import asyncprawcore.exceptions
+
 from src.config.settings import get_config
 from src.models import VideoAnalysisEnhanced, PerformanceMetrics
 from src.integrations.reddit_client import RedditClient
@@ -22,17 +24,23 @@ from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.management.channel_manager import ChannelManager
 from src.monitoring.engagement_metrics import EngagementMonitor
 from src.utils.gpu_memory_manager import GPUMemoryManager
-from src.orchestrator import VideoOrchestrator  # Import base orchestrator
+from src.processing.video_processor import VideoProcessor
 
-
-class EnhancedVideoOrchestrator(VideoOrchestrator):
+class EnhancedVideoOrchestrator:
     """
     Enhanced orchestrator with AI-powered cinematic editing, advanced audio processing,
     intelligent thumbnail optimization, and proactive channel management.
     """
     
     def __init__(self):
-        super().__init__()  # Initialize base orchestrator
+        # Basic setup
+        self.config = get_config()
+        self.logger = logging.getLogger(__name__)
+        
+        # Initialize core components
+        self.ai_client = AIClient()
+        self.youtube_client = YouTubeClient()
+        self.video_processor = VideoProcessor()
         
         # Initialize enhanced components
         self.cinematic_editor = CinematicEditor()
@@ -43,7 +51,7 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
         self.engagement_monitor = EngagementMonitor()
         
         # Enhanced GPU memory management
-        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.7)
+        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)
         
         # Enhanced workflow parameters
         self.enable_cinematic_editing = True
@@ -140,23 +148,36 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
     async def _download_and_analyze_video(self, reddit_url: str) -> Dict[str, Any]:
         """Download video and perform base analysis"""
         try:
-            # Get Reddit content
-            reddit_content = await self.reddit_client.get_video_content(reddit_url)
-            if not reddit_content or not reddit_content.get('video_url'):
-                return {'success': False, 'error': 'Failed to get Reddit content'}
+            # Get Reddit post
+            async with RedditClient() as reddit_client:
+                reddit_post = await reddit_client.get_post_by_url(reddit_url)
+            if not reddit_post or not reddit_post.video_url:
+                return {'success': False, 'error': 'Failed to get Reddit content or no video URL'}
             
-            # Download video
-            video_path = await self.video_processor.download_video(
-                reddit_content['video_url'], 
-                self.config.paths.downloads_dir
+            # Download video using the VideoDownloader component
+            output_file = self.config.paths.temp_dir / f"video_{reddit_post.id}"
+            success = self.video_processor.downloader.download_video(
+                reddit_post.video_url,
+                output_file
             )
             
-            if not video_path or not video_path.exists():
+            if not success:
                 return {'success': False, 'error': 'Video download failed'}
+            
+            # Find the actual downloaded file (yt-dlp adds extension)
+            video_path = None
+            for ext in ['.mp4', '.webm', '.mkv', '.avi']:
+                potential_path = output_file.with_suffix(ext)
+                if potential_path.exists():
+                    video_path = potential_path
+                    break
+            
+            if not video_path:
+                return {'success': False, 'error': 'Downloaded video file not found'}
             
             # Perform base AI analysis
             analysis = await self.ai_client.analyze_video_content(
-                video_path, reddit_content
+                video_path, reddit_post
             )
             
             if not analysis:
@@ -166,8 +187,14 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
                 'success': True,
                 'video_path': video_path,
                 'analysis': analysis,
-                'reddit_content': reddit_content
+                'reddit_post': reddit_post
             }
+            
+        except asyncprawcore.exceptions.ResponseException as e:
+            if e.response.status_code == 404:
+                self.logger.error(f"Error fetching post from URL {reddit_url}: received 404 HTTP response")
+                return {'success': False, 'error': f"Reddit post not found: {reddit_url}"}
+            raise # Re-raise other ResponseExceptions
             
         except Exception as e:
             self.logger.error(f"Download and analysis failed: {e}")
@@ -273,57 +300,22 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
                                        video_path: Path,
                                        analysis: VideoAnalysisEnhanced,
                                        options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        """Process video with all enhancements"""
+        """Process video with advanced audio and video enhancements"""
         try:
             self.logger.info("Processing video with advanced enhancements...")
             
-            # Prepare enhanced processing options
-            enhanced_options = {
-                'enable_cinematic_effects': True,
-                'enable_advanced_audio_ducking': True,
-                'apply_ai_optimizations': True,
-                'use_gpu_acceleration': True,
-                **(options or {})
-            }
-            
-            # Use the base video processor with enhanced analysis
-            processing_result = await self.video_processor.process_video(
-                video_path,
-                self.config.paths.processed_dir / f"enhanced_{video_path.stem}.mp4",
-                analysis,
-                generate_thumbnail=False  # We'll handle thumbnails separately
+            # This calls the main video processor
+            output_file = self.config.paths.processed_dir / f"enhanced_{video_path.stem}.mp4"
+            processing_result = self.video_processor.process_video(
+                video_path, output_file, analysis, generate_thumbnail=False
             )
             
-            if not processing_result.get('success'):
-                return processing_result
-            
-            # Apply advanced audio processing if narration exists
-            if analysis.narrative_script_segments and self.enable_advanced_audio:
-                await self._apply_advanced_audio_processing(
-                    processing_result, analysis
-                )
-            
-            self.logger.info("Enhanced video processing completed")
+            self.logger.info("Advanced enhancement processing complete")
             return processing_result
             
         except Exception as e:
-            self.logger.error(f"Enhanced processing failed: {e}")
+            self.logger.error(f"Advanced enhancement processing failed: {e}", exc_info=True)
             return {'success': False, 'error': str(e)}
-    
-    async def _apply_advanced_audio_processing(self, 
-                                             processing_result: Dict[str, Any],
-                                             analysis: VideoAnalysisEnhanced):
-        """Apply advanced audio processing with ducking"""
-        try:
-            if not analysis.audio_ducking_config.duck_during_narration:
-                return
-            
-            # This would integrate with the advanced audio processor
-            # For now, we'll log the intended processing
-            self.logger.info("Advanced audio ducking applied with smart detection")
-            
-        except Exception as e:
-            self.logger.error(f"Advanced audio processing failed: {e}")
     
     async def _generate_ab_test_thumbnails(self, 
                                          video_path: Path,
@@ -543,38 +535,49 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
             self.logger.error(f"Performance prediction failed: {e}")
             return {}
     
-    def _generate_enhancement_recommendations(self, 
+    def _generate_enhancement_recommendations(self,
                                             analysis: VideoAnalysisEnhanced) -> List[Dict[str, Any]]:
         """Generate enhancement recommendations based on analysis"""
+        from src.models import EnhancementOptimization
+        
         recommendations = []
         
         try:
             # Recommend speed effects for high-energy content
             if analysis.mood in ['exciting', 'energetic'] and len(analysis.speed_effects) < 2:
-                recommendations.append({
-                    'type': 'speed_effects',
-                    'recommendation': 'Add speed ramps for dynamic pacing',
-                    'priority': 'high',
-                    'estimated_impact': 15  # 15% improvement
-                })
+                recommendations.append(EnhancementOptimization(
+                    effect_type='speed_effects',
+                    current_intensity=0.5,
+                    performance_score=75.0,
+                    usage_frequency=0.3,
+                    retention_impact=15.0,
+                    engagement_impact=12.0,
+                    recommended_adjustment=0.2
+                ))
             
             # Recommend more visual cues for complex content
             if len(analysis.text_overlays) > 5 and len(analysis.visual_cues) < 3:
-                recommendations.append({
-                    'type': 'visual_cues',
-                    'recommendation': 'Add visual highlights to reduce text overlay dependence',
-                    'priority': 'medium',
-                    'estimated_impact': 8
-                })
+                recommendations.append(EnhancementOptimization(
+                    effect_type='visual_cues',
+                    current_intensity=0.3,
+                    performance_score=68.0,
+                    usage_frequency=0.6,
+                    retention_impact=8.0,
+                    engagement_impact=10.0,
+                    recommended_adjustment=0.4
+                ))
             
             # Recommend sound effects for engagement
             if len(analysis.sound_effects) < 3:
-                recommendations.append({
-                    'type': 'sound_effects',
-                    'recommendation': 'Add more sound effects for engagement',
-                    'priority': 'medium',
-                    'estimated_impact': 12
-                })
+                recommendations.append(EnhancementOptimization(
+                    effect_type='sound_effects',
+                    current_intensity=0.4,
+                    performance_score=72.0,
+                    usage_frequency=0.5,
+                    retention_impact=12.0,
+                    engagement_impact=15.0,
+                    recommended_adjustment=0.3
+                ))
             
         except Exception as e:
             self.logger.error(f"Recommendation generation failed: {e}")
@@ -639,7 +642,7 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
     async def get_system_status(self) -> Dict[str, Any]:
         """Get comprehensive system status"""
         try:
-            return {
+            status = {
                 'timestamp': datetime.now().isoformat(),
                 'system_status': 'operational',
                 
@@ -653,11 +656,9 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
                 },
                 
                 # Resource status
-                'resources': self.gpu_manager.get_memory_summary(),
-                
-                # Performance status
-                'optimization_summary': self.enhancement_optimizer.get_optimization_summary(),
-                'channel_management': self.channel_manager.get_management_summary(),
+                'resources': {},
+                'optimization_summary': {},
+                'channel_management': {},
                 
                 # Processing capabilities
                 'capabilities': {
@@ -672,6 +673,29 @@ class EnhancedVideoOrchestrator(VideoOrchestrator):
                     ]
                 }
             }
+            
+            # Add resource status safely
+            try:
+                status['resources'] = self.gpu_manager.get_memory_summary()
+            except Exception as e:
+                self.logger.warning(f"Could not get GPU memory summary: {e}")
+                status['resources'] = {}
+            
+            # Add optimization summary safely
+            try:
+                status['optimization_summary'] = self.enhancement_optimizer.get_optimization_summary()
+            except Exception as e:
+                self.logger.warning(f"Could not get optimization summary: {e}")
+                status['optimization_summary'] = {}
+            
+            # Add channel management summary safely
+            try:
+                status['channel_management'] = self.channel_manager.get_management_summary()
+            except Exception as e:
+                self.logger.warning(f"Could not get management summary: {e}")
+                status['channel_management'] = {}
+            
+            return status
             
         except Exception as e:
             self.logger.error(f"System status check failed: {e}")

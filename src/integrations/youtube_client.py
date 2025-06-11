@@ -8,6 +8,8 @@ import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
+import os
+import json
 
 try:
     from googleapiclient.discovery import build
@@ -31,20 +33,14 @@ class YouTubeClient:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         
-        # YouTube API setup
-        self.scopes = [
-            'https://www.googleapis.com/auth/youtube.upload',
-            'https://www.googleapis.com/auth/youtube',
-            'https://www.googleapis.com/auth/youtube.force-ssl',
-            'https://www.googleapis.com/auth/yt-analytics.readonly'
-        ]
+        # YouTube API setup - use configured scopes
+        self.scopes = self.config.api.youtube_scopes
         
         self.youtube_service = None
         self.analytics_service = None
+        self._services_initialized = False
         
-        if GOOGLE_API_AVAILABLE:
-            self._initialize_services()
-        else:
+        if not GOOGLE_API_AVAILABLE:
             self.logger.warning("Google API libraries not available - YouTube features will be limited")
     
     def _initialize_services(self):
@@ -56,41 +52,58 @@ class YouTubeClient:
                 self.analytics_service = build('youtubeAnalytics', 'v2', credentials=credentials)
                 self.logger.info("YouTube API services initialized successfully")
             else:
-                self.logger.error("Failed to obtain YouTube API credentials")
+                self.logger.warning("Failed to obtain YouTube API credentials, YouTube features will be disabled.")
                 
         except Exception as e:
             self.logger.error(f"YouTube API initialization failed: {e}")
     
+    async def _ensure_services_initialized(self):
+        """Ensure services are initialized before use"""
+        if not self._services_initialized and GOOGLE_API_AVAILABLE:
+            await asyncio.to_thread(self._initialize_services)
+            self._services_initialized = True
+    
     def _get_credentials(self):
-        """Get YouTube API credentials"""
+        """Get YouTube API credentials from environment variable only"""
         try:
-            creds = None
-            token_path = self.config.paths.base_dir / "youtube_token.json"
-            credentials_path = self.config.paths.base_dir / "youtube_credentials.json"
+            import os
+            import json
             
-            # Load existing token
-            if token_path.exists():
-                creds = Credentials.from_authorized_user_file(str(token_path), self.scopes)
+            # Only use YOUTUBE_TOKEN_JSON environment variable
+            youtube_token_env = os.getenv('YOUTUBE_TOKEN_JSON')
+            if not youtube_token_env:
+                self.logger.info("YOUTUBE_TOKEN_JSON environment variable not found. YouTube functionality will be disabled.")
+                return None
             
-            # Refresh or obtain new credentials
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
-                    if not credentials_path.exists():
-                        self.logger.error("YouTube credentials file not found")
-                        return None
-                    
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        str(credentials_path), self.scopes
-                    )
-                    creds = flow.run_local_server(port=0)
+            try:
+                token_data = json.loads(youtube_token_env)
+                creds = Credentials.from_authorized_user_info(token_data, self.scopes)
+                self.logger.info("Loaded credentials from YOUTUBE_TOKEN_JSON environment variable")
                 
-                # Save credentials for next run
-                with open(token_path, 'w') as token:
-                    token.write(creds.to_json())
-            
-            return creds
+                # If credentials are valid, return them immediately
+                if creds and creds.valid:
+                    self.logger.info("Credentials are valid and ready to use")
+                    return creds
+                
+                # If credentials exist but are expired, try to refresh
+                if creds and creds.expired and creds.refresh_token:
+                    try:
+                        creds.refresh(Request())
+                        self.logger.info("Successfully refreshed credentials from environment variable")
+                        return creds
+                    except Exception as refresh_error:
+                        self.logger.error(f"Failed to refresh credentials: {refresh_error}")
+                        return None
+                else:
+                    self.logger.error("Credentials are invalid and cannot be refreshed")
+                    return None
+                    
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Invalid JSON in YOUTUBE_TOKEN_JSON environment variable: {e}")
+                return None
+            except Exception as e:
+                self.logger.error(f"Error loading credentials from environment variable: {e}")
+                return None
             
         except Exception as e:
             self.logger.error(f"Credential handling failed: {e}")
@@ -112,6 +125,7 @@ class YouTubeClient:
             Upload result with video ID and URL
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return {'success': False, 'error': 'YouTube service not available'}
             
@@ -186,6 +200,7 @@ class YouTubeClient:
             True if successful
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return False
             
@@ -226,6 +241,7 @@ class YouTubeClient:
             Video information or None if failed
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return None
             
@@ -265,6 +281,7 @@ class YouTubeClient:
             Analytics data or None if failed
         """
         try:
+            await self._ensure_services_initialized()
             if not self.analytics_service:
                 return None
             
@@ -307,6 +324,7 @@ class YouTubeClient:
     async def _get_detailed_analytics(self, video_id: str) -> Optional[Dict[str, Any]]:
         """Get detailed analytics using YouTube Analytics API"""
         try:
+            await self._ensure_services_initialized()
             if not self.analytics_service:
                 return None
             
@@ -351,6 +369,7 @@ class YouTubeClient:
             List of recent video information
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return []
             
@@ -414,8 +433,11 @@ class YouTubeClient:
             List of comment data
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return []
+            
+            self.logger.info(f"Fetching comments for video: {video_id}")
             
             request = self.youtube_service.commentThreads().list(
                 part='snippet',
@@ -463,8 +485,11 @@ class YouTubeClient:
             True if successful
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return False
+            
+            self.logger.info(f"Replying to comment: {comment_id}")
             
             request = self.youtube_service.comments().insert(
                 part='snippet',
@@ -499,6 +524,7 @@ class YouTubeClient:
             True if successful
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return False
             
@@ -506,7 +532,7 @@ class YouTubeClient:
             # This would need to be implemented through comment moderation
             # For now, we'll log the intended action
             
-            self.logger.info(f"Heart action intended for comment {comment_id}")
+            self.logger.info(f"Hearting comment: {comment_id}")
             return True
             
         except Exception as e:
@@ -524,6 +550,7 @@ class YouTubeClient:
             True if successful
         """
         try:
+            await self._ensure_services_initialized()
             if not self.youtube_service:
                 return False
             
@@ -531,7 +558,7 @@ class YouTubeClient:
             # This would typically need to be done through YouTube Studio
             # For now, we'll log the intended action
             
-            self.logger.info(f"Pin action intended for comment {comment_id}")
+            self.logger.info(f"Pinning comment: {comment_id}")
             return True
             
         except Exception as e:
@@ -541,20 +568,18 @@ class YouTubeClient:
     async def _execute_request_async(self, request):
         """Execute API request asynchronously"""
         try:
-            # Run the request in a thread pool to avoid blocking
+            # Asynchronous execution of Google API requests
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, request.execute)
             
         except Exception as e:
-            self.logger.error(f"API request execution failed: {e}")
+            self.logger.error(f"Google API request failed: {e}")
             return None
     
     def get_client_status(self) -> Dict[str, Any]:
-        """Get YouTube client status"""
+        """Get the current status of the YouTube client"""
         return {
-            'google_api_available': GOOGLE_API_AVAILABLE,
-            'youtube_service_initialized': self.youtube_service is not None,
-            'analytics_service_initialized': self.analytics_service is not None,
-            'scopes': self.scopes,
-            'status': 'operational' if self.youtube_service else 'limited'
+            'services_initialized': self._services_initialized,
+            'youtube_service': bool(self.youtube_service),
+            'analytics_service': bool(self.analytics_service)
         }

@@ -170,7 +170,8 @@ class CTAProcessor:
                 return 1 + 0.3 * max(0, np.sin(t * 6)) if t < 1.0 else 1
             
             text_clip = MoviePyCompat.resize(text_clip, like_animation)
-            text_clip = text_clip.crossfadein(0.4).crossfadeout(0.4)
+            text_clip = MoviePyCompat.crossfadein(text_clip, 0.4)
+            text_clip = MoviePyCompat.crossfadeout(text_clip, 0.4)
             
             return text_clip
             
@@ -254,11 +255,15 @@ class CTAProcessor:
                 MoviePyCompat.with_duration(main_cta, end_duration),
                 start_time
             )
-            main_cta = main_cta.crossfadein(0.5)
+            main_cta = MoviePyCompat.crossfadein(main_cta, 0.5)
             
-            # Add pulsing animation to main CTA
-            main_cta = MoviePyCompat.resize(main_cta, lambda t: 1 + 0.05 * np.sin(t * 4))
-            end_elements.append(main_cta)
+            # Add pulsing animation to main CTA if successful
+            if main_cta is not None:
+                try:
+                    main_cta = MoviePyCompat.resize(main_cta, lambda t: 1 + 0.05 * np.sin(t * 4))
+                except Exception as e:
+                    self.logger.debug(f"Could not apply pulsing animation: {e}")
+                end_elements.append(main_cta)
             
             # Multiple action CTAs
             action_ctas = [

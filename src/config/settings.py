@@ -45,7 +45,11 @@ class VideoConfig:
     nvenc_memory_pool_size: str = '512M'  # Limit NVENC memory pool
     
     # Quality profile for easy management
-    video_quality_profile: str = 'standard'  # Options: 'standard', 'high', 'maximum'
+    video_quality_profile: str = 'standard'  # Options: 'standard', 'high', 'maximum', 'speed'
+    
+    # Speed optimization settings
+    enable_speed_optimization: bool = True
+    speed_optimization_level: str = 'aggressive'  # Options: 'conservative', 'balanced', 'aggressive'
     
     # Processing
     chunk_size: int = 30  # seconds
@@ -203,15 +207,17 @@ class ContentConfig:
 class PathConfig:
     """File and directory path configuration"""
     base_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve())
-    temp_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "temp_processing")
+    temp_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "data" / "temp")
+    processed_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "processed")
     
     # Asset directories
     music_folder: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "music")
     sound_effects_folder: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "sound_effects")
     fonts_folder: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "fonts")
+    thumbnails_dir: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "thumbnails")
     
     # Files
-    db_file: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "uploaded_videos.db")
+    db_file: Path = field(default_factory=lambda: Path(__file__).parent.parent.parent.resolve() / "data" / "databases" / "uploaded_videos.db")
     watermark_path: Optional[Path] = None
     
     # Credentials and tokens
@@ -268,6 +274,8 @@ class ConfigManager:
             
             # Update configurations from YAML
             self._update_from_dict(self.video, yaml_config.get('video', {}))
+            # Also check for video_processing section 
+            self._update_from_dict(self.video, yaml_config.get('video_processing', {}))
             self._update_from_dict(self.text_overlay, yaml_config.get('text_overlay', {}))
             self._update_from_dict(self.effects, yaml_config.get('effects', {}))
             self._update_from_dict(self.audio, yaml_config.get('audio', {}))
@@ -378,6 +386,7 @@ class ConfigManager:
         self.paths.music_folder.mkdir(parents=True, exist_ok=True)
         self.paths.sound_effects_folder.mkdir(parents=True, exist_ok=True)
         self.paths.fonts_folder.mkdir(parents=True, exist_ok=True)
+        self.paths.thumbnails_dir.mkdir(parents=True, exist_ok=True)
         
         # Log validation results
         if errors:
@@ -439,3 +448,43 @@ def init_config(config_file: Optional[Union[str, Path]] = None) -> ConfigManager
     global config
     config = ConfigManager(config_file)
     return config
+
+def setup_logging(level: str = "INFO") -> None:
+    """Set up logging configuration with Unicode support"""
+    import sys
+    import codecs
+    
+    # Create handlers with proper encoding
+    console_handler = logging.StreamHandler()
+    
+    # For Windows, wrap stdout to handle Unicode properly
+    if sys.platform.startswith('win'):
+        # Ensure console can handle UTF-8
+        if hasattr(console_handler.stream, 'reconfigure'):
+            try:
+                console_handler.stream.reconfigure(encoding='utf-8', errors='replace')
+            except Exception:
+                # If reconfigure fails, use a wrapper
+                console_handler.stream = codecs.getwriter('utf-8')(
+                    console_handler.stream.buffer, errors='replace'
+                )
+        else:
+            # Fallback for older Python versions
+            console_handler.stream = codecs.getwriter('utf-8')(
+                console_handler.stream.buffer if hasattr(console_handler.stream, 'buffer') else console_handler.stream,
+                errors='replace'
+            )
+    
+    # File handler with UTF-8 encoding
+    file_handler = logging.FileHandler('youtube_generator.log', encoding='utf-8')
+    
+    # Set format for both handlers
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+    
+    # Configure root logger
+    logging.basicConfig(
+        level=getattr(logging, level.upper()),
+        handlers=[console_handler, file_handler]
+    )
