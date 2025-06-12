@@ -238,7 +238,8 @@ class RedditClient:
             return
             
         if not all([self.config.api.reddit_client_id, self.config.api.reddit_client_secret]):
-            self.logger.error("Reddit credentials not configured")
+            self.logger.error("Reddit credentials not configured. Please set REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in your .env file")
+            self.logger.error("Run 'python test_reddit_connection.py' for setup instructions")
             return
         
         try:
@@ -260,6 +261,14 @@ class RedditClient:
             
             self._initialized = True
                 
+        except asyncprawcore.ResponseException as e:
+            if e.response.status == 401:
+                self.logger.error("Reddit authentication failed: Invalid credentials")
+                self.logger.error("Please check your REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in the .env file")
+                self.logger.error("Run 'python test_reddit_connection.py' to verify your Reddit API setup")
+            else:
+                self.logger.error(f"Reddit API error during initialization: HTTP {e.response.status} - {e}")
+            self.reddit = None
         except Exception as e:
             self.logger.error(f"Failed to initialize Reddit client: {e}")
             self.reddit = None
@@ -321,6 +330,14 @@ class RedditClient:
             return []
         except asyncprawcore.Forbidden:
             self.logger.error(f"Access forbidden to r/{subreddit_name}")
+            return []
+        except asyncprawcore.ResponseException as e:
+            if e.response.status == 401:
+                self.logger.error(f"Authentication failed for r/{subreddit_name}: Reddit API credentials invalid or expired")
+                self.logger.error("Please check your REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in the .env file")
+                self.logger.error("Run 'python test_reddit_connection.py' to verify your Reddit API setup")
+            else:
+                self.logger.error(f"Reddit API error for r/{subreddit_name}: HTTP {e.response.status} - {e}")
             return []
         except Exception as e:
             self.logger.error(f"Error fetching posts from r/{subreddit_name}: {e}")
@@ -413,6 +430,16 @@ class RedditClient:
         except asyncprawcore.exceptions.NotFound:
             self.logger.error(f"Reddit submission not found: {url}")
             return None
+        except asyncprawcore.ResponseException as e:
+            if e.response.status == 401:
+                self.logger.error(f"Authentication failed for URL {url}: Reddit API credentials invalid or expired")
+                self.logger.error("Please check your REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in the .env file")
+                self.logger.error("Run 'python test_reddit_connection.py' to verify your Reddit API setup")
+            elif e.response.status == 404:
+                self.logger.error(f"Reddit post not found: {url}")
+            else:
+                self.logger.error(f"Reddit API error for URL {url}: HTTP {e.response.status} - {e}")
+            return None
         except Exception as e:
             self.logger.error(f"Error fetching post from URL {url}: {e}")
             return None
@@ -471,6 +498,14 @@ class RedditClient:
             self.logger.info(f"Found {len(posts)} posts matching query: {query}")
             return posts
             
+        except asyncprawcore.ResponseException as e:
+            if e.response.status == 401:
+                self.logger.error("Authentication failed during search: Reddit API credentials invalid or expired")
+                self.logger.error("Please check your REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET in the .env file")
+                self.logger.error("Run 'python test_reddit_connection.py' to verify your Reddit API setup")
+            else:
+                self.logger.error(f"Reddit API error during search: HTTP {e.response.status} - {e}")
+            return []
         except Exception as e:
             self.logger.error(f"Error searching posts: {e}")
             return []

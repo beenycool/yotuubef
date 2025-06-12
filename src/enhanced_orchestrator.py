@@ -13,7 +13,7 @@ from datetime import datetime
 import asyncprawcore.exceptions
 
 from src.config.settings import get_config
-from src.models import VideoAnalysisEnhanced, PerformanceMetrics
+from src.models import VideoAnalysis, VideoAnalysisEnhanced, PerformanceMetrics
 from src.integrations.reddit_client import RedditClient
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
@@ -191,7 +191,7 @@ class EnhancedVideoOrchestrator:
             }
             
         except asyncprawcore.exceptions.ResponseException as e:
-            if e.response.status_code == 404:
+            if e.response.status == 404:
                 self.logger.error(f"Error fetching post from URL {reddit_url}: received 404 HTTP response")
                 return {'success': False, 'error': f"Reddit post not found: {reddit_url}"}
             raise # Re-raise other ResponseExceptions
@@ -304,10 +304,15 @@ class EnhancedVideoOrchestrator:
         try:
             self.logger.info("Processing video with advanced enhancements...")
             
+            # Select appropriate background music based on analysis
+            background_music_path = self._select_background_music(analysis)
+            
             # This calls the main video processor
             output_file = self.config.paths.processed_dir / f"enhanced_{video_path.stem}.mp4"
             processing_result = self.video_processor.process_video(
-                video_path, output_file, analysis, generate_thumbnail=False
+                video_path, output_file, analysis,
+                background_music_path=background_music_path,
+                generate_thumbnail=False
             )
             
             self.logger.info("Advanced enhancement processing complete")
@@ -768,3 +773,81 @@ class EnhancedVideoOrchestrator:
                 'error': str(e),
                 'partial_results': results if 'results' in locals() else []
             }
+    
+    def _select_background_music(self, analysis: VideoAnalysis) -> Optional[Path]:
+        """
+        Select appropriate background music based on video analysis
+        
+        Args:
+            analysis: Video analysis containing mood and genre information
+            
+        Returns:
+            Path to selected music file or None if no suitable music found
+        """
+        try:
+            music_folder = self.config.paths.music_folder
+            
+            if not music_folder.exists():
+                self.logger.warning("Music folder not found")
+                return None
+            
+            # Determine mood/genre from analysis
+            mood = getattr(analysis, 'mood', 'upbeat').lower()
+            music_genres = getattr(analysis, 'music_genres', ['upbeat'])
+            
+            # Map moods to music categories
+            mood_mapping = {
+                'exciting': 'upbeat',
+                'dramatic': 'suspenseful', 
+                'calm': 'relaxing',
+                'peaceful': 'relaxing',
+                'funny': 'funny',
+                'humorous': 'funny',
+                'emotional': 'emotional',
+                'sad': 'emotional',
+                'heartwarming': 'emotional',
+                'informative': 'informative',
+                'educational': 'informative',
+                'mysterious': 'suspenseful',
+                'tense': 'suspenseful'
+            }
+            
+            # Get music category from mood or genres
+            target_category = mood_mapping.get(mood, 'upbeat')
+            
+            # If analysis has specific genres, use the first one
+            if music_genres and music_genres[0] in ['upbeat', 'emotional', 'suspenseful', 'relaxing', 'funny', 'informative']:
+                target_category = music_genres[0]
+            
+            # Look for music in the target category folder first
+            category_folder = music_folder / target_category
+            if category_folder.exists():
+                music_files = list(category_folder.glob("*.mp3"))
+                if music_files:
+                    selected = music_files[0]  # Take first available
+                    self.logger.info(f"Selected background music from {target_category}: {selected.name}")
+                    return selected
+            
+            # Fallback: look in main music folder
+            main_music_files = list(music_folder.glob("*.mp3"))
+            if main_music_files:
+                selected = main_music_files[0]  # Take first available
+                self.logger.info(f"Selected fallback background music: {selected.name}")
+                return selected
+            
+            # Last resort: look in any subfolder
+            for subfolder in ['upbeat', 'relaxing', 'informative', 'funny', 'emotional', 'suspenseful']:
+                subfolder_path = music_folder / subfolder
+                if subfolder_path.exists():
+                    music_files = list(subfolder_path.glob("*.mp3"))
+                    if music_files:
+                        selected = music_files[0]
+                        self.logger.info(f"Selected background music from {subfolder}: {selected.name}")
+                        return selected
+            
+            self.logger.warning("No background music files found")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to select background music: {e}")
+            return None

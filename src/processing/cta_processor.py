@@ -447,3 +447,32 @@ class CTAProcessor:
         except Exception as e:
             self.logger.warning(f"Error creating subscribe button image: {e}")
             return None
+    
+    def add_auditory_ctas(self,
+                         audio_clip: AudioFileClip,
+                         analysis: VideoAnalysis,
+                         video_duration: float) -> AudioFileClip:
+        """
+        Add auditory CTAs (voice prompts, sound effects) to enhance engagement
+        
+        Args:
+            audio_clip: Source audio clip
+            analysis: AI analysis with CTA requirements
+            video_duration: Duration of the video
+            
+        Returns:
+            Audio with auditory CTAs added
+        """
+        try:
+            # For now, return the original audio clip
+            # In the future, this could add voice prompts like:
+            # - "Don't forget to like and subscribe!"
+            # - Sound effects for CTAs
+            # - Audio notifications for engagement
+            
+            self.logger.info("Auditory CTAs processing completed (placeholder)")
+            return audio_clip
+            
+        except Exception as e:
+            self.logger.error(f"Error adding auditory CTAs: {e}")
+            return audio_clip

@@ -64,9 +64,22 @@ class EnhancedYouTubeGenerator:
         print("=" * 40)
         for i, post in enumerate(result['posts'], 1):
             duration_str = f" ({post.duration:.1f}s)" if post.duration else ""
-            print(f"{i}. r/{post.subreddit} - {post.title[:60]}...")
-            print(f"   Score: {post.score} | Comments: {post.num_comments}{duration_str}")
-            print(f"   URL: {post.url}")
+            # Handle Unicode characters by encoding/decoding properly
+            try:
+                title = post.title[:60].encode('ascii', 'ignore').decode('ascii')
+                if len(post.title) > 60:
+                    title += "..."
+                print(f"{i}. r/{post.subreddit} - {title}")
+                print(f"   Score: {post.score} | Comments: {post.num_comments}{duration_str}")
+                print(f"   URL: {post.url}")
+            except UnicodeEncodeError:
+                # Fallback: replace problematic characters
+                safe_title = post.title[:60].encode('ascii', 'replace').decode('ascii')
+                if len(post.title) > 60:
+                    safe_title += "..."
+                print(f"{i}. r/{post.subreddit} - {safe_title}")
+                print(f"   Score: {post.score} | Comments: {post.num_comments}{duration_str}")
+                print(f"   URL: {post.url}")
             print()
         print("=" * 40)
     
@@ -577,7 +590,7 @@ Examples:
     
     if not args.command:
         # Default to 'find' command when no command is specified
-        print("🔍 No command specified, defaulting to 'find' mode...")
+        print("No command specified, defaulting to 'find' mode...")
         print("Use 'python main.py find --help' for more options\n")
         
         # Create a mock args object with default find parameters
@@ -737,10 +750,10 @@ def run_main():
         # Run the main function
         return asyncio.run(main())
     except KeyboardInterrupt:
-        print("\n⏹️ Startup interrupted by user")
+        print("\nStartup interrupted by user")
         return 0
     except Exception as e:
-        print(f"🚨 Critical startup error: {e}")
+        print(f"Critical startup error: {e}")
         return 1
 
 

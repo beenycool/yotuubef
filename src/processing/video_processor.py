@@ -1886,7 +1886,7 @@ class VideoProcessor:
                     final_audio = composite_audio
                 
                 # Stage 6: Combine and Render Final Video
-                final_clip = final_visuals.set_audio(final_audio) if final_audio else final_visuals
+                final_clip = final_visuals.with_audio(final_audio) if final_audio else final_visuals
                 video_success = self._render_video(final_clip, output_path, temp_manager)
                 
                 if video_success:
@@ -2070,18 +2070,106 @@ class VideoProcessor:
             elif base_composite:
                 return base_composite
             else:
-                self.logger.warning("No audio elements available")
-                return None
+                self.logger.warning("No audio elements available, creating fallback background music")
+                # Try to create fallback background music from available files
+                try:
+                    video_duration = getattr(source_clip, 'duration', 60.0)
+                    fallback_audio = self._create_fallback_audio(video_duration, resource_manager)
+                    if fallback_audio:
+                        self.logger.info("Created fallback background music")
+                        return fallback_audio
+                    else:
+                        # Last resort: create silent audio
+                        self.logger.warning("Creating silent audio as final fallback")
+                        from moviepy.audio.AudioClip import AudioClip
+                        silent_audio = AudioClip(make_frame=lambda t: [0, 0], duration=video_duration)
+                        resource_manager.register_clip(silent_audio)
+                        return silent_audio
+                except Exception as e:
+                    self.logger.error(f"Failed to create fallback audio: {e}")
+                    return None
             
         except Exception as e:
             self.logger.error(f"Error in audio synthesis: {e}")
             # Return original audio as fallback
             return source_audio if source_audio else None
     
+    def _create_fallback_audio(self,
+                               video_duration: float,
+                               resource_manager: ResourceManager) -> Optional[AudioFileClip]:
+        """
+        Create fallback background music when no other audio elements are available
+        
+        Args:
+            video_duration: Duration of the video
+            resource_manager: Resource manager for cleanup
+            
+        Returns:
+            AudioFileClip with background music or None if failed
+        """
+        try:
+            # Try to find any available music file
+            music_files = []
+            
+            # Check main music directory
+            for music_file in self.config.paths.music_folder.glob("*.mp3"):
+                if music_file.exists():
+                    music_files.append(music_file)
+            
+            # Check music subdirectories
+            for subdir in ["upbeat", "relaxing", "informative", "funny", "emotional", "suspenseful"]:
+                subdir_path = self.config.paths.music_folder / subdir
+                if subdir_path.exists():
+                    for music_file in subdir_path.glob("*.mp3"):
+                        if music_file.exists():
+                            music_files.append(music_file)
+            
+            if not music_files:
+                self.logger.warning("No music files found for fallback audio")
+                return None
+            
+            # Select first available music file
+            selected_music = music_files[0]
+            self.logger.info(f"Using fallback music: {selected_music.name}")
+            
+            # Create background music with basic processing
+            try:
+                from moviepy.audio.io.AudioFileClip import AudioFileClip
+                
+                music_clip = AudioFileClip(str(selected_music))
+                resource_manager.register_clip(music_clip)
+                
+                # Adjust duration to match video
+                if music_clip.duration < video_duration:
+                    # Loop the music if it's shorter than video
+                    loops_needed = int(video_duration / music_clip.duration) + 1
+                    music_clip = music_clip.loop(duration=video_duration)
+                    resource_manager.register_clip(music_clip)
+                elif music_clip.duration > video_duration:
+                    # Trim the music if it's longer than video
+                    music_clip = music_clip.subclipped(0, video_duration)
+                    resource_manager.register_clip(music_clip)
+                
+                # Apply volume adjustment
+                background_volume = self.config.audio.background_music_volume
+                music_clip = music_clip.with_volume_multiplied(background_volume)
+                resource_manager.register_clip(music_clip)
+                
+                self.logger.info(f"Created fallback background music: {video_duration:.2f}s at {background_volume:.2f} volume")
+                return music_clip
+                
+            except Exception as e:
+                self.logger.error(f"Failed to process fallback music {selected_music}: {e}")
+                return None
+                
+        except Exception as e:
+            self.logger.error(f"Error creating fallback audio: {e}")
+            return None
+    
     def _compose_visuals(self,
-                         source_clip: VideoFileClip,
-                         analysis: VideoAnalysis,
-                         resource_manager: ResourceManager) -> VideoFileClip:
+                        source_clip: VideoFileClip,
+                        analysis: VideoAnalysis,
+                        resource_manager: ResourceManager) -> VideoFileClip:
         """
         Stage 3: Compose all visual effects, overlays, and enhancements
         
@@ -2421,7 +2509,7 @@ class VideoProcessor:
             )
             
             if final_audio:
-                audio_clip = video_clip.set_audio(final_audio)
+                audio_clip = video_clip.with_audio(final_audio)
                 resource_manager.register_clip(final_audio)
                 resource_manager.register_clip(audio_clip)
                 return audio_clip

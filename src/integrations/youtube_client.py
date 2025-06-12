@@ -50,6 +50,7 @@ class YouTubeClient:
             if credentials:
                 self.youtube_service = build('youtube', 'v3', credentials=credentials)
                 self.analytics_service = build('youtubeAnalytics', 'v2', credentials=credentials)
+                self._services_initialized = True
                 self.logger.info("YouTube API services initialized successfully")
             else:
                 self.logger.warning("Failed to obtain YouTube API credentials, YouTube features will be disabled.")
@@ -64,50 +65,99 @@ class YouTubeClient:
             self._services_initialized = True
     
     def _get_credentials(self):
-        """Get YouTube API credentials from environment variable only"""
+        """Get YouTube API credentials from environment variable or file"""
         try:
             import os
             import json
+            from pathlib import Path
             
-            # Only use YOUTUBE_TOKEN_JSON environment variable
+            # First try YOUTUBE_TOKEN_JSON environment variable
             youtube_token_env = os.getenv('YOUTUBE_TOKEN_JSON')
-            if not youtube_token_env:
-                self.logger.info("YOUTUBE_TOKEN_JSON environment variable not found. YouTube functionality will be disabled.")
-                return None
-            
-            try:
-                token_data = json.loads(youtube_token_env)
-                creds = Credentials.from_authorized_user_info(token_data, self.scopes)
-                self.logger.info("Loaded credentials from YOUTUBE_TOKEN_JSON environment variable")
-                
-                # If credentials are valid, return them immediately
-                if creds and creds.valid:
-                    self.logger.info("Credentials are valid and ready to use")
-                    return creds
-                
-                # If credentials exist but are expired, try to refresh
-                if creds and creds.expired and creds.refresh_token:
-                    try:
-                        creds.refresh(Request())
-                        self.logger.info("Successfully refreshed credentials from environment variable")
-                        return creds
-                    except Exception as refresh_error:
-                        self.logger.error(f"Failed to refresh credentials: {refresh_error}")
-                        return None
-                else:
-                    self.logger.error("Credentials are invalid and cannot be refreshed")
-                    return None
+            if youtube_token_env:
+                try:
+                    token_data = json.loads(youtube_token_env)
+                    creds = Credentials.from_authorized_user_info(token_data, self.scopes)
+                    self.logger.info("Loaded credentials from YOUTUBE_TOKEN_JSON environment variable")
                     
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Invalid JSON in YOUTUBE_TOKEN_JSON environment variable: {e}")
-                return None
-            except Exception as e:
-                self.logger.error(f"Error loading credentials from environment variable: {e}")
-                return None
+                    # If credentials are valid, return them immediately
+                    if creds and creds.valid:
+                        self.logger.info("Credentials are valid and ready to use")
+                        return creds
+                    
+                    # If credentials exist but are expired, try to refresh
+                    if creds and creds.expired and creds.refresh_token:
+                        try:
+                            creds.refresh(Request())
+                            self.logger.info("Successfully refreshed credentials from environment variable")
+                            # Update the environment variable with refreshed token
+                            self._update_token_in_env(creds)
+                            return creds
+                        except Exception as refresh_error:
+                            self.logger.warning(f"Failed to refresh credentials from env var: {refresh_error}")
+                            # Fall through to try file-based approach
+                    
+                except json.JSONDecodeError as e:
+                    self.logger.error(f"Invalid JSON in YOUTUBE_TOKEN_JSON environment variable: {e}")
+                    return None
+                except Exception as e:
+                    self.logger.warning(f"Error loading credentials from environment variable: {e}")
+                    # Fall through to try file-based approach
+            
+            # Try file-based approach as fallback
+            token_file = self.config.paths.youtube_token_file
+            if token_file and token_file.exists():
+                try:
+                    with open(token_file, 'r') as f:
+                        token_data = json.load(f)
+                    creds = Credentials.from_authorized_user_info(token_data, self.scopes)
+                    self.logger.info(f"Loaded credentials from token file: {token_file}")
+                    
+                    # If credentials are valid, return them immediately
+                    if creds and creds.valid:
+                        self.logger.info("File-based credentials are valid and ready to use")
+                        return creds
+                    
+                    # If credentials exist but are expired, try to refresh
+                    if creds and creds.expired and creds.refresh_token:
+                        try:
+                            creds.refresh(Request())
+                            self.logger.info("Successfully refreshed credentials from token file")
+                            # Update the token file with refreshed credentials
+                            with open(token_file, 'w') as f:
+                                f.write(creds.to_json())
+                            self.logger.info(f"Updated token file: {token_file}")
+                            return creds
+                        except Exception as refresh_error:
+                            self.logger.error(f"Failed to refresh credentials from file: {refresh_error}")
+                            return None
+                    else:
+                        self.logger.error("File-based credentials are invalid and cannot be refreshed")
+                        return None
+                        
+                except (json.JSONDecodeError, FileNotFoundError) as e:
+                    self.logger.error(f"Error loading credentials from token file: {e}")
+                    return None
+            
+            self.logger.warning("No valid YouTube credentials found. YouTube functionality will be disabled.")
+            self.logger.info("To fix this:")
+            self.logger.info("1. Set YOUTUBE_TOKEN_JSON environment variable with valid credentials, OR")
+            self.logger.info("2. Run 'python auth_youtube.py' to create/refresh youtube_token.json file")
+            return None
             
         except Exception as e:
             self.logger.error(f"Credential handling failed: {e}")
             return None
+    
+    def _update_token_in_env(self, creds):
+        """Update the YOUTUBE_TOKEN_JSON environment variable with refreshed credentials"""
+        try:
+            # Note: This only updates the current process environment
+            # For persistent updates, the user would need to update their .env file
+            import os
+            os.environ['YOUTUBE_TOKEN_JSON'] = creds.to_json()
+            self.logger.info("Updated YOUTUBE_TOKEN_JSON environment variable with refreshed credentials")
+        except Exception as e:
+            self.logger.warning(f"Failed to update environment variable: {e}")
     
     async def upload_video(self, 
                           video_path: str,

@@ -11,8 +11,8 @@ from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
-# Load environment variables first
-load_dotenv()
+# Load environment variables from .env file, but don't override existing system variables
+load_dotenv(override=False)
 
 @dataclass
 class VideoConfig:
@@ -312,11 +312,22 @@ class ConfigManager:
     
     def _load_env_config(self):
         """Load configuration from environment variables"""
-        # API credentials
-        self.api.reddit_client_id = os.getenv('REDDIT_CLIENT_ID', '')
-        self.api.reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', '')
-        self.api.reddit_user_agent = os.getenv('REDDIT_USER_AGENT', self.api.reddit_user_agent)
-        self.api.gemini_api_key = os.getenv('GEMINI_API_KEY', '')
+        # API credentials - only set if not empty to avoid overriding with empty strings
+        reddit_client_id = os.getenv('REDDIT_CLIENT_ID', '').strip()
+        if reddit_client_id:
+            self.api.reddit_client_id = reddit_client_id
+            
+        reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', '').strip()
+        if reddit_client_secret:
+            self.api.reddit_client_secret = reddit_client_secret
+            
+        reddit_user_agent = os.getenv('REDDIT_USER_AGENT', '').strip()
+        if reddit_user_agent:
+            self.api.reddit_user_agent = reddit_user_agent
+            
+        gemini_api_key = os.getenv('GEMINI_API_KEY', '').strip()
+        if gemini_api_key:
+            self.api.gemini_api_key = gemini_api_key
         
         # File paths
         if os.getenv('GOOGLE_CLIENT_SECRETS_FILE'):
@@ -368,9 +379,9 @@ class ConfigManager:
         
         # Check essential API credentials
         if not self.api.reddit_client_id:
-            errors.append("REDDIT_CLIENT_ID not set")
+            warnings.append("REDDIT_CLIENT_ID not set - Reddit functionality will be disabled")
         if not self.api.reddit_client_secret:
-            errors.append("REDDIT_CLIENT_SECRET not set")
+            warnings.append("REDDIT_CLIENT_SECRET not set - Reddit functionality will be disabled")
         if not self.api.gemini_api_key:
             warnings.append("GEMINI_API_KEY not set - AI analysis will be disabled")
         
