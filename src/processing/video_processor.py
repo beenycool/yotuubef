@@ -1886,7 +1886,7 @@ class VideoProcessor:
                     final_audio = composite_audio
                 
                 # Stage 6: Combine and Render Final Video
-                final_clip = final_visuals.with_audio(final_audio) if final_audio else final_visuals
+                final_clip = MoviePyCompat.with_audio(final_visuals, final_audio) if final_audio else final_visuals
                 video_success = self._render_video(final_clip, output_path, temp_manager)
                 
                 if video_success:
@@ -2135,24 +2135,37 @@ class VideoProcessor:
             # Create background music with basic processing
             try:
                 from moviepy.audio.io.AudioFileClip import AudioFileClip
+                from moviepy.editor import concatenate_audioclips
+                from src.processing.video_processor_fixes import MoviePyCompat
+                import math
                 
                 music_clip = AudioFileClip(str(selected_music))
                 resource_manager.register_clip(music_clip)
                 
                 # Adjust duration to match video
                 if music_clip.duration < video_duration:
-                    # Loop the music if it's shorter than video
-                    loops_needed = int(video_duration / music_clip.duration) + 1
-                    music_clip = music_clip.loop(duration=video_duration)
-                    resource_manager.register_clip(music_clip)
-                elif music_clip.duration > video_duration:
-                    # Trim the music if it's longer than video
-                    music_clip = music_clip.subclipped(0, video_duration)
+                    # Loop the music if it's shorter than video (using correct approach)
+                    loops_needed = math.ceil(video_duration / music_clip.duration)
+                    music_clips = [music_clip] * loops_needed
+                    music_clip = concatenate_audioclips(music_clips)
                     resource_manager.register_clip(music_clip)
                 
-                # Apply volume adjustment
+                # Trim to video duration if needed (using MoviePyCompat)
+                if music_clip.duration > video_duration:
+                    music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
+                    resource_manager.register_clip(music_clip)
+                
+                # Apply volume adjustment (using correct method)
                 background_volume = self.config.audio.background_music_volume
-                music_clip = music_clip.with_volume_multiplied(background_volume)
+                try:
+                    music_clip = music_clip.with_volume_scaled(background_volume)
+                except Exception as e:
+                    self.logger.warning(f"Error applying volume to fallback music: {e}")
+                    # Fallback to trying volumex method
+                    try:
+                        music_clip = music_clip.volumex(background_volume)
+                    except Exception as e2:
+                        self.logger.warning(f"Error with volumex fallback: {e2}")
                 resource_manager.register_clip(music_clip)
                 
                 self.logger.info(f"Created fallback background music: {video_duration:.2f}s at {background_volume:.2f} volume")
@@ -2509,7 +2522,7 @@ class VideoProcessor:
             )
             
             if final_audio:
-                audio_clip = video_clip.with_audio(final_audio)
+                audio_clip = MoviePyCompat.with_audio(video_clip, final_audio)
                 resource_manager.register_clip(final_audio)
                 resource_manager.register_clip(audio_clip)
                 return audio_clip
