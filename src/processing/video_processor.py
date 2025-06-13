@@ -2149,10 +2149,9 @@ class VideoProcessor:
                     music_clips = [music_clip] * loops_needed
                     music_clip = concatenate_audioclips(music_clips)
                     resource_manager.register_clip(music_clip)
-                
-                # Trim to video duration if needed (using MoviePyCompat)
-                if music_clip.duration > video_duration:
-                    music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
+                elif music_clip.duration > video_duration:
+                    # Trim the music if it's longer than video
+                    music_clip = music_clip.subclipped(0, video_duration)
                     resource_manager.register_clip(music_clip)
                 
                 # Apply volume adjustment (using correct method)
