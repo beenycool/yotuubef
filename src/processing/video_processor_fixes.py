@@ -334,6 +334,46 @@ class MoviePyCompat:
             return 2
     
     @staticmethod
+    def with_audio(video_clip, audio_clip):
+        """Set audio for video clip with compatibility between MoviePy versions"""
+        # First check if neither method exists
+        if not hasattr(video_clip, 'with_audio') and not hasattr(video_clip, 'set_audio'):
+            raise AttributeError("Neither 'with_audio' nor 'set_audio' method found on video clip")
+        
+        # Try MoviePy 2.x method first
+        if hasattr(video_clip, 'with_audio'):
+            try:
+                return video_clip.with_audio(audio_clip)
+            except Exception as e:
+                # If with_audio fails, try set_audio if available
+                if hasattr(video_clip, 'set_audio'):
+                    try:
+                        return video_clip.set_audio(audio_clip)
+                    except Exception as e2:
+                        # If both fail, log and return original clip
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f"Failed to set audio on video clip with both methods: {e}, {e2}")
+                        return video_clip
+                else:
+                    # Only with_audio available but it failed
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to set audio on video clip: {e}")
+                    return video_clip
+        
+        # Fall back to MoviePy 1.x method (set_audio only)
+        elif hasattr(video_clip, 'set_audio'):
+            try:
+                return video_clip.set_audio(audio_clip)
+            except Exception as e:
+                # If set_audio fails, log and return original clip
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to set audio on video clip: {e}")
+                return video_clip
+    
+    @staticmethod
     def crossfadein(clip, duration):
         """Compatible crossfadein method"""
         if clip is None:
@@ -563,3 +603,8 @@ class VideoProcessorFixes:
     def get_audio_channels(clip):
         """Get audio channels using compatibility layer"""
         return MoviePyCompat.get_audio_channels(clip)
+    
+    @staticmethod
+    def with_audio(video_clip, audio_clip):
+        """Set audio for video clip using compatibility layer"""
+        return MoviePyCompat.with_audio(video_clip, audio_clip)
