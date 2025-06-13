@@ -152,7 +152,7 @@ class TestVideoProcessorFallbackAudio:
         # Mock the music directory to contain our test file
         video_processor.config.paths.music_folder = mock_music_file.parent
         
-        with patch('src.processing.video_processor.AudioFileClip') as mock_audio_clip_class:
+        with patch('moviepy.audio.io.AudioFileClip.AudioFileClip') as mock_audio_clip_class:
             with patch('src.processing.video_processor.MoviePyCompat') as mock_compat:
                 
                 # Setup mocks
