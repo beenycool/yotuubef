@@ -2151,7 +2151,7 @@ class VideoProcessor:
                     resource_manager.register_clip(music_clip)
                 elif music_clip.duration > video_duration:
                     # Trim the music if it's longer than video
-                    music_clip = music_clip.subclipped(0, video_duration)
+                    music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
                     resource_manager.register_clip(music_clip)
                 
                 # Apply volume adjustment (using correct method)
