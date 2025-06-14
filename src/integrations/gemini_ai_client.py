@@ -12,13 +12,15 @@ from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 try:
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types
     GEMINI_AVAILABLE = True
 except ImportError:
     GEMINI_AVAILABLE = False
 
 from src.config.settings import get_config
 from src.models import VideoAnalysisEnhanced
+from src.integrations.narrative_analyzer import NarrativeAnalysis
 
 
 class RateLimiter:
@@ -64,6 +66,9 @@ class GeminiAIClient:
     Google Gemini AI client for enhanced video analysis and processing tasks
     """
     
+    # Class variable to track if Gemini has been initialized
+    _gemini_initialized = False
+    
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
@@ -74,10 +79,9 @@ class GeminiAIClient:
         # Initialize Gemini if available
         if GEMINI_AVAILABLE and gemini_api_key:
             try:
-                genai.configure(api_key=gemini_api_key)
-                self.model = genai.GenerativeModel(
-                    model_name=os.getenv('GEMINI_MODEL') or getattr(self.config.api, 'gemini_model', 'gemini-2.0-flash-exp')
-                )
+                # Initialize the new unified client
+                self.client = genai.Client(api_key=gemini_api_key)
+                self.model_name = os.getenv('GEMINI_MODEL') or getattr(self.config.api, 'gemini_model', 'gemini-2.0-flash-001')
                 self.gemini_available = True
                 
                 # Setup rate limiting
@@ -85,7 +89,10 @@ class GeminiAIClient:
                 daily_limit = int(os.getenv('GEMINI_RATE_LIMIT_DAILY', '0')) or getattr(self.config.api, 'gemini_rate_limit_daily', 500)
                 self.rate_limiter = RateLimiter(rpm_limit, daily_limit)
                 
-                self.logger.info(f"Gemini AI initialized with model: {self.model.model_name}")
+                # Only log Gemini initialization once per application run
+                if not GeminiAIClient._gemini_initialized:
+                    self.logger.info(f"Gemini AI initialized with new unified SDK, model: {self.model_name}")
+                    GeminiAIClient._gemini_initialized = True
                 
             except Exception as e:
                 self.gemini_available = False
@@ -94,7 +101,7 @@ class GeminiAIClient:
         else:
             self.gemini_available = False
             if not GEMINI_AVAILABLE:
-                self.logger.warning("Gemini library not installed - install with: pip install google-generativeai")
+                self.logger.warning("Gemini library not installed - install with: pip install google-genai")
             else:
                 self.logger.warning("Gemini API key not found - set GEMINI_API_KEY environment variable or add to config")
         
@@ -266,11 +273,12 @@ class GeminiAIClient:
             
             self.logger.debug(f"Sending prompt to Gemini: {prompt[:100]}...")
             
-            # Make API call
+            # Make API call using new unified SDK
             response = await asyncio.to_thread(
-                self.model.generate_content,
-                prompt,
-                generation_config=genai.GenerationConfig(
+                self.client.models.generate_content,
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
                     temperature=0.7,
                     max_output_tokens=2000,
                     candidate_count=1
@@ -484,9 +492,10 @@ class GeminiAIClient:
             )
             
             response = await asyncio.to_thread(
-                self.model.generate_content,
-                full_prompt,
-                generation_config=genai.GenerationConfig(
+                self.client.models.generate_content,
+                model=self.model_name,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
                     temperature=0.3,
                     max_output_tokens=800,
                     candidate_count=1
@@ -700,3 +709,333 @@ class GeminiAIClient:
         except Exception as e:
             self.logger.error(f"Minimal analysis creation failed: {e}")
             raise
+    
+    async def analyze_video_content_with_narrative(self,
+                                                 video_path: Path,
+                                                 reddit_content: Any,
+                                                 narrative_analysis: NarrativeAnalysis) -> Optional[VideoAnalysisEnhanced]:
+        """
+        Enhanced video analysis that leverages narrative analysis for strategic storytelling.
+        
+        This method implements the strategic narrative approach by:
+        1. Using narrative gaps to guide AI analysis
+        2. Creating persona-specific prompts
+        3. Generating Hook-Story-Payoff structure
+        4. Optimizing for the identified narrative opportunities
+        
+        Args:
+            video_path: Path to video file
+            reddit_content: Original Reddit content data
+            narrative_analysis: Pre-computed narrative analysis
+            
+        Returns:
+            Enhanced video analysis optimized for narrative storytelling
+        """
+        try:
+            self.logger.info(f"Starting narrative-enhanced video analysis (score: {narrative_analysis.narrative_potential_score})")
+            
+            # Extract video metadata
+            video_metadata = self._extract_video_metadata(video_path)
+            
+            # Prepare narrative-enhanced context
+            narrative_context = self._create_narrative_context(reddit_content, video_metadata, narrative_analysis)
+            
+            # Use narrative-specific prompts
+            if self.gemini_available:
+                analysis_result = await self._analyze_with_narrative_gemini(narrative_context, narrative_analysis)
+            else:
+                analysis_result = self._analyze_with_narrative_fallback(narrative_context, narrative_analysis)
+            
+            if not analysis_result:
+                self.logger.warning("Narrative-enhanced analysis failed, falling back to standard analysis")
+                return await self.analyze_video_content(video_path, reddit_content)
+            
+            # Convert to VideoAnalysisEnhanced with narrative enhancements
+            enhanced_analysis = self._convert_to_narrative_enhanced_analysis(
+                analysis_result, reddit_content, narrative_analysis
+            )
+            
+            self.logger.info("Narrative-enhanced video analysis completed successfully")
+            return enhanced_analysis
+            
+        except Exception as e:
+            self.logger.error(f"Narrative-enhanced video analysis failed: {e}")
+            # Fall back to standard analysis
+            return await self.analyze_video_content(video_path, reddit_content)
+    
+    def _create_narrative_context(self, reddit_content: Any, video_metadata: Dict[str, Any],
+                                narrative_analysis: NarrativeAnalysis) -> Dict[str, Any]:
+        """Create narrative-enhanced context for AI analysis"""
+        
+        # Handle both RedditPost object and dict
+        if hasattr(reddit_content, '__dict__') and hasattr(reddit_content, 'title') and not hasattr(reddit_content, 'get'):
+            # RedditPost object
+            title = getattr(reddit_content, 'title', '')
+            subreddit = getattr(reddit_content, 'subreddit', '')
+            score = getattr(reddit_content, 'score', 0)
+            num_comments = getattr(reddit_content, 'num_comments', 0)
+        else:
+            # Dictionary format
+            title = reddit_content.get('title', '') if hasattr(reddit_content, 'get') else ''
+            subreddit = reddit_content.get('subreddit', '') if hasattr(reddit_content, 'get') else ''
+            score = reddit_content.get('score', 0) if hasattr(reddit_content, 'get') else 0
+            num_comments = reddit_content.get('num_comments', 0) if hasattr(reddit_content, 'get') else 0
+        
+        return {
+            'title': title,
+            'subreddit': subreddit,
+            'score': score,
+            'num_comments': num_comments,
+            'duration': video_metadata.get('duration', 60),
+            'narrative_score': narrative_analysis.narrative_potential_score,
+            'story_arc': narrative_analysis.story_arc,
+            'narrator_persona': narrative_analysis.narrator_persona,
+            'narrative_gaps': narrative_analysis.narrative_gaps,
+            'character_profile': narrative_analysis.character_profile,
+            'hook_story_payoff': narrative_analysis.hook_story_payoff
+        }
+    
+    async def _analyze_with_narrative_gemini(self, context: Dict[str, Any],
+                                           narrative_analysis: NarrativeAnalysis) -> Optional[Dict[str, Any]]:
+        """Analyze content using Gemini with narrative-enhanced prompts"""
+        try:
+            # Wait for rate limit if needed
+            await self.rate_limiter.wait_if_needed()
+            
+            # Create narrative-specific prompt
+            narrative_prompt = self._create_narrative_prompt(context, narrative_analysis)
+            
+            self.logger.debug(f"Sending narrative-enhanced prompt to Gemini...")
+            
+            # Make API call using new unified SDK
+            response = await asyncio.to_thread(
+                self.client.models.generate_content,
+                model=self.model_name,
+                contents=narrative_prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.8,  # Slightly higher for creativity
+                    max_output_tokens=2500,  # More tokens for detailed narrative
+                    candidate_count=1
+                )
+            )
+            
+            # Parse response
+            content = response.text
+            self.logger.debug(f"Gemini narrative response received ({len(content)} chars)")
+            
+            # Try to extract JSON from response
+            try:
+                start_idx = content.find('{')
+                end_idx = content.rfind('}') + 1
+                
+                if start_idx >= 0 and end_idx > start_idx:
+                    json_str = content[start_idx:end_idx]
+                    result = json.loads(json_str)
+                    
+                    # Enhance with narrative insights
+                    result['narrative_enhanced'] = True
+                    result['narrative_score'] = narrative_analysis.narrative_potential_score
+                    return result
+                    
+            except json.JSONDecodeError:
+                pass
+            
+            # If JSON parsing fails, create structured response from text
+            return self._parse_narrative_gemini_response(content, context, narrative_analysis)
+            
+        except Exception as e:
+            self.logger.error(f"Narrative Gemini analysis failed: {e}")
+            return None
+    
+    def _create_narrative_prompt(self, context: Dict[str, Any],
+                               narrative_analysis: NarrativeAnalysis) -> str:
+        """Create narrative-specific prompt for Gemini"""
+        
+        # Get narrative gaps description
+        gaps_description = "\n".join([
+            f"- {gap.gap_type}: {gap.description} (Strategy: {gap.fill_strategy})"
+            for gap in narrative_analysis.narrative_gaps
+        ]) if narrative_analysis.narrative_gaps else "- No specific gaps identified"
+        
+        # Get character description
+        character_desc = ""
+        if narrative_analysis.character_profile:
+            character_desc = f"""
+Character Analysis:
+- Type: {narrative_analysis.character_profile.type}
+- Description: {narrative_analysis.character_profile.description}
+- Traits: {', '.join(narrative_analysis.character_profile.personality_traits)}
+- Emotional State: {narrative_analysis.character_profile.emotional_state}
+- Narrative Role: {narrative_analysis.character_profile.narrative_role}
+"""
+        
+        return f"""
+You are a master storyteller creating content for YouTube Shorts. Analyze this {context['duration']:.1f}s video and create a compelling narrative strategy.
+
+SOURCE CONTENT:
+Title: {context['title']}
+Subreddit: {context['subreddit']}
+Score: {context['score']} | Comments: {context['num_comments']}
+
+NARRATIVE ANALYSIS:
+Story Arc: {narrative_analysis.story_arc}
+Narrator Persona: {narrative_analysis.narrator_persona}
+Narrative Potential Score: {narrative_analysis.narrative_potential_score}/100
+
+{character_desc}
+
+NARRATIVE GAPS TO LEVERAGE:
+{gaps_description}
+
+HOOK-STORY-PAYOFF STRUCTURE:
+Hook: {narrative_analysis.hook_story_payoff.get('hook', 'TBD')}
+Story: {narrative_analysis.hook_story_payoff.get('story', 'TBD')}
+Payoff: {narrative_analysis.hook_story_payoff.get('payoff', 'TBD')}
+
+Create a detailed analysis in JSON format that leverages these narrative opportunities:
+
+{{
+    "suggested_title": "Engaging title that hints at the narrative mystery (max 60 chars)",
+    "hook_text": "Opening hook that creates curiosity about the narrative gap",
+    "hook_variations": ["Alternative hook 1", "Alternative hook 2", "Alternative hook 3"],
+    "narrative_script_segments": [
+        {{
+            "text": "Hook narration text",
+            "time_seconds": 0.0,
+            "intended_duration_seconds": 3.0,
+            "emotion": "curious",
+            "pacing": "normal"
+        }},
+        {{
+            "text": "Story narration text",
+            "time_seconds": 3.0,
+            "intended_duration_seconds": 10.0,
+            "emotion": "{narrative_analysis.narrator_persona}",
+            "pacing": "normal"
+        }},
+        {{
+            "text": "Payoff narration text",
+            "time_seconds": 13.0,
+            "intended_duration_seconds": 5.0,
+            "emotion": "satisfied",
+            "pacing": "slow"
+        }}
+    ],
+    "mood": "Mood that supports the narrative arc",
+    "key_moments": [
+        {{"timestamp": 5.0, "description": "Moment that reveals narrative gap"}},
+        {{"timestamp": 15.0, "description": "Moment that provides resolution"}}
+    ],
+    "visual_cues": [
+        {{"timestamp_seconds": 5.0, "description": "Visual emphasis point", "effect_type": "zoom", "intensity": 1.2}},
+        {{"timestamp_seconds": 15.0, "description": "Resolution emphasis", "effect_type": "highlight", "intensity": 1.0}}
+    ],
+    "suggested_hashtags": ["#narrativedriven", "#storytelling", "#{narrative_analysis.story_arc}"],
+    "engagement_score": {narrative_analysis.narrative_potential_score},
+    "retention_predictions": {{
+        "intro_retention": {min(95, narrative_analysis.narrative_potential_score + 10)},
+        "mid_retention": {max(70, narrative_analysis.narrative_potential_score - 5)},
+        "end_retention": {max(60, narrative_analysis.narrative_potential_score - 10)}
+    }},
+    "optimal_thumbnail_timestamp": "Timestamp that best represents the narrative mystery",
+    "call_to_action": "CTA that references the narrative resolution",
+    "content_style": "{narrative_analysis.story_arc}",
+    "target_audience": "Audience who appreciates {narrative_analysis.narrator_persona} storytelling"
+}}
+
+Focus on creating content that transforms passive viewing into active engagement through strategic storytelling.
+"""
+    
+    def _parse_narrative_gemini_response(self, response_text: str, context: Dict[str, Any],
+                                       narrative_analysis: NarrativeAnalysis) -> Dict[str, Any]:
+        """Parse Gemini narrative response into structured format"""
+        try:
+            # Enhanced fallback that incorporates narrative insights
+            base_analysis = self._parse_gemini_text_response(response_text, context)
+            
+            # Enhance with narrative elements
+            base_analysis.update({
+                'narrative_enhanced': True,
+                'narrative_score': narrative_analysis.narrative_potential_score,
+                'hook_text': narrative_analysis.hook_story_payoff.get('hook', base_analysis.get('hook_text', 'Must watch!')),
+                'mood': narrative_analysis.story_arc,
+                'content_style': narrative_analysis.story_arc,
+                'target_audience': f"Fans of {narrative_analysis.narrator_persona} content",
+                'suggested_hashtags': base_analysis.get('suggested_hashtags', []) + [f'#{narrative_analysis.story_arc}', '#storytelling']
+            })
+            
+            return base_analysis
+            
+        except Exception as e:
+            self.logger.warning(f"Narrative response parsing failed: {e}")
+            return None
+    
+    def _analyze_with_narrative_fallback(self, context: Dict[str, Any],
+                                       narrative_analysis: NarrativeAnalysis) -> Dict[str, Any]:
+        """Enhanced fallback analysis using narrative insights"""
+        try:
+            # Start with base fallback
+            base_analysis = self._analyze_with_fallback(context)
+            
+            # Enhance with narrative insights
+            base_analysis.update({
+                'narrative_enhanced': True,
+                'narrative_score': narrative_analysis.narrative_potential_score,
+                'hook_text': narrative_analysis.hook_story_payoff.get('hook', 'You won\'t believe this!'),
+                'mood': narrative_analysis.story_arc,
+                'content_style': narrative_analysis.story_arc,
+                'call_to_action': f'Subscribe for more {narrative_analysis.narrator_persona} content!',
+                'target_audience': f'Fans of {narrative_analysis.narrator_persona} storytelling'
+            })
+            
+            # Add narrative-specific hashtags
+            narrative_tags = [f'#{narrative_analysis.story_arc}', '#storytelling', f'#{narrative_analysis.narrator_persona}']
+            base_analysis['suggested_hashtags'] = list(set(base_analysis.get('suggested_hashtags', []) + narrative_tags))
+            
+            return base_analysis
+            
+        except Exception as e:
+            self.logger.error(f"Narrative fallback analysis failed: {e}")
+            return {}
+    
+    def _convert_to_narrative_enhanced_analysis(self, analysis_result: Dict[str, Any],
+                                              reddit_content: Any,
+                                              narrative_analysis: NarrativeAnalysis) -> VideoAnalysisEnhanced:
+        """Convert analysis result to VideoAnalysisEnhanced with narrative enhancements"""
+        try:
+            # Use the standard conversion as base
+            base_enhanced = self._convert_to_enhanced_analysis(analysis_result, reddit_content)
+            
+            # Override with narrative-specific enhancements
+            if narrative_analysis.hook_story_payoff.get('hook'):
+                base_enhanced.hook_text = narrative_analysis.hook_story_payoff['hook']
+            
+            # Add narrative script segments if provided
+            if 'narrative_script_segments' in analysis_result:
+                try:
+                    from src.models import NarrativeSegment
+                    narrative_segments = []
+                    for seg in analysis_result['narrative_script_segments']:
+                        narrative_segments.append(NarrativeSegment(
+                            text=seg.get('text', ''),
+                            time_seconds=seg.get('time_seconds', 0),
+                            intended_duration_seconds=seg.get('intended_duration_seconds', 3),
+                            emotion=seg.get('emotion', 'neutral'),
+                            pacing=seg.get('pacing', 'normal')
+                        ))
+                    base_enhanced.narrative_script_segments = narrative_segments
+                except Exception as e:
+                    self.logger.warning(f"Failed to create narrative segments: {e}")
+            
+            # Enhance mood with narrative arc
+            base_enhanced.mood = narrative_analysis.story_arc
+            
+            # Mark as narrative enhanced
+            if hasattr(base_enhanced, 'fallback'):
+                base_enhanced.fallback = False
+            
+            return base_enhanced
+            
+        except Exception as e:
+            self.logger.error(f"Narrative-enhanced conversion failed: {e}")
+            return self._convert_to_enhanced_analysis(analysis_result, reddit_content)

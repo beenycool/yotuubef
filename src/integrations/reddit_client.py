@@ -6,7 +6,7 @@ Handles Reddit authentication, post fetching, and content validation.
 import re
 import logging
 import asyncio
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -15,103 +15,17 @@ import asyncprawcore
 from asyncpraw.models import Submission
 
 from src.config.settings import get_config
-
-
-@dataclass
-class RedditPost:
-    """Structured representation of a Reddit post with quality metrics"""
-    id: str
-    title: str
-    url: str
-    subreddit: str
-    author: str
-    score: int
-    upvote_ratio: float
-    num_comments: int
-    created_utc: datetime
-    is_video: bool
-    video_url: Optional[str] = None
-    thumbnail_url: Optional[str] = None
-    duration: Optional[float] = None
-    nsfw: bool = False
-    spoiler: bool = False
-    # Quality metrics for source filtering
-    width: int = 0
-    height: int = 0
-    fps: float = 0
-    # Reddit-specific URLs
-    reddit_url: Optional[str] = None  # Full Reddit submission URL for API access
-    
-    @classmethod
-    def from_submission(cls, submission: Submission) -> 'RedditPost':
-        """Create RedditPost from praw Submission with quality metrics"""
-        # Determine if this is a video post
-        is_video = False
-        video_url = None
-        duration = None
-        width = 0
-        height = 0
-        fps = 0
-        
-        if hasattr(submission, 'is_video') and submission.is_video:
-            is_video = True
-            if hasattr(submission, 'media') and submission.media:
-                reddit_video = submission.media.get('reddit_video', {})
-                video_url = reddit_video.get('fallback_url') or reddit_video.get('hls_url')
-                duration = reddit_video.get('duration')
-                width = reddit_video.get('width', 0)
-                height = reddit_video.get('height', 0)
-                # Try to extract FPS if available
-                if hasattr(submission.media, 'reddit_video'):
-                    fps = reddit_video.get('fps', 0)
-                    # Estimate FPS from duration and frame count if available
-                    if not fps and reddit_video.get('duration') and reddit_video.get('scanned_size'):
-                        try:
-                            fps = reddit_video['scanned_size'] / reddit_video['duration']
-                        except (ZeroDivisionError, TypeError):
-                            fps = 0
-        elif submission.url and any(submission.url.lower().endswith(ext) for ext in ['.mp4', '.webm', '.mov', '.avi']):
-            is_video = True
-            video_url = submission.url
-        elif 'youtube.com' in submission.url or 'youtu.be' in submission.url:
-            is_video = True
-            video_url = submission.url
-        elif 'v.redd.it' in submission.url:
-            is_video = True
-            video_url = submission.url
-        
-        # Generate the proper Reddit submission URL
-        reddit_url = f"https://www.reddit.com/r/{submission.subreddit.display_name}/comments/{submission.id}/"
-        
-        return cls(
-            id=submission.id,
-            title=submission.title,
-            url=submission.url,
-            subreddit=submission.subreddit.display_name,
-            author=str(submission.author) if submission.author else "[deleted]",
-            score=submission.score,
-            upvote_ratio=submission.upvote_ratio,
-            num_comments=submission.num_comments,
-            created_utc=datetime.fromtimestamp(submission.created_utc),
-            is_video=is_video,
-            video_url=video_url,
-            thumbnail_url=submission.thumbnail if hasattr(submission, 'thumbnail') else None,
-            duration=duration,
-            nsfw=submission.over_18,
-            spoiler=submission.spoiler,
-            width=width,
-            height=height,
-            fps=fps,
-            reddit_url=reddit_url
-        )
+from src.models import RedditPost, NarrativeAnalysis
+from src.integrations.narrative_analyzer import NarrativeAnalyzer
 
 
 class ContentFilter:
-    """Content filtering and validation for Reddit posts"""
+    """Content filtering and validation for Reddit posts with narrative analysis"""
     
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
+        self.narrative_analyzer = NarrativeAnalyzer()
     
     def contains_forbidden_words(self, text: Optional[str]) -> bool:
         """Check if text contains forbidden words"""
@@ -204,6 +118,53 @@ class ContentFilter:
                 self.logger.debug(f"Post rejected: {post.title[:50]}... - {suitability['reason']}")
         
         return suitable_posts
+    
+    def filter_posts_with_narrative_analysis(self, posts: List[RedditPost], min_narrative_score: int = 60) -> List[Tuple[RedditPost, NarrativeAnalysis]]:
+        """
+        Filter posts using both traditional suitability and narrative potential analysis.
+        
+        Args:
+            posts: List of RedditPost objects to analyze
+            min_narrative_score: Minimum narrative potential score (1-100)
+            
+        Returns:
+            List of tuples containing (RedditPost, NarrativeAnalysis) for posts that pass both filters
+        """
+        suitable_posts_with_analysis = []
+        
+        for post in posts:
+            # First, check basic suitability
+            suitability = self.is_suitable_for_monetization(post)
+            
+            if not suitability['is_suitable']:
+                self.logger.debug(f"Post rejected on basic suitability: {post.title[:50]}... - {suitability['reason']}")
+                continue
+            
+            # Then, analyze narrative potential
+            try:
+                narrative_analysis = self.narrative_analyzer.analyze_narrative_potential(post)
+                
+                if narrative_analysis.narrative_potential_score >= min_narrative_score:
+                    suitable_posts_with_analysis.append((post, narrative_analysis))
+                    self.logger.info(f"Post accepted with narrative score {narrative_analysis.narrative_potential_score}: {post.title[:50]}...")
+                    self.logger.debug(f"  - Narrative gaps: {len(narrative_analysis.narrative_gaps)}")
+                    self.logger.debug(f"  - Story arc: {narrative_analysis.story_arc}")
+                    self.logger.debug(f"  - Persona: {narrative_analysis.narrator_persona}")
+                else:
+                    self.logger.debug(f"Post rejected on narrative score ({narrative_analysis.narrative_potential_score}): {post.title[:50]}...")
+                    
+            except Exception as e:
+                self.logger.warning(f"Narrative analysis failed for post {post.id}: {e}")
+                # If narrative analysis fails, fall back to basic filtering
+                suitable_posts_with_analysis.append((post, None))
+        
+        # Sort by narrative potential score (highest first)
+        suitable_posts_with_analysis.sort(
+            key=lambda x: x[1].narrative_potential_score if x[1] else 0,
+            reverse=True
+        )
+        
+        return suitable_posts_with_analysis
 
 
 class RedditClient:
@@ -448,6 +409,66 @@ class RedditClient:
         """Get a specific post by Reddit URL using async context manager"""
         async with self:
             return await self.get_post_by_url(url)
+    
+    async def get_narrative_driven_video_posts(self,
+                                             subreddit_names: Optional[List[str]] = None,
+                                             max_posts: Optional[int] = None,
+                                             min_narrative_score: int = 60) -> List[Tuple[RedditPost, NarrativeAnalysis]]:
+        """
+        Get video posts with strong narrative potential using the narrative gap approach.
+        
+        This method implements the strategic content curation approach by:
+        1. Finding videos with narrative gaps (unclear context, unexplained reactions, etc.)
+        2. Analyzing their storytelling potential
+        3. Prioritizing content that can be enhanced with compelling narration
+        
+        Args:
+            subreddit_names: List of subreddit names to search
+            max_posts: Maximum number of posts to return
+            min_narrative_score: Minimum narrative potential score (1-100)
+        
+        Returns:
+            List of tuples containing (RedditPost, NarrativeAnalysis) for posts with high narrative potential
+        """
+        if max_posts is None:
+            max_posts = self.config.content.max_reddit_posts_to_fetch
+        
+        self.logger.info(f"Starting narrative-driven content discovery (min_score: {min_narrative_score})")
+        
+        # Fetch a larger pool of posts to analyze
+        fetch_multiplier = 3  # Fetch 3x more to account for filtering
+        all_posts = await self.fetch_posts_from_multiple_subreddits(
+            subreddit_names,
+            posts_per_subreddit=max(10, (max_posts * fetch_multiplier) // len(subreddit_names or self.config.content.curated_subreddits))
+        )
+        
+        # Filter for video posts only
+        video_posts = [post for post in all_posts if post.is_video and post.video_url]
+        self.logger.info(f"Found {len(video_posts)} video posts for narrative analysis")
+        
+        # Apply narrative-driven filtering
+        narrative_posts = self.content_filter.filter_posts_with_narrative_analysis(
+            video_posts,
+            min_narrative_score=min_narrative_score
+        )
+        
+        self.logger.info(f"Narrative analysis complete: {len(narrative_posts)} posts passed criteria")
+        
+        # Log narrative insights for the top posts
+        for i, (post, analysis) in enumerate(narrative_posts[:5]):  # Log top 5
+            if analysis:
+                self.logger.info(f"Top narrative post {i+1}: {post.title[:50]}...")
+                self.logger.info(f"  - Score: {analysis.narrative_potential_score}/100")
+                self.logger.info(f"  - Gaps: {len(analysis.narrative_gaps)} narrative opportunities")
+                self.logger.info(f"  - Arc: {analysis.story_arc} | Persona: {analysis.narrator_persona}")
+                if analysis.narrative_gaps:
+                    self.logger.info(f"  - Primary gap: {analysis.narrative_gaps[0].description}")
+        
+        # Return top posts
+        result = narrative_posts[:max_posts]
+        self.logger.info(f"Returning {len(result)} narrative-driven posts for processing")
+        
+        return result
     
     async def search_posts(self,
                           query: str,

@@ -110,6 +110,9 @@ class EnhancementPerformance:
 class EngagementMetricsDB:
     """Database manager for engagement metrics"""
     
+    # Class attribute to track if database has been initialized
+    _db_initialized = False
+    
     def __init__(self, db_path: Optional[Path] = None):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
@@ -198,7 +201,10 @@ class EngagementMetricsDB:
                 """)
                 
                 conn.commit()
-                self.logger.info("Engagement metrics database initialized")
+                # Only log database initialization once per application run
+                if not EngagementMetricsDB._db_initialized:
+                    self.logger.info("Engagement metrics database initialized")
+                    EngagementMetricsDB._db_initialized = True
                 
         except Exception as e:
             self.logger.error(f"Error initializing engagement metrics database: {e}")

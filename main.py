@@ -16,6 +16,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from src.enhanced_orchestrator import EnhancedVideoOrchestrator
+from src.integrations.narrative_analyzer import NarrativeAnalyzer
 from src.management.channel_manager import ChannelManager
 from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.integrations.reddit_client import RedditClient
@@ -50,6 +51,9 @@ class EnhancedYouTubeGenerator:
         
         # Initialize Reddit client for automatic video finding (will be initialized async)
         self.reddit_client = None
+        
+        # Initialize narrative analyzer for strategic content curation
+        self.narrative_analyzer = NarrativeAnalyzer()
         
         # Register cleanup on exit
         atexit.register(self._cleanup_music_files)
@@ -410,6 +414,272 @@ class EnhancedYouTubeGenerator:
         except Exception as e:
             self.logger.error(f"Auto video finding failed: {e}")
             return {'success': False, 'error': str(e)}
+    async def find_and_process_narrative_driven_videos(self,
+                                                          max_videos: int = 5,
+                                                          subreddit_names: Optional[List[str]] = None,
+                                                          min_narrative_score: int = 60,
+                                                          sort_method: str = 'hot',
+                                                          time_filter: str = 'day',
+                                                          dry_run: bool = False,
+                                                          options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Find and process videos using the strategic narrative gap approach.
+        
+        This method implements the complete strategic workflow:
+        1. Discovers content with narrative gaps (missing context, unexplained reactions)
+        2. Analyzes storytelling potential using AI
+        3. Processes videos with narrative-optimized settings
+        4. Creates content that transforms passive viewing into active engagement
+        
+        Args:
+            max_videos: Maximum number of videos to find and process
+            subreddit_names: Specific subreddits to search (uses config default if None)
+            min_narrative_score: Minimum narrative potential score (1-100)
+            sort_method: Sorting method ('hot', 'top', 'new', 'rising')
+            time_filter: Time filter for top posts ('hour', 'day', 'week', 'month')
+            dry_run: If True, find videos but don't process them
+            options: Processing options
+            
+        Returns:
+            Dict with processing results and narrative insights
+        """
+        try:
+            self.logger.info(f"🎬 Starting narrative-driven content discovery...")
+            self.logger.info(f"📊 Target: {max_videos} videos with min narrative score: {min_narrative_score}")
+            
+            # Apply analytics feedback to options
+            if options is None:
+                options = {}
+            
+            # Get analytics-driven recommendations
+            content_recommendations = self.analytics_advisor.get_content_recommendations_for_finder()
+            if content_recommendations:
+                self.logger.info("Applying analytics insights to narrative video selection...")
+                
+                # Use preferred subreddits if none specified
+                if not subreddit_names and content_recommendations.get('preferred_subreddits'):
+                    subreddit_names = content_recommendations['preferred_subreddits'][:5]
+                    self.logger.info(f"Using analytics-recommended subreddits: {subreddit_names}")
+            
+            # Enhanced options with analytics feedback
+            enhanced_options = self.analytics_advisor.apply_analytics_feedback_to_options(options)
+            if enhanced_options != options:
+                self.logger.info("Applied analytics feedback to narrative processing options")
+                options = enhanced_options
+            
+            # Initialize Reddit client if needed
+            if self.reddit_client is None:
+                from src.integrations.reddit_client import create_reddit_client
+                self.reddit_client = await create_reddit_client()
+            
+            # Check connection
+            if not self.reddit_client.is_connected():
+                return {
+                    'success': False,
+                    'error': 'Reddit client not connected. Please check your Reddit API credentials.'
+                }
+            
+            # Use narrative-driven discovery
+            self.logger.info("🔍 Searching for content with strong narrative potential...")
+            narrative_posts = await self.reddit_client.get_narrative_driven_video_posts(
+                subreddit_names=subreddit_names,
+                max_posts=max_videos,
+                min_narrative_score=min_narrative_score
+            )
+            
+            if not narrative_posts:
+                return {
+                    'success': False,
+                    'error': f'No videos found with narrative score >= {min_narrative_score}',
+                    'posts_found': 0
+                }
+            
+            self.logger.info(f"✅ Found {len(narrative_posts)} narrative-rich videos")
+            
+            # Print narrative discovery summary
+            self._print_narrative_discovery_summary(narrative_posts)
+            
+            if dry_run:
+                return {
+                    'success': True,
+                    'dry_run': True,
+                    'narrative_driven': True,
+                    'posts_found': len(narrative_posts),
+                    'narrative_insights': [
+                        {
+                            'title': post.title,
+                            'narrative_score': analysis.narrative_potential_score,
+                            'story_arc': analysis.story_arc,
+                            'narrator_persona': analysis.narrator_persona,
+                            'narrative_gaps': len(analysis.narrative_gaps),
+                            'estimated_retention': analysis.estimated_retention
+                        } for post, analysis in narrative_posts
+                    ]
+                }
+            
+            # Process narrative-driven videos
+            self.logger.info("🎭 Starting narrative-driven video processing...")
+            results = []
+            total_start_time = datetime.now()
+            
+            for i, (post, narrative_analysis) in enumerate(narrative_posts):
+                try:
+                    self.logger.info(f"Processing narrative video {i+1}/{len(narrative_posts)}: {post.title[:50]}...")
+                    self.logger.info(f"  📈 Narrative score: {narrative_analysis.narrative_potential_score}/100")
+                    self.logger.info(f"  🎬 Story arc: {narrative_analysis.story_arc}")
+                    self.logger.info(f"  🎙️ Narrator persona: {narrative_analysis.narrator_persona}")
+                    
+                    # Process with narrative-driven approach
+                    result = await self.orchestrator.process_narrative_driven_video(
+                        post, narrative_analysis, options
+                    )
+                    
+                    # Track performance for analytics
+                    if result.get('success') and result.get('video_id'):
+                        try:
+                            performance_data = {
+                                'processed_at': datetime.now().isoformat(),
+                                'narrative_driven': True,
+                                'narrative_score': narrative_analysis.narrative_potential_score,
+                                'story_arc': narrative_analysis.story_arc,
+                                'narrator_persona': narrative_analysis.narrator_persona,
+                                'processing_options': options,
+                                'success': True
+                            }
+                            
+                            if result.get('performance_prediction'):
+                                performance_data['predicted_metrics'] = result['performance_prediction']
+                            
+                            self.analytics_advisor.track_video_performance_feedback(
+                                result['video_id'], performance_data
+                            )
+                            
+                        except Exception as e:
+                            self.logger.warning(f"Failed to track narrative video performance: {e}")
+                    
+                    results.append({
+                        'post': post,
+                        'narrative_analysis': narrative_analysis,
+                        'result': result
+                    })
+                    
+                    if result.get('success'):
+                        self.logger.info(f"✅ Narrative video {i+1} processed successfully")
+                    else:
+                        self.logger.error(f"❌ Narrative video {i+1} failed: {result.get('error')}")
+                        
+                except Exception as e:
+                    self.logger.error(f"Failed to process narrative video {i+1}: {e}")
+                    results.append({
+                        'post': post,
+                        'narrative_analysis': narrative_analysis,
+                        'result': {'success': False, 'error': str(e)}
+                    })
+            
+            total_processing_time = (datetime.now() - total_start_time).total_seconds()
+            
+            # Compile comprehensive results
+            successful_videos = len([r for r in results if r['result'].get('success')])
+            
+            final_result = {
+                'success': True,
+                'narrative_driven': True,
+                'narrative_discovery': {
+                    'posts_found': len(narrative_posts),
+                    'min_narrative_score': min_narrative_score,
+                    'sort_method': sort_method,
+                    'time_filter': time_filter if sort_method == 'top' else None,
+                    'subreddits_searched': subreddit_names or 'default_curated_list'
+                },
+                'processing_summary': {
+                    'total_videos': len(narrative_posts),
+                    'successful_videos': successful_videos,
+                    'failed_videos': len(narrative_posts) - successful_videos,
+                    'total_processing_time_seconds': total_processing_time,
+                    'average_time_per_video': total_processing_time / len(narrative_posts) if narrative_posts else 0
+                },
+                'narrative_insights': {
+                    'average_narrative_score': sum(analysis.narrative_potential_score for _, analysis in narrative_posts) / len(narrative_posts),
+                    'story_arcs_used': list(set(analysis.story_arc for _, analysis in narrative_posts)),
+                    'narrator_personas_used': list(set(analysis.narrator_persona for _, analysis in narrative_posts)),
+                    'total_narrative_gaps_leveraged': sum(len(analysis.narrative_gaps) for _, analysis in narrative_posts)
+                },
+                'individual_results': results
+            }
+            
+            # Print final summary
+            self._print_narrative_processing_summary(final_result)
+            
+            return final_result
+            
+        except Exception as e:
+            self.logger.error(f"Narrative-driven video discovery failed: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    def _print_narrative_discovery_summary(self, narrative_posts):
+        """Print summary of discovered narrative-driven videos"""
+        print("\n🎬 Narrative-Driven Content Discovery Results:")
+        print("=" * 60)
+        
+        for i, (post, analysis) in enumerate(narrative_posts, 1):
+            try:
+                # Handle Unicode safely
+                title = post.title[:50].encode('ascii', 'ignore').decode('ascii')
+                if len(post.title) > 50:
+                    title += "..."
+                
+                safe_print(f"\n{i}. 📺 r/{post.subreddit} - {title}")
+                safe_print(f"   📊 Score: {post.score} | 💬 Comments: {post.num_comments}")
+                safe_print(f"   🎭 Narrative Score: {analysis.narrative_potential_score}/100")
+                print(f"   📖 Story Arc: {analysis.story_arc}")
+                print(f"   🎙️ Narrator: {analysis.narrator_persona}")
+                print(f"   🔍 Gaps: {len(analysis.narrative_gaps)} narrative opportunities")
+                if analysis.narrative_gaps:
+                    safe_print(f"   💡 Primary Gap: {analysis.narrative_gaps[0].description}")
+                safe_print(f"   📈 Est. Retention: {analysis.estimated_retention}%")
+                
+            except UnicodeEncodeError:
+                safe_title = post.title[:50].encode('ascii', 'replace').decode('ascii')
+                if len(post.title) > 50:
+                    safe_title += "..."
+                safe_print(f"\n{i}. 📺 r/{post.subreddit} - {safe_title}")
+                safe_print(f"   📊 Score: {post.score} | 💬 Comments: {post.num_comments}")
+                safe_print(f"   🎭 Narrative Score: {analysis.narrative_potential_score}/100")
+        
+        print("\n" + "=" * 60)
+    
+    def _print_narrative_processing_summary(self, result: Dict[str, Any]):
+        """Print summary of narrative-driven processing results"""
+        if not result.get('success'):
+            return
+            
+        print("\n🎬 Narrative-Driven Processing Complete!")
+        print("=" * 50)
+        
+        summary = result['processing_summary']
+        insights = result['narrative_insights']
+        
+        safe_print(f"📊 Processing Results:")
+        safe_print(f"   ✅ Successful: {summary['successful_videos']}/{summary['total_videos']}")
+        safe_print(f"   ⏱️ Total Time: {summary['total_processing_time_seconds']:.1f}s")
+        safe_print(f"   📈 Avg Time/Video: {summary['average_time_per_video']:.1f}s")
+
+        safe_print(f"\n🎭 Narrative Insights:")
+        safe_print(f"   📊 Avg Narrative Score: {insights['average_narrative_score']:.1f}/100")
+        safe_print(f"   📖 Story Arcs: {', '.join(insights['story_arcs_used'])}")
+        print(f"   🎙️ Personas: {', '.join(insights['narrator_personas_used'])}")
+        print(f"   🔍 Total Gaps Leveraged: {insights['total_narrative_gaps_leveraged']}")
+        
+        # Show successful results
+        successful_results = [r for r in result['individual_results'] if r['result'].get('success')]
+        if successful_results:
+            print(f"\n✅ Successfully Processed Videos:")
+            for i, video_result in enumerate(successful_results, 1):
+                video_id = video_result['result'].get('video_id', 'N/A')
+                analysis = video_result['narrative_analysis']
+                print(f"   {i}. Score: {analysis.narrative_potential_score}/100 | Arc: {analysis.story_arc} | ID: {video_id}")
+        
+        print("=" * 50)
     
     async def start_proactive_management(self):
         """
@@ -837,14 +1107,14 @@ Examples:
             # Process batch of videos
             urls_file = Path(args.file)
             if not urls_file.exists():
-                safesafe_print(f"❌ File not found: {urls_file}")
+                safe_print(f"❌ File not found: {urls_file}")
                 return
             
             with open(urls_file, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
             
             if not urls:
-                safe_safe_print(f"❌ No URLs found in file")
+                safe_print(f"❌ No URLs found in file")
                 return
             
             options = {
@@ -904,10 +1174,10 @@ Examples:
             if args.all:
                 # Add any other all-encompassing cleanup here
                 pass
-            safe_safe_print(f"✅ Cleanup process finished.")
+            safe_print(f"✅ Cleanup process finished.")
     
     except KeyboardInterrupt:
-        safe_safe_print(f"\n⏹️ Operation interrupted by user")
+        safe_print(f"\n⏹️ Operation interrupted by user")
         print("Cleaning up resources...")
         await generator.cleanup()
     except Exception as e:
@@ -928,7 +1198,7 @@ def run_main():
         # Check if we're already in an async context
         try:
             loop = asyncio.get_running_loop()
-            safe_safe_print(f"⚠️ Already in async context. Use 'await main()' instead.")
+            safe_print(f"⚠️ Already in async context. Use 'await main()' instead.")
             return 1
         except RuntimeError:
             # No running loop - this is what we want

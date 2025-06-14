@@ -78,12 +78,25 @@ class YouTubeClient:
             if youtube_token_env:
                 try:
                     token_data = json.loads(youtube_token_env)
+                    
+                    # Try with current scopes first
                     creds = Credentials.from_authorized_user_info(token_data, self.scopes)
                     self.logger.info("Loaded credentials from YOUTUBE_TOKEN_JSON environment variable")
                     
+                    # Validate scopes
+                    if not self._validate_scopes(creds, self.scopes):
+                        self.logger.warning("Environment credentials have scope issues, trying with basic scopes")
+                        # Fallback to basic scopes
+                        basic_scopes = [
+                            'https://www.googleapis.com/auth/youtube.upload',
+                            'https://www.googleapis.com/auth/youtube.force-ssl',
+                            'https://www.googleapis.com/auth/youtubepartner'
+                        ]
+                        creds = Credentials.from_authorized_user_info(token_data, basic_scopes)
+                    
                     # If credentials are valid, return them immediately
                     if creds and creds.valid:
-                        self.logger.info("Credentials are valid and ready to use")
+                        self.logger.info("Environment credentials are valid and ready to use")
                         return creds
                     
                     # If credentials exist but are expired, try to refresh
@@ -100,7 +113,7 @@ class YouTubeClient:
                     
                 except json.JSONDecodeError as e:
                     self.logger.error(f"Invalid JSON in YOUTUBE_TOKEN_JSON environment variable: {e}")
-                    return None
+                    # Fall through to try file-based approach
                 except Exception as e:
                     self.logger.warning(f"Error loading credentials from environment variable: {e}")
                     # Fall through to try file-based approach
@@ -111,8 +124,21 @@ class YouTubeClient:
                 try:
                     with open(token_file, 'r') as f:
                         token_data = json.load(f)
+                    
+                    # Try with current scopes first
                     creds = Credentials.from_authorized_user_info(token_data, self.scopes)
                     self.logger.info(f"Loaded credentials from token file: {token_file}")
+                    
+                    # Validate scopes
+                    if not self._validate_scopes(creds, self.scopes):
+                        self.logger.warning("File credentials have scope issues, trying with basic scopes")
+                        # Fallback to basic scopes
+                        basic_scopes = [
+                            'https://www.googleapis.com/auth/youtube.upload',
+                            'https://www.googleapis.com/auth/youtube.force-ssl',
+                            'https://www.googleapis.com/auth/youtubepartner'
+                        ]
+                        creds = Credentials.from_authorized_user_info(token_data, basic_scopes)
                     
                     # If credentials are valid, return them immediately
                     if creds and creds.valid:
@@ -131,9 +157,11 @@ class YouTubeClient:
                             return creds
                         except Exception as refresh_error:
                             self.logger.error(f"Failed to refresh credentials from file: {refresh_error}")
+                            self.logger.info("This might be due to scope issues. Try running 'python auth_youtube.py' to re-authenticate")
                             return None
                     else:
                         self.logger.error("File-based credentials are invalid and cannot be refreshed")
+                        self.logger.info("Try running 'python auth_youtube.py' to re-authenticate with proper scopes")
                         return None
                         
                 except (json.JSONDecodeError, FileNotFoundError) as e:
@@ -142,14 +170,38 @@ class YouTubeClient:
             
             self.logger.warning("No valid YouTube credentials found. YouTube functionality will be disabled.")
             self.logger.info("To fix this:")
-            self.logger.info("1. Set YOUTUBE_TOKEN_JSON environment variable with valid credentials, OR")
-            self.logger.info("2. Run 'python auth_youtube.py' to create/refresh youtube_token.json file")
+            self.logger.info("1. Run 'python auth_youtube.py' to create proper credentials with required scopes")
+            self.logger.info("2. Or set YOUTUBE_TOKEN_JSON environment variable with valid credentials")
+            self.logger.info("3. Ensure your OAuth app has the required scopes configured in Google Cloud Console")
             return None
             
         except Exception as e:
             self.logger.error(f"Credential handling failed: {e}")
             return None
     
+    def _validate_scopes(self, creds, required_scopes):
+        """Validate that credentials have required scopes"""
+        if not creds or not hasattr(creds, 'scopes'):
+            return False
+        
+        creds_scopes = set(creds.scopes) if creds.scopes else set()
+        required_scopes_set = set(required_scopes)
+        
+        missing_scopes = required_scopes_set - creds_scopes
+        if missing_scopes:
+            self.logger.warning(f"Missing scopes: {list(missing_scopes)}")
+            # Try to work with basic scopes if analytics scope is missing
+            basic_scopes = {
+                'https://www.googleapis.com/auth/youtube.upload',
+                'https://www.googleapis.com/auth/youtube.force-ssl',
+                'https://www.googleapis.com/auth/youtubepartner'
+            }
+            if basic_scopes.issubset(creds_scopes):
+                self.logger.info("Proceeding with basic YouTube scopes (analytics features disabled)")
+                return True
+            return False
+        return True
+
     def _update_token_in_env(self, creds):
         """Update the YOUTUBE_TOKEN_JSON environment variable with refreshed credentials"""
         try:

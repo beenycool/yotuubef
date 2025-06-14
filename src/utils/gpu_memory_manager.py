@@ -26,6 +26,9 @@ class GPUMemoryManager:
     Manages GPU memory allocation and optimization for AI models
     """
     
+    # Class variable to track if GPU info has been logged
+    _gpu_info_logged = False
+    
     def __init__(self, max_vram_usage: float = 0.85):
         """
         Initialize GPU memory manager
@@ -53,19 +56,22 @@ class GPUMemoryManager:
     def _initialize_device(self) -> None:
         """Initialize CUDA device and check VRAM availability"""
         if not TORCH_AVAILABLE:
-            self.logger.warning("PyTorch not available, using CPU only")
+            if not GPUMemoryManager._gpu_info_logged:
+                self.logger.warning("PyTorch not available, using CPU only")
             self.device = "cpu"
             return
         
         if not torch.cuda.is_available():
-            self.logger.info("CUDA not available, using CPU")
+            if not GPUMemoryManager._gpu_info_logged:
+                self.logger.info("CUDA not available, using CPU")
             self.device = "cpu"
             return
         
         # Get GPU info
         gpu_count = torch.cuda.device_count()
         if gpu_count == 0:
-            self.logger.info("No CUDA devices found, using CPU")
+            if not GPUMemoryManager._gpu_info_logged:
+                self.logger.info("No CUDA devices found, using CPU")
             self.device = "cpu"
             return
         
@@ -78,12 +84,17 @@ class GPUMemoryManager:
             total_vram_gb = vram_info['total'] / 1024**3
             self.vram_limit_mb = int(vram_info['total'] * self.max_vram_usage / 1024**2)
             
-            self.logger.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
-            self.logger.info(f"Total VRAM: {total_vram_gb:.1f}GB")
-            self.logger.info(f"VRAM limit set to: {self.vram_limit_mb}MB ({self.max_vram_usage*100:.0f}%)")
+            # Only log GPU info once per application run
+            if not GPUMemoryManager._gpu_info_logged:
+                self.logger.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
+                self.logger.info(f"Total VRAM: {total_vram_gb:.1f}GB")
+                GPUMemoryManager._gpu_info_logged = True
             
-            # Check if we have sufficient VRAM for typical models
-            if total_vram_gb < 4.0:
+            # Always log VRAM limit as it may vary per instance
+            self.logger.debug(f"VRAM limit set to: {self.vram_limit_mb}MB ({self.max_vram_usage*100:.0f}%)")
+            
+            # Check if we have sufficient VRAM for typical models (only log once)
+            if total_vram_gb < 4.0 and not GPUMemoryManager._gpu_info_logged:
                 self.logger.warning(f"Low VRAM detected ({total_vram_gb:.1f}GB). Consider using CPU or optimized models.")
     
     def get_vram_info(self) -> Optional[Dict[str, int]]:

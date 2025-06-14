@@ -15,6 +15,7 @@ from src.integrations.gemini_ai_client import GeminiAIClient
 from src.management.channel_manager import ChannelManager
 from src.analytics.analytics_feedback import AnalyticsFeedbackSystem
 from src.config.settings import get_config
+from src.utils.safe_print import safe_print
 
 
 class AnalyticsAdvisor:
@@ -633,60 +634,60 @@ Unfortunately, analytics data could not be retrieved at this time.
 
     def print_recommendations(self, report: Dict[str, Any]):
         """Print recommendations in a formatted way"""
-        print("\n" + "="*80)
-        print("🎯 YOUTUBE ANALYTICS ADVISOR - STARTUP RECOMMENDATIONS")
-        print("="*80)
+        safe_print("\n" + "="*80)
+        safe_print("🎯 YOUTUBE ANALYTICS ADVISOR - STARTUP RECOMMENDATIONS")
+        safe_print("="*80)
         
         if not report.get('success'):
-            print(f"❌ Error: {report.get('error', 'Unknown error')}")
-            print(f"Message: {report.get('message', 'No additional information')}")
+            safe_print(f"❌ Error: {report.get('error', 'Unknown error')}")
+            safe_print(f"Message: {report.get('message', 'No additional information')}")
             return
         
         # Print summary
         summary = report.get('analytics_summary', {})
         if summary:
             totals = summary.get('channel_totals', {})
-            print(f"\n📊 QUICK STATS (Last 30 Days):")
-            print(f"   Views: {totals.get('total_views', 0):,}")
-            print(f"   Videos: {totals.get('total_videos', 0)}")
-            print(f"   Watch Time: {totals.get('total_watch_time', 0):.0f} minutes")
-            print(f"   Subscribers Gained: {totals.get('total_subscribers_gained', 0)}")
+            safe_print(f"\n📊 QUICK STATS (Last 30 Days):")
+            safe_print(f"   Views: {totals.get('total_views', 0):,}")
+            safe_print(f"   Videos: {totals.get('total_videos', 0)}")
+            safe_print(f"   Watch Time: {totals.get('total_watch_time', 0):.0f} minutes")
+            safe_print(f"   Subscribers Gained: {totals.get('total_subscribers_gained', 0)}")
         
         # Print recommendations
         recommendations = report.get('recommendations', '')
         if recommendations:
-            print(f"\n{recommendations}")
+            safe_print(f"\n{recommendations}")
         
         # Print action items
         action_items = report.get('action_items', [])
         if action_items:
-            print(f"\n⚡ TOP PRIORITY ACTIONS:")
+            safe_print(f"\n⚡ TOP PRIORITY ACTIONS:")
             for i, action in enumerate(action_items, 1):
-                print(f"   {i}. {action}")
+                safe_print(f"   {i}. {action}")
         
         # Print optimization insights if available
         optimization_params = report.get('optimization_params', {})
         if optimization_params:
-            print(f"\n🔧 SYSTEM OPTIMIZATION APPLIED:")
+            safe_print(f"\n🔧 SYSTEM OPTIMIZATION APPLIED:")
             
             # Content filtering
             content_filter = optimization_params.get('content_filtering', {})
             if content_filter.get('preferred_types'):
-                print(f"   Preferred content types: {', '.join(content_filter['preferred_types'])}")
+                safe_print(f"   Preferred content types: {', '.join(content_filter['preferred_types'])}")
             
             # Title optimization
             title_opt = optimization_params.get('title_optimization', {})
             enabled_title_opts = [k for k, v in title_opt.items() if v]
             if enabled_title_opts:
-                print(f"   Title optimization: {', '.join(enabled_title_opts)}")
+                safe_print(f"   Title optimization: {', '.join(enabled_title_opts)}")
             
             # Processing preferences
             proc_pref = optimization_params.get('processing_preferences', {})
             enabled_prefs = [k for k, v in proc_pref.items() if v]
             if enabled_prefs:
-                print(f"   Processing enhancements: {', '.join(enabled_prefs)}")
+                safe_print(f"   Processing enhancements: {', '.join(enabled_prefs)}")
         
-        print("\n" + "="*80)
-        print(f"📝 Full report saved to analytics_reports/")
-        print(f"🔄 Feedback applied to future video processing")
-        print("="*80 + "\n")
+        safe_print("\n" + "="*80)
+        safe_print(f"📝 Full report saved to analytics_reports/")
+        safe_print(f"🔄 Feedback applied to future video processing")
+        safe_print("="*80 + "\n")

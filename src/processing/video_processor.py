@@ -2135,7 +2135,7 @@ class VideoProcessor:
             # Create background music with basic processing
             try:
                 from moviepy.audio.io.AudioFileClip import AudioFileClip
-                from moviepy.editor import concatenate_audioclips
+                from moviepy import concatenate_audioclips
                 from src.processing.video_processor_fixes import MoviePyCompat
                 import math
                 

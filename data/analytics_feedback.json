@@ -23,7 +23,7 @@
     "successful_content_types": [],
     "optimal_video_characteristics": {
       "title_length": 7,
-      "high_performance_threshold": 10,
+      "high_performance_threshold": 3,
       "successful_characteristics": []
     }
   },
@@ -32,5 +32,5 @@
     "applied_changes": [],
     "success_metrics": {}
   },
-  "last_updated": "2025-06-14T10:04:28.021028"
+  "last_updated": "2025-06-14T14:34:24.436762"
 }

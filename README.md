@@ -40,6 +40,25 @@ An advanced, AI-driven system for automatically creating engaging YouTube Shorts
 - **Engagement Optimization**: Identify and promote high-value interactions
 - **Community Building**: Proactive audience engagement strategies
 
+## 📦 Dependencies & Recent Updates
+
+### Recent Updates (June 2025)
+- ✅ **Migrated to Google GenAI unified SDK** (breaking change from google-generativeai)
+- ✅ **Updated to MoviePy 2.2** (latest stable with improvements)
+- ✅ **Updated to Transformers 4.48.0** (support for latest AI models like Zamba2)
+- ✅ **Updated to PyTorch 2.4.0** (better compatibility and performance)
+- ✅ **Added Accelerate and Evaluate** (enhanced ML capabilities)
+
+**Migration Required**: If upgrading from an older version, run `python migrate_dependencies.py` or see `MIGRATION_GUIDE.md` for detailed instructions.
+
+### Key Dependencies
+- **Video Processing**: MoviePy 2.2+, OpenCV, FFmpeg
+- **AI Integration**: Google GenAI (unified SDK), Transformers 4.48+
+- **Audio Processing**: Librosa, SoundFile
+- **Machine Learning**: PyTorch 2.4+, Accelerate, Evaluate
+- **Database**: SQLite with enhanced analytics
+- **APIs**: YouTube Data API, Reddit API, Spotify API
+
 ## 🚀 Quick Start
 
 ### Prerequisites

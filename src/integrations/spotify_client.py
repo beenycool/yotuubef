@@ -7,6 +7,7 @@ import logging
 import asyncio
 import aiohttp
 import json
+import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -20,43 +21,7 @@ from src.config.settings import get_config
 from src.models import SpotifyTrack, SpotifyPlaylist, MusicDownloadConfig
 
 
-@dataclass
-class SpotifyTrack:
-    """Represents a Spotify track with metadata"""
-    track_id: str
-    name: str
-    artist: str
-    album: str
-    duration_ms: int
-    popularity: int
-    preview_url: Optional[str]
-    external_urls: Dict[str, str]
-    genres: List[str]
-    energy: Optional[float] = None
-    danceability: Optional[float] = None
-    valence: Optional[float] = None
-    tempo: Optional[float] = None
-    
-    @property
-    def duration_seconds(self) -> float:
-        return self.duration_ms / 1000.0
-    
-    @property
-    def search_query(self) -> str:
-        """Generate a search query for finding this track elsewhere"""
-        return f"{self.artist} {self.name}".replace(" ", "+")
-
-
-@dataclass
-class SpotifyPlaylist:
-    """Represents a Spotify playlist"""
-    playlist_id: str
-    name: str
-    description: str
-    total_tracks: int
-    tracks: List[SpotifyTrack]
-    popularity_score: float
-    genres: List[str]
+# Using Pydantic models from src.models instead of dataclasses
 
 
 @dataclass
@@ -85,9 +50,18 @@ class SpotifyClient:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         
-        # Spotify API configuration
-        self.client_id = self.config.spotify.client_id
-        self.client_secret = self.config.spotify.client_secret
+        # Spotify API configuration with graceful fallback
+        try:
+            self.client_id = getattr(self.config, 'spotify', {}).get('client_id') or os.getenv('SPOTIFY_CLIENT_ID')
+            self.client_secret = getattr(self.config, 'spotify', {}).get('client_secret') or os.getenv('SPOTIFY_CLIENT_SECRET')
+        except (AttributeError, TypeError):
+            # Fallback to environment variables if config doesn't have spotify section
+            self.client_id = os.getenv('SPOTIFY_CLIENT_ID')
+            self.client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
+        
+        if not self.client_id or not self.client_secret:
+            self.logger.warning("Spotify API credentials not found. Spotify features will be disabled.")
+            self.logger.info("Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables to enable Spotify features")
         self.base_url = "https://api.spotify.com/v1"
         self.auth_url = "https://accounts.spotify.com/api/token"
         
@@ -166,28 +140,51 @@ class SpotifyClient:
             url = f"{self.base_url}/{endpoint.lstrip('/')}"
             headers = {"Authorization": f"Bearer {self.access_token}"}
             
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as response:
-                    self.request_count += 1
-                    
-                    if response.status == 200:
-                        data = await response.json()
-                        # Cache successful response
-                        self.cache[cache_key] = (data, datetime.now())
-                        return data
-                    elif response.status == 429:
-                        # Rate limited
-                        retry_after = int(response.headers.get("Retry-After", 1))
-                        self.logger.warning(f"Rate limited, waiting {retry_after} seconds")
-                        await asyncio.sleep(retry_after)
-                        return await self._make_request(endpoint, params)
-                    else:
-                        error_text = await response.text()
-                        self.logger.error(f"Spotify API error: {response.status} - {error_text}")
-                        return None
+            # Network timeout and retry configuration
+            timeout = aiohttp.ClientTimeout(total=30, connect=10)
+            connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
+            
+            async with aiohttp.ClientSession(timeout=timeout, connector=connector) as session:
+                try:
+                    async with session.get(url, headers=headers, params=params) as response:
+                        self.request_count += 1
                         
+                        if response.status == 200:
+                            data = await response.json()
+                            # Cache successful response
+                            self.cache[cache_key] = (data, datetime.now())
+                            return data
+                        elif response.status == 429:
+                            # Rate limited
+                            retry_after = int(response.headers.get("Retry-After", 1))
+                            self.logger.warning(f"Rate limited, waiting {retry_after} seconds")
+                            await asyncio.sleep(retry_after)
+                            return await self._make_request(endpoint, params)
+                        elif response.status in [502, 503, 504]:
+                            # Server errors - retry with backoff
+                            self.logger.warning(f"Server error {response.status}, will retry")
+                            await asyncio.sleep(2)
+                            return None  # Let caller handle retry
+                        elif response.status == 401:
+                            # Unauthorized - clear token and retry once
+                            self.logger.warning("Unauthorized - clearing token and retrying")
+                            self.access_token = None
+                            self.token_expires_at = None
+                            return None
+                        else:
+                            error_text = await response.text()
+                            self.logger.error(f"Spotify API error: {response.status} - {error_text}")
+                            return None
+                            
+                except aiohttp.ClientError as e:
+                    self.logger.warning(f"Network error in Spotify API request: {e}")
+                    return None
+                        
+        except asyncio.TimeoutError:
+            self.logger.warning("Spotify API request timed out")
+            return None
         except Exception as e:
-            self.logger.error(f"Error making Spotify API request: {e}")
+            self.logger.error(f"Unexpected error making Spotify API request: {e}")
             return None
     
     async def _check_rate_limit(self) -> bool:

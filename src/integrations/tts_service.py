@@ -49,6 +49,9 @@ class TTSService:
     Comprehensive Text-to-Speech service supporting multiple providers
     """
     
+    # Class variable to track if TTS has been initialized
+    _tts_initialized = False
+    
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
@@ -61,14 +64,18 @@ class TTSService:
         if ELEVENLABS_AVAILABLE and self.config.api.elevenlabs_api_key:
             try:
                 elevenlabs.set_api_key(self.config.api.elevenlabs_api_key)
-                self.logger.info("ElevenLabs TTS service initialized")
+                if not TTSService._tts_initialized:
+                    self.logger.info("ElevenLabs TTS service initialized")
             except Exception as e:
                 self.logger.warning(f"Failed to initialize ElevenLabs: {e}")
         
         if DIA_AVAILABLE:
-            self.logger.info("Local Dia-1.6B TTS model is available for use.")
+            if not TTSService._tts_initialized:
+                self.logger.info("Local Dia-1.6B TTS model is available for use.")
+                TTSService._tts_initialized = True
         else:
-            self.logger.warning("Dia TTS not available - install dia package")
+            if not TTSService._tts_initialized:
+                self.logger.warning("Dia TTS not available - install dia package")
     
     def _initialize_dia(self):
         """Lazy initialization of the local Dia model with GPU memory optimization."""
