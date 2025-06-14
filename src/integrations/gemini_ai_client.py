@@ -823,13 +823,13 @@ class GeminiAIClient:
             content = response.text
             self.logger.debug(f"Gemini narrative response received ({len(content)} chars)")
             
-            # Try to extract JSON from response
+            # Try to extract JSON from response using a regular expression
             try:
-                start_idx = content.find('{')
-                end_idx = content.rfind('}') + 1
+                import re
+                json_match = re.search(r'\{.*?\}', content, re.DOTALL)
                 
-                if start_idx >= 0 and end_idx > start_idx:
-                    json_str = content[start_idx:end_idx]
+                if json_match:
+                    json_str = json_match.group(0)
                     result = json.loads(json_str)
                     
                     # Enhance with narrative insights
