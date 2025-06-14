@@ -140,7 +140,8 @@ class APIConfig:
     youtube_scopes: List[str] = field(default_factory=lambda: [
         'https://www.googleapis.com/auth/youtube.upload',
         'https://www.googleapis.com/auth/youtube.force-ssl',
-        'https://www.googleapis.com/auth/youtubepartner'
+        'https://www.googleapis.com/auth/youtubepartner',
+        'https://www.googleapis.com/auth/yt-analytics.readonly'
     ])
     youtube_upload_category_id: str = '24'
     youtube_upload_privacy_status: str = 'public'

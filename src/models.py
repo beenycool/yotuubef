@@ -410,3 +410,68 @@ class VideoAnalysisEnhanced(VideoAnalysis):
         validate_assignment=True,
         extra="forbid"
     )
+# Spotify Integration Models
+class SpotifyTrack(BaseModel):
+    """Represents a Spotify track with metadata"""
+    track_id: str = Field(..., description="Spotify track ID")
+    name: str = Field(..., description="Track name")
+    artist: str = Field(..., description="Primary artist name")
+    album: str = Field(..., description="Album name")
+    duration_ms: int = Field(..., description="Track duration in milliseconds")
+    popularity: int = Field(..., ge=0, le=100, description="Popularity score 0-100")
+    preview_url: Optional[str] = Field(None, description="Preview URL if available")
+    external_urls: Dict[str, str] = Field(default_factory=dict, description="External URLs")
+    genres: List[str] = Field(default_factory=list, description="Track genres")
+    energy: Optional[float] = Field(None, ge=0, le=1, description="Energy level 0-1")
+    danceability: Optional[float] = Field(None, ge=0, le=1, description="Danceability 0-1")
+    valence: Optional[float] = Field(None, ge=0, le=1, description="Valence (happiness) 0-1")
+    tempo: Optional[float] = Field(None, description="Tempo in BPM")
+    
+    @property
+    def duration_seconds(self) -> float:
+        """Get duration in seconds"""
+        return self.duration_ms / 1000.0
+    
+    @property
+    def search_query(self) -> str:
+        """Generate search query for this track"""
+        return f"{self.artist} {self.name}".replace(" ", "+")
+    
+    model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
+
+
+class SpotifyPlaylist(BaseModel):
+    """Represents a Spotify playlist"""
+    playlist_id: str = Field(..., description="Spotify playlist ID")
+    name: str = Field(..., description="Playlist name")
+    description: str = Field(..., description="Playlist description")
+    total_tracks: int = Field(..., ge=0, description="Total number of tracks")
+    tracks: List[SpotifyTrack] = Field(default_factory=list, description="Playlist tracks")
+    popularity_score: float = Field(..., ge=0, le=1, description="Overall popularity score")
+    genres: List[str] = Field(default_factory=list, description="Playlist genres")
+    
+    model_config = ConfigDict(use_enum_values=True, validate_assignment=True)
+
+
+class MusicDownloadConfig(BaseModel):
+    """Configuration for music downloading"""
+    max_tracks: int = Field(50, ge=1, le=200, description="Maximum tracks to download")
+    min_popularity: int = Field(50, ge=0, le=100, description="Minimum popularity score")
+    preferred_genres: List[str] = Field(
+        default_factory=lambda: ["pop", "electronic", "hip-hop", "indie", "rock"],
+        description="Preferred music genres"
+    )
+    exclude_explicit: bool = Field(True, description="Exclude explicit content")
+    max_duration_seconds: int = Field(180, ge=30, le=600, description="Maximum track duration")
+    min_duration_seconds: int = Field(30, ge=10, le=120, description="Minimum track duration")
+    quality_preference: str = Field("medium", description="Audio quality preference")
+    
+    @field_validator('quality_preference')
+    @classmethod
+    def validate_quality(cls, v):
+        valid_qualities = ["low", "medium", "high"]
+        if v not in valid_qualities:
+            raise ValueError(f"Quality must be one of {valid_qualities}")
+        return v
+    
+    model_config = ConfigDict(use_enum_values=True, validate_assignment=True)

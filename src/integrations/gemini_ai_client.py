@@ -7,6 +7,7 @@ import logging
 import json
 import asyncio
 import time
+import os
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
@@ -67,22 +68,35 @@ class GeminiAIClient:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         
+        # Get Gemini API key from environment variables or config
+        gemini_api_key = os.getenv('GEMINI_API_KEY') or getattr(self.config.api, 'gemini_api_key', None)
+        
         # Initialize Gemini if available
-        if GEMINI_AVAILABLE and hasattr(self.config.api, 'gemini_api_key'):
-            genai.configure(api_key=self.config.api.gemini_api_key)
-            self.model = genai.GenerativeModel(
-                model_name=getattr(self.config.api, 'gemini_model', 'gemini-2.0-flash')
-            )
-            self.gemini_available = True
-            
-            # Setup rate limiting
-            rpm_limit = getattr(self.config.api, 'gemini_rate_limit_rpm', 10)
-            daily_limit = getattr(self.config.api, 'gemini_rate_limit_daily', 500)
-            self.rate_limiter = RateLimiter(rpm_limit, daily_limit)
+        if GEMINI_AVAILABLE and gemini_api_key:
+            try:
+                genai.configure(api_key=gemini_api_key)
+                self.model = genai.GenerativeModel(
+                    model_name=os.getenv('GEMINI_MODEL') or getattr(self.config.api, 'gemini_model', 'gemini-2.0-flash-exp')
+                )
+                self.gemini_available = True
+                
+                # Setup rate limiting
+                rpm_limit = int(os.getenv('GEMINI_RATE_LIMIT_RPM', '0')) or getattr(self.config.api, 'gemini_rate_limit_rpm', 10)
+                daily_limit = int(os.getenv('GEMINI_RATE_LIMIT_DAILY', '0')) or getattr(self.config.api, 'gemini_rate_limit_daily', 500)
+                self.rate_limiter = RateLimiter(rpm_limit, daily_limit)
+                
+                self.logger.info(f"Gemini AI initialized with model: {self.model.model_name}")
+                
+            except Exception as e:
+                self.gemini_available = False
+                self.logger.warning(f"Failed to initialize Gemini AI: {e}")
             
         else:
             self.gemini_available = False
-            self.logger.warning("Gemini not available - some AI features will be limited")
+            if not GEMINI_AVAILABLE:
+                self.logger.warning("Gemini library not installed - install with: pip install google-generativeai")
+            else:
+                self.logger.warning("Gemini API key not found - set GEMINI_API_KEY environment variable or add to config")
         
         # AI analysis prompts
         self.video_analysis_prompt = """

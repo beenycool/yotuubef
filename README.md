@@ -289,6 +289,30 @@ python main_enhanced.py --profile --test-video-limit 60
    - Check YouTube OAuth token validity
    - Ensure proper file permissions
 
+4. **YouTube Analytics API Error (403 accessNotConfigured)**
+   ```
+   ERROR - Google API request failed: HttpError 403 when requesting
+   https://youtubeanalytics.googleapis.com/v2/reports?...
+   "YouTube Analytics API has not been used in project before or it is disabled"
+   ```
+   
+   **Solution:**
+   ```bash
+   # Run the diagnostic script
+   python check_youtube_analytics_api.py
+   
+   # Follow the steps to:
+   # 1. Enable YouTube Analytics API in Google Cloud Console
+   # 2. Re-authenticate with updated scopes
+   # 3. Wait for API activation
+   ```
+   
+   **Manual Steps:**
+   - Go to [Google Cloud Console](https://console.developers.google.com/apis/api/youtubeanalytics.googleapis.com/overview)
+   - Select your project and click "Enable"
+   - Delete `youtube_token.json` and run `python auth_youtube.py`
+   - Wait 2-5 minutes for API activation
+
 ### Logging
 
 ```bash

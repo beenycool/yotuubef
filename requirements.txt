@@ -1,8 +1,5 @@
 # Enhanced AI-Powered YouTube Shorts Generator Requirements
 
-# Core dependencies
--r requirements.txt
-
 # Enhanced AI and Machine Learning
 google-generativeai>=0.3.0       # Google Gemini API for advanced analysis
 transformers>=4.30.0             # Hugging Face transformers for local AI models
@@ -161,3 +158,4 @@ subprocess                       # Built-in subprocess management (part of Pytho
 # API Documentation (Optional)
 # fastapi>=0.95.0                # Fast API framework for web services
 # uvicorn>=0.22.0                # ASGI server for FastAPI
+spotify_dl>=8.0.0

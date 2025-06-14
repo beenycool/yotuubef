@@ -135,6 +135,13 @@ class TTSService:
         if output_path is None:
             output_path = Path(tempfile.mktemp(suffix='.wav'))
         
+        # Validate and sanitize output path for security
+        try:
+            output_path = TTSSecurityConfig.validate_audio_output_path(output_path)
+        except ValueError as e:
+            self.logger.error(f"Invalid output path: {e}")
+            return None
+        
         # Prioritize local Dia model if available
         if DIA_AVAILABLE:
             result = self._generate_with_dia(segment, output_path)
@@ -463,6 +470,38 @@ class TTSService:
         if DIA_AVAILABLE:
             services.append("dia")
         return services
+    
+    def generate_narrative_audio(self, segments: List['NarrativeSegment']) -> List[Optional[AudioFileClip]]:
+        """
+        Generate audio clips for narrative segments (used by CTA processor)
+        
+        Args:
+            segments: List of NarrativeSegment objects
+            
+        Returns:
+            List of AudioFileClip objects (or None for failed generations)
+        """
+        audio_clips = []
+        
+        for segment in segments:
+            try:
+                # Generate speech for this segment
+                audio_path = self.generate_speech(segment)
+                
+                if audio_path and audio_path.exists():
+                    # Load as AudioFileClip
+                    audio_clip = AudioFileClip(str(audio_path))
+                    audio_clips.append(audio_clip)
+                    self.logger.debug(f"Generated narrative audio for: '{segment.text[:30]}...'")
+                else:
+                    audio_clips.append(None)
+                    self.logger.warning(f"Failed to generate audio for segment: '{segment.text[:30]}...'")
+                    
+            except Exception as e:
+                self.logger.warning(f"Error generating narrative audio: {e}")
+                audio_clips.append(None)
+        
+        return audio_clips
     def _generate_with_pyttsx3(self,
                                segment: NarrativeSegment,
                                output_path: Path) -> Optional[Path]:

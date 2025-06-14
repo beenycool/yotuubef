@@ -14,12 +14,14 @@ import json
 try:
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
+    from googleapiclient.errors import HttpError
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     GOOGLE_API_AVAILABLE = True
 except ImportError:
     GOOGLE_API_AVAILABLE = False
+    HttpError = Exception  # Fallback for error handling
 
 from src.config.settings import get_config
 
@@ -350,10 +352,13 @@ class YouTubeClient:
                 'dislikes': int(stats.get('dislikeCount', 0)),
                 'comments': int(stats.get('commentCount', 0)),
                 'shares': 0,  # Would need additional API calls
-                'impressions': 0,  # Would need YouTube Analytics API
-                'clicks': 0,  # Would need YouTube Analytics API
-                'ctr': 0.0,  # Would be calculated from impressions/clicks
-                'average_view_percentage': 0.0,  # Would need Analytics API
+                'impressions': 0,  # Legacy field for backward compatibility
+                'clicks': 0,  # Legacy field for backward compatibility
+                'ctr': 0.0,  # Legacy field for backward compatibility
+                'average_view_percentage': 0.0,  # Legacy field for backward compatibility
+                'estimated_minutes_watched': 0,  # From YouTube Analytics API
+                'average_view_duration': 0.0,  # From YouTube Analytics API
+                'subscribers_gained': 0,  # From YouTube Analytics API
                 'retrieved_at': datetime.now().isoformat()
             }
             
@@ -376,6 +381,7 @@ class YouTubeClient:
         try:
             await self._ensure_services_initialized()
             if not self.analytics_service:
+                self.logger.info("Analytics service not available - detailed analytics will be skipped")
                 return None
             
             # Get analytics for the last 30 days
@@ -386,7 +392,7 @@ class YouTubeClient:
                 ids='channel==MINE',
                 startDate=start_date,
                 endDate=end_date,
-                metrics='views,impressions,clicks,averageViewPercentage',
+                metrics='views,estimatedMinutesWatched,averageViewDuration,subscribersGained',
                 filters=f'video=={video_id}'
             )
             
@@ -395,15 +401,38 @@ class YouTubeClient:
             if response and response.get('rows'):
                 data = response['rows'][0]  # First row contains the data
                 
+                # New metrics: views, estimatedMinutesWatched, averageViewDuration, subscribersGained
+                estimated_minutes_watched = int(data[1]) if len(data) > 1 else 0
+                average_view_duration = float(data[2]) if len(data) > 2 else 0.0
+                subscribers_gained = int(data[3]) if len(data) > 3 else 0
+                
                 return {
-                    'impressions': int(data[1]) if len(data) > 1 else 0,
-                    'clicks': int(data[2]) if len(data) > 2 else 0,
-                    'ctr': float(data[2]) / float(data[1]) if len(data) > 2 and data[1] > 0 else 0.0,
-                    'average_view_percentage': float(data[3]) if len(data) > 3 else 0.0
+                    'estimated_minutes_watched': estimated_minutes_watched,
+                    'average_view_duration': average_view_duration,
+                    'subscribers_gained': subscribers_gained,
+                    # Keep these for backward compatibility, but set to 0
+                    'impressions': 0,
+                    'clicks': 0,
+                    'ctr': 0.0,
+                    'average_view_percentage': 0.0
                 }
             
             return None
             
+        except HttpError as e:
+            if e.resp.status == 403 and 'accessNotConfigured' in str(e):
+                self.logger.warning(
+                    "YouTube Analytics API is not enabled for this project. "
+                    "To enable it:\n"
+                    "1. Go to https://console.developers.google.com/apis/api/youtubeanalytics.googleapis.com/overview\n"
+                    "2. Select your project and click 'Enable'\n"
+                    "3. Wait a few minutes for the changes to propagate\n"
+                    "Detailed analytics will be unavailable until then."
+                )
+                return None
+            else:
+                self.logger.warning(f"YouTube Analytics API error: {e}")
+                return None
         except Exception as e:
             self.logger.warning(f"Detailed analytics failed: {e}")
             return None
@@ -622,6 +651,9 @@ class YouTubeClient:
             loop = asyncio.get_event_loop()
             return await loop.run_in_executor(None, request.execute)
             
+        except HttpError as e:
+            # Re-raise HttpError so it can be handled specifically by calling methods
+            raise e
         except Exception as e:
             self.logger.error(f"Google API request failed: {e}")
             return None

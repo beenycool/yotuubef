@@ -425,16 +425,31 @@ class EnhancedVideoOrchestrator:
         description_parts = [
             analysis.summary_for_description,
             "",
-            "🔥 Enhanced with AI-powered editing for maximum engagement!",
+            "🔥 Like & Share!",
             "",
-            "📱 Follow for more amazing content!",
+            "👍 SMASH that LIKE button if you enjoyed this!",
+            "🔔 SUBSCRIBE for more amazing content!",
+            "💬 What was your favorite moment? Let us know in the comments!",
+            "📤 SHARE this with friends who need to see this!",
             "",
-            "🏷️ Tags: " + " ".join(analysis.hashtags),
+            "💬 ENGAGE WITH US:",
+            "🤔 What did you think would happen?",
+            "📊 Rate this from 1-10 in the comments!",
+            "",
+            "🔍 DISCOVER MORE:",
+            "✨ Turn on notifications to never miss a video!",
+            "🌟 Check out our other viral content!",
+            "",
+            f"📈 {' '.join(analysis.hashtags)}",
+            "",
+            "📍 SOURCE:",
+            "Original post from Reddit",
+            "Enhanced with AI-powered editing for maximum engagement!"
         ]
         
-        # Add call to action
+        # Add call to action if available
         if hasattr(analysis, 'call_to_action') and analysis.call_to_action:
-            description_parts.insert(-2, f"👍 {analysis.call_to_action.text}")
+            description_parts.insert(-3, f"👍 {analysis.call_to_action.text}")
         
         return "\n".join(description_parts)
     

@@ -9,6 +9,8 @@ import logging
 import argparse
 import json
 import sys
+import atexit
+import signal
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -17,8 +19,11 @@ from src.enhanced_orchestrator import EnhancedVideoOrchestrator
 from src.management.channel_manager import ChannelManager
 from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.integrations.reddit_client import RedditClient
+from src.analytics.analytics_advisor import AnalyticsAdvisor
 from src.config.settings import get_config, setup_logging
 from src.utils.cleanup import clear_temp_files, clear_results, clear_logs
+from src.integrations.spotify_downloader import SpotifyDownloader
+from src.utils.safe_print import safe_print
 
 
 class EnhancedYouTubeGenerator:
@@ -37,9 +42,19 @@ class EnhancedYouTubeGenerator:
         # Initialize management systems
         self.channel_manager = ChannelManager()
         self.enhancement_optimizer = EnhancementOptimizer()
+        self.analytics_advisor = AnalyticsAdvisor()
+        
+        # Initialize music downloader
+        self.spotify_downloader = SpotifyDownloader()
+        self.downloaded_music_files = []
         
         # Initialize Reddit client for automatic video finding (will be initialized async)
         self.reddit_client = None
+        
+        # Register cleanup on exit
+        atexit.register(self._cleanup_music_files)
+        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._signal_handler)
         
         self.logger.info("Enhanced YouTube Generator initialized")
     
@@ -55,6 +70,75 @@ class EnhancedYouTubeGenerator:
         """Clean up resources"""
         if self.reddit_client:
             await self.reddit_client.close()
+        self._cleanup_music_files()
+    
+    def _signal_handler(self, signum, frame):
+        """Handle interrupt signals"""
+        self.logger.info("Received interrupt signal, cleaning up...")
+        self._cleanup_music_files()
+        sys.exit(0)
+    
+    def _cleanup_music_files(self):
+        """Delete downloaded music files"""
+        try:
+            if self.downloaded_music_files:
+                self.logger.info(f"Cleaning up {len(self.downloaded_music_files)} downloaded music files...")
+                for file_path in self.downloaded_music_files:
+                    try:
+                        if file_path.exists():
+                            file_path.unlink()
+                            self.logger.debug(f"Deleted: {file_path}")
+                    except Exception as e:
+                        self.logger.warning(f"Failed to delete {file_path}: {e}")
+                self.downloaded_music_files.clear()
+                self.logger.info("Music cleanup complete")
+        except Exception as e:
+            self.logger.error(f"Error during music cleanup: {e}")
+    
+    def _safe_print(self, message: str):
+        """Safely print Unicode messages, falling back to ASCII if needed"""
+        try:
+            print(message)
+        except UnicodeEncodeError:
+            # Fallback to ASCII-safe version
+            safe_message = message.encode('ascii', 'replace').decode('ascii')
+            print(safe_message)
+    
+    async def _download_top_music(self):
+        """Download top 10 songs at startup"""
+        try:
+            self.logger.info("Downloading top 10 songs for video creation...")
+            safe_print("🎵 Downloading top 10 popular songs...")
+            
+            # Download top charts
+            downloaded_files = self.spotify_downloader.download_top_charts("US", 10)
+            
+            if downloaded_files:
+                self.downloaded_music_files.extend(downloaded_files)
+                self.logger.info(f"Downloaded {len(downloaded_files)} songs successfully")
+                safe_print(f"✅ Downloaded {len(downloaded_files)} songs to music/ folder")
+                
+                # Show downloaded songs
+                for i, file_path in enumerate(downloaded_files[:5], 1):  # Show first 5
+                    safe_print(f"   {i}. {file_path.stem}")
+                if len(downloaded_files) > 5:
+                    safe_print(f"   ... and {len(downloaded_files) - 5} more")
+            else:
+                self.logger.warning("No songs were downloaded")
+                safe_print(f"❌ No songs were downloaded - check your internet connection or install spotify_dl")
+                safe_print(f"💡 You can manually add music files to the music/ folder")
+                
+                # Check if there are existing music files
+                existing_music = list(self.config.paths.music_folder.glob("*.mp3"))
+                if existing_music:
+                    safe_print(f"✅ Found {len(existing_music)} existing music files in music/ folder")
+                    for i, file_path in enumerate(existing_music[:5], 1):
+                        safe_print(f"   {i}. {file_path.stem}")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to download music: {e}")
+            safe_print(f"❌ Failed to download music: {e}")
+            safe_print(f"💡 You can manually add music files to the music/ folder")
     def _print_found_videos_summary(self, result: dict):
         """Print summary of found videos"""
         if not result.get('success') or not result.get('posts'):
@@ -99,8 +183,40 @@ class EnhancedYouTubeGenerator:
         try:
             self.logger.info(f"Processing single video: {reddit_url}")
             
+            # Apply analytics feedback to options
+            if options is None:
+                options = {}
+            
+            # Apply analytics feedback to processing options
+            enhanced_options = self.analytics_advisor.apply_analytics_feedback_to_options(options)
+            if enhanced_options != options:
+                self.logger.info("Applied analytics feedback to video processing options")
+                options = enhanced_options
+            
             # Enhanced processing with all features
             result = await self.orchestrator.process_enhanced_video(reddit_url, options)
+            
+            # Track performance for future analytics feedback
+            if result.get('success') and result.get('video_id'):
+                try:
+                    # Track basic performance data
+                    performance_data = {
+                        'processed_at': datetime.now().isoformat(),
+                        'reddit_url': reddit_url,
+                        'processing_options': options,
+                        'success': True
+                    }
+                    
+                    # Add any available metrics
+                    if result.get('performance_prediction'):
+                        performance_data['predicted_metrics'] = result['performance_prediction']
+                    
+                    self.analytics_advisor.track_video_performance_feedback(
+                        result['video_id'], performance_data
+                    )
+                    
+                except Exception as e:
+                    self.logger.warning(f"Failed to track video performance: {e}")
             
             # Log results
             if result.get('success'):
@@ -172,6 +288,26 @@ class EnhancedYouTubeGenerator:
         """
         try:
             self.logger.info(f"Finding videos from Reddit (max: {max_videos}, sort: {sort_method})")
+            
+            # Apply analytics feedback to options
+            if options is None:
+                options = {}
+            
+            # Get analytics-driven content recommendations
+            content_recommendations = self.analytics_advisor.get_content_recommendations_for_finder()
+            if content_recommendations:
+                self.logger.info("Applying analytics insights to video selection...")
+                
+                # Use preferred subreddits if none specified
+                if not subreddit_names and content_recommendations.get('preferred_subreddits'):
+                    subreddit_names = content_recommendations['preferred_subreddits'][:5]  # Top 5
+                    self.logger.info(f"Using analytics-recommended subreddits: {subreddit_names}")
+            
+            # Apply analytics feedback to processing options
+            enhanced_options = self.analytics_advisor.apply_analytics_feedback_to_options(options)
+            if enhanced_options != options:
+                self.logger.info("Applied analytics feedback to video processing options")
+                options = enhanced_options
             
             # Initialize Reddit client if not already done
             if self.reddit_client is None:
@@ -337,6 +473,32 @@ class EnhancedYouTubeGenerator:
         except Exception as e:
             self.logger.error(f"Status check failed: {e}")
             return {'status': 'error', 'error': str(e)}
+    
+    async def generate_analytics_recommendations(self) -> Dict[str, Any]:
+        """
+        Generate analytics-based recommendations using Gemini AI
+        
+        Returns:
+            Analytics recommendations and insights
+        """
+        try:
+            self.logger.info("Generating analytics recommendations...")
+            
+            # Generate comprehensive recommendations
+            recommendations = await self.analytics_advisor.generate_startup_recommendations()
+            
+            # Print recommendations to console
+            if recommendations.get('success'):
+                self.analytics_advisor.print_recommendations(recommendations)
+            else:
+                safe_print(f"\n❌ Analytics Error: {recommendations.get('error', 'Unknown error')}")
+                safe_print(f"Message: {recommendations.get('message', 'Unable to generate recommendations')}\n")
+            
+            return recommendations
+            
+        except Exception as e:
+            self.logger.error(f"Analytics recommendation generation failed: {e}")
+            return {'success': False, 'error': str(e)}
     
     def _print_processing_summary(self, result: Dict[str, Any]):
         """Print processing summary"""
@@ -581,6 +743,9 @@ Examples:
     # System status
     status_parser = subparsers.add_parser('status', help='Check system status')
     
+    # Analytics recommendations
+    analytics_parser = subparsers.add_parser('analytics', help='Generate AI-powered analytics recommendations')
+    
     # Cleanup command
     cleanup_parser = subparsers.add_parser('cleanup', help='Clean up temporary files, results, and logs')
     cleanup_parser.add_argument('--logs', action='store_true', help='Also clear log files')
@@ -610,6 +775,15 @@ Examples:
     
     # Initialize enhanced generator
     generator = EnhancedYouTubeGenerator()
+    
+    # Download top music on startup (unless it's cleanup command)
+    if args.command != 'cleanup':
+        await generator._download_top_music()
+    
+    # Generate analytics recommendations on startup (unless it's cleanup command)
+    if args.command != 'cleanup':
+        safe_print(f"🎯 Generating analytics recommendations...")
+        await generator.generate_analytics_recommendations()
     
     try:
         if args.command == 'find':
@@ -663,14 +837,14 @@ Examples:
             # Process batch of videos
             urls_file = Path(args.file)
             if not urls_file.exists():
-                print(f"❌ File not found: {urls_file}")
+                safesafe_print(f"❌ File not found: {urls_file}")
                 return
             
             with open(urls_file, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
             
             if not urls:
-                print("❌ No URLs found in file")
+                safe_safe_print(f"❌ No URLs found in file")
                 return
             
             options = {
@@ -708,6 +882,19 @@ Examples:
             # Check system status
             await generator.get_system_status()
         
+        elif args.command == 'analytics':
+            # Generate analytics recommendations
+            result = await generator.generate_analytics_recommendations()
+            
+            # Save result
+            if result.get('success'):
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                result_file = Path(f"data/results/analytics_{timestamp}.json")
+                result_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(result_file, 'w') as f:
+                    json.dump(result, f, indent=2, default=str)
+                print(f"Analytics results saved to: {result_file}")
+        
         elif args.command == 'cleanup':
             print("🧹 Starting cleanup process...")
             clear_temp_files()
@@ -717,10 +904,10 @@ Examples:
             if args.all:
                 # Add any other all-encompassing cleanup here
                 pass
-            print("✅ Cleanup process finished.")
+            safe_safe_print(f"✅ Cleanup process finished.")
     
     except KeyboardInterrupt:
-        print("\n⏹️ Operation interrupted by user")
+        safe_safe_print(f"\n⏹️ Operation interrupted by user")
         print("Cleaning up resources...")
         await generator.cleanup()
     except Exception as e:
@@ -741,7 +928,7 @@ def run_main():
         # Check if we're already in an async context
         try:
             loop = asyncio.get_running_loop()
-            print("⚠️ Already in async context. Use 'await main()' instead.")
+            safe_safe_print(f"⚠️ Already in async context. Use 'await main()' instead.")
             return 1
         except RuntimeError:
             # No running loop - this is what we want
