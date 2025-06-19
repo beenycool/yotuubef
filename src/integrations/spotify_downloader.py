@@ -88,8 +88,7 @@ class SpotifyDownloader:
                         "-l", playlist_url,
                         "-o", str(temp_dir),
                         "-mc", "2",  # Reduced cores to avoid network congestion
-                        "--format", "mp3",  # Specify format
-                        "--skip-existing"  # Skip if already exists
+                        "--format", "mp3"  # Specify format
                     ]
                     
                     # Run the download command with network retry handling

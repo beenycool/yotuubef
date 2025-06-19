@@ -11,7 +11,6 @@ import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from urllib.parse import urlencode, quote
 import base64
@@ -22,22 +21,6 @@ from src.models import SpotifyTrack, SpotifyPlaylist, MusicDownloadConfig
 
 
 # Using Pydantic models from src.models instead of dataclasses
-
-
-@dataclass
-class MusicDownloadConfig:
-    """Configuration for music downloading"""
-    max_tracks: int = 50
-    min_popularity: int = 50
-    preferred_genres: List[str] = None
-    exclude_explicit: bool = True
-    max_duration_seconds: int = 180  # 3 minutes max
-    min_duration_seconds: int = 30   # 30 seconds min
-    quality_preference: str = "medium"  # low, medium, high
-    
-    def __post_init__(self):
-        if self.preferred_genres is None:
-            self.preferred_genres = ["pop", "electronic", "hip-hop", "indie", "rock"]
 
 
 class SpotifyClient:

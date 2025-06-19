@@ -631,9 +631,9 @@ class EnhancedYouTubeGenerator:
                 safe_print(f"\n{i}. 📺 r/{post.subreddit} - {title}")
                 safe_print(f"   📊 Score: {post.score} | 💬 Comments: {post.num_comments}")
                 safe_print(f"   🎭 Narrative Score: {analysis.narrative_potential_score}/100")
-                print(f"   📖 Story Arc: {analysis.story_arc}")
-                print(f"   🎙️ Narrator: {analysis.narrator_persona}")
-                print(f"   🔍 Gaps: {len(analysis.narrative_gaps)} narrative opportunities")
+                safe_print(f"   Story Arc: {analysis.story_arc}")
+                safe_print(f"   Narrator: {analysis.narrator_persona}")
+                safe_print(f"   Gaps: {len(analysis.narrative_gaps)} narrative opportunities")
                 if analysis.narrative_gaps:
                     safe_print(f"   💡 Primary Gap: {analysis.narrative_gaps[0].description}")
                 safe_print(f"   📈 Est. Retention: {analysis.estimated_retention}%")
@@ -667,8 +667,8 @@ class EnhancedYouTubeGenerator:
         safe_print(f"\n🎭 Narrative Insights:")
         safe_print(f"   📊 Avg Narrative Score: {insights['average_narrative_score']:.1f}/100")
         safe_print(f"   📖 Story Arcs: {', '.join(insights['story_arcs_used'])}")
-        print(f"   🎙️ Personas: {', '.join(insights['narrator_personas_used'])}")
-        print(f"   🔍 Total Gaps Leveraged: {insights['total_narrative_gaps_leveraged']}")
+        safe_print(f"   Personas: {', '.join(insights['narrator_personas_used'])}")
+        safe_print(f"   Total Gaps Leveraged: {insights['total_narrative_gaps_leveraged']}")
         
         # Show successful results
         successful_results = [r for r in result['individual_results'] if r['result'].get('success')]
@@ -1078,8 +1078,21 @@ Examples:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 result_file = Path(f"data/results/results_find_{timestamp}.json")
                 result_file.parent.mkdir(parents=True, exist_ok=True)
+                
+                # Convert Path objects to strings for JSON serialization
+                def convert_paths(obj):
+                    if isinstance(obj, Path):
+                        return str(obj)
+                    elif isinstance(obj, dict):
+                        return {k: convert_paths(v) for k, v in obj.items()}
+                    elif isinstance(obj, list):
+                        return [convert_paths(item) for item in obj]
+                    return obj
+                
+                serializable_result = convert_paths(result)
+                
                 with open(result_file, 'w') as f:
-                    json.dump(result, f, indent=2)
+                    json.dump(serializable_result, f, indent=2)
                 print(f"Results saved to: {result_file}")
             else:
                 print(f"ERROR: Auto video finding failed: {result.get('error')}")
@@ -1177,11 +1190,11 @@ Examples:
             safe_print(f"✅ Cleanup process finished.")
     
     except KeyboardInterrupt:
-        safe_print(f"\n⏹️ Operation interrupted by user")
-        print("Cleaning up resources...")
+        safe_print(f"\nOperation interrupted by user")
+        safe_print("Cleaning up resources...")
         await generator.cleanup()
     except Exception as e:
-        print(f"🚨 ERROR: Operation failed: {e}")
+        safe_print(f"ERROR: Operation failed: {e}")
         logging.getLogger(__name__).exception("Main operation failed")
         await generator.cleanup()
     finally:

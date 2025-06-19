@@ -6,6 +6,7 @@ Now using Google Gemini API instead of OpenAI.
 
 import logging
 import json
+import asyncio
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
@@ -13,6 +14,12 @@ from pathlib import Path
 from src.integrations.gemini_ai_client import GeminiAIClient
 from src.config.settings import get_config
 from src.models import VideoAnalysisEnhanced
+
+try:
+    from google.genai import types
+    TYPES_AVAILABLE = True
+except ImportError:
+    TYPES_AVAILABLE = False
 
 
 class AIClient:
@@ -162,11 +169,18 @@ class AIClient:
             prompt = prompts[content_type].format(content=json.dumps(context, indent=2))
             
             # Use Gemini to generate content
-            response = await self.gemini_client.model.generate_content_async(
-                prompt,
-                generation_config={
+            response = await asyncio.to_thread(
+                self.gemini_client.client.models.generate_content,
+                model=self.gemini_client.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.8,
+                    max_output_tokens=1000,
+                    candidate_count=1
+                ) if TYPES_AVAILABLE else {
                     'temperature': 0.8,
-                    'max_output_tokens': 1000
+                    'max_output_tokens': 1000,
+                    'candidate_count': 1
                 }
             )
             
@@ -226,11 +240,18 @@ class AIClient:
             }}
             """
             
-            response = await self.gemini_client.model.generate_content_async(
-                prompt,
-                generation_config={
+            response = await asyncio.to_thread(
+                self.gemini_client.client.models.generate_content,
+                model=self.gemini_client.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.3,
+                    max_output_tokens=1500,
+                    candidate_count=1
+                ) if TYPES_AVAILABLE else {
                     'temperature': 0.3,
-                    'max_output_tokens': 1500
+                    'max_output_tokens': 1500,
+                    'candidate_count': 1
                 }
             )
             

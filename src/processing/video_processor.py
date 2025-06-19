@@ -2073,7 +2073,7 @@ class VideoProcessor:
                 self.logger.warning("No audio elements available, creating fallback background music")
                 # Try to create fallback background music from available files
                 try:
-                    video_duration = getattr(source_clip, 'duration', 60.0)
+                    # Use video_duration that's already calculated in this method
                     fallback_audio = self._create_fallback_audio(video_duration, resource_manager)
                     if fallback_audio:
                         self.logger.info("Created fallback background music")

@@ -17,6 +17,12 @@ from src.analytics.analytics_feedback import AnalyticsFeedbackSystem
 from src.config.settings import get_config
 from src.utils.safe_print import safe_print
 
+try:
+    from google.genai import types
+    TYPES_AVAILABLE = True
+except ImportError:
+    TYPES_AVAILABLE = False
+
 
 class AnalyticsAdvisor:
     """
@@ -302,9 +308,14 @@ class AnalyticsAdvisor:
             await self.gemini_client.rate_limiter.wait_if_needed()
             
             response = await asyncio.to_thread(
-                self.gemini_client.model.generate_content,
-                prompt,
-                generation_config={
+                self.gemini_client.client.models.generate_content,
+                model=self.gemini_client.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.7,
+                    max_output_tokens=3000,
+                    candidate_count=1
+                ) if TYPES_AVAILABLE else {
                     'temperature': 0.7,
                     'max_output_tokens': 3000,
                     'candidate_count': 1
@@ -421,6 +432,10 @@ Unfortunately, analytics data could not be retrieved at this time.
         try:
             action_items = []
             
+            # Handle None recommendations gracefully
+            if not recommendations:
+                return ["Review your analytics data", "Check your latest video performance", "Optimize your next video title"]
+            
             # Look for immediate actions section
             if "IMMEDIATE ACTIONS" in recommendations:
                 lines = recommendations.split('\n')
@@ -530,9 +545,14 @@ Unfortunately, analytics data could not be retrieved at this time.
             await self.gemini_client.rate_limiter.wait_if_needed()
             
             response = await asyncio.to_thread(
-                self.gemini_client.model.generate_content,
-                prompt,
-                generation_config={
+                self.gemini_client.client.models.generate_content,
+                model=self.gemini_client.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.6,
+                    max_output_tokens=2000,
+                    candidate_count=1
+                ) if TYPES_AVAILABLE else {
                     'temperature': 0.6,
                     'max_output_tokens': 2000,
                     'candidate_count': 1

@@ -211,10 +211,13 @@ class GeminiAIClient:
                 return None
             
             # Convert to VideoAnalysisEnhanced
-            enhanced_analysis = self._convert_to_enhanced_analysis(analysis_result, reddit_content)
-            
-            self.logger.info("Gemini video content analysis completed")
-            return enhanced_analysis
+            if analysis_result:
+                enhanced_analysis = self._convert_to_enhanced_analysis(analysis_result, reddit_content)
+                self.logger.info("Gemini video content analysis completed")
+                return enhanced_analysis
+            else:
+                self.logger.error("Analysis result is None, cannot convert to enhanced analysis")
+                return None
             
         except Exception as e:
             self.logger.error(f"Gemini video analysis failed: {e}")
@@ -285,8 +288,16 @@ class GeminiAIClient:
                 )
             )
             
-            # Parse response
+            # Parse response with better error handling
+            if not response or not hasattr(response, 'text'):
+                self.logger.error("Invalid response from Gemini API")
+                return None
+                
             content = response.text
+            if not content:
+                self.logger.error("Empty response from Gemini API")
+                return None
+                
             self.logger.debug(f"Gemini response: {content[:200]}...")
             
             # Try to extract JSON from response
@@ -298,8 +309,10 @@ class GeminiAIClient:
                 if start_idx >= 0 and end_idx > start_idx:
                     json_str = content[start_idx:end_idx]
                     return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                self.logger.warning(f"JSON parsing failed: {e}")
+            except Exception as e:
+                self.logger.warning(f"Response parsing error: {e}")
             
             # If JSON parsing fails, create structured response from text
             return self._parse_gemini_text_response(content, context)
@@ -568,6 +581,11 @@ class GeminiAIClient:
                                     reddit_content: Any) -> VideoAnalysisEnhanced:
         """Convert Gemini analysis result to VideoAnalysisEnhanced model"""
         try:
+            if not analysis_result:
+                raise ValueError("Analysis result is None or empty")
+            
+            if not isinstance(analysis_result, dict):
+                raise TypeError(f"Analysis result must be dict, got {type(analysis_result)}")
             from src.models import (
                 HookMoment, AudioHook, VideoSegment, ThumbnailInfo, CallToAction,
                 AudioDuckingConfig

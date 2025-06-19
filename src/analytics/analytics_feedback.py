@@ -124,6 +124,10 @@ class AnalyticsFeedbackSystem:
             'length_recommendations': {}
         }
         
+        # Handle None recommendations gracefully
+        if not recommendations:
+            return content_insights
+        
         # Extract keywords and topics mentioned in recommendations
         rec_lower = recommendations.lower()
         
@@ -158,6 +162,10 @@ class AnalyticsFeedbackSystem:
             'optimal_hours': [],
             'posting_frequency': {}
         }
+        
+        # Handle None recommendations gracefully
+        if not recommendations:
+            return timing_insights
         
         rec_lower = recommendations.lower()
         
@@ -194,6 +202,10 @@ class AnalyticsFeedbackSystem:
             'thumbnail_strategies': [],
             'engagement_strategies': []
         }
+        
+        # Handle None recommendations gracefully
+        if not recommendations:
+            return optimization_insights
         
         rec_lower = recommendations.lower()
         
