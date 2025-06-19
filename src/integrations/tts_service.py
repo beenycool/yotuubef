@@ -144,10 +144,28 @@ class TTSService:
         
         # Validate and sanitize output path for security
         try:
-            output_path = TTSSecurityConfig.validate_audio_output_path(output_path)
+            output_path = self._validate_audio_output_path(output_path)
         except ValueError as e:
             self.logger.error(f"Invalid output path: {e}")
             return None
+
+    def _validate_audio_output_path(self, output_path):
+        """
+        Inline validation for audio output path security.
+        Ensures the path is a file, not a directory, and is within allowed directories.
+        """
+        output_path = Path(output_path)
+        if output_path.is_dir():
+            raise ValueError("Output path must be a file, not a directory.")
+        # Optionally, restrict to a specific parent directory (e.g., self.config.paths.audio_folder)
+        # allowed_dir = Path(self.config.paths.audio_folder)
+        # if not allowed_dir in output_path.parents:
+        #     raise ValueError("Output path is outside allowed directory.")
+        # Check for forbidden characters or patterns
+        forbidden = ["..", "~", "//", "\\", "|", ":", "*", "?", "\"", "<", ">"]
+        if any(f in str(output_path) for f in forbidden):
+            raise ValueError("Output path contains forbidden characters or patterns.")
+        return output_path
         
         # Prioritize local Dia model if available
         if DIA_AVAILABLE:

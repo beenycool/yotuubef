@@ -276,36 +276,46 @@ class GeminiAIClient:
             
             self.logger.debug(f"Sending prompt to Gemini: {prompt[:100]}...")
             
-            # Make API call using new unified SDK
-            response = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                    max_output_tokens=2000,
-                    candidate_count=1
+            # Make API call using new unified SDK with timeout for robustness
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        self.client.models.generate_content,
+                        model=self.model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=0.7,
+                            max_output_tokens=2000,
+                            candidate_count=1
+                        )
+                    ),
+                    timeout=20
                 )
-            )
-            
+            except asyncio.TimeoutError:
+                self.logger.error("Gemini API call timed out after 20 seconds")
+                return None
+            except Exception as e:
+                self.logger.error(f"Gemini API call failed: {e}")
+                return None
+
             # Parse response with better error handling
-            if not response or not hasattr(response, 'text'):
-                self.logger.error("Invalid response from Gemini API")
+            if not response or not hasattr(response, 'text') or response.text is None:
+                self.logger.error("Invalid or missing response from Gemini API")
                 return None
-                
+
             content = response.text
-            if not content:
-                self.logger.error("Empty response from Gemini API")
+            if not isinstance(content, str) or not content.strip():
+                self.logger.error("Empty or non-string response from Gemini API")
                 return None
-                
+
             self.logger.debug(f"Gemini response: {content[:200]}...")
-            
+
             # Try to extract JSON from response
             try:
                 # Look for JSON block in response
                 start_idx = content.find('{')
                 end_idx = content.rfind('}') + 1
-                
+
                 if start_idx >= 0 and end_idx > start_idx:
                     json_str = content[start_idx:end_idx]
                     return json.loads(json_str)
@@ -313,7 +323,7 @@ class GeminiAIClient:
                 self.logger.warning(f"JSON parsing failed: {e}")
             except Exception as e:
                 self.logger.warning(f"Response parsing error: {e}")
-            
+
             # If JSON parsing fails, create structured response from text
             return self._parse_gemini_text_response(content, context)
             

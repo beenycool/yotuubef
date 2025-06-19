@@ -8,7 +8,6 @@ import subprocess
 import os
 from pathlib import Path
 from typing import List, Optional
-import re
 import shutil
 import tempfile
 
@@ -55,126 +54,139 @@ class SpotifyDownloader:
 
     def download_playlist(self, playlist_url: str, output_dir: Optional[Path] = None) -> List[Path]:
         """
-        Download a Spotify playlist using spotify_dl with improved error handling
-        
-        Args:
-            playlist_url: URL of Spotify playlist
-            output_dir: Optional output directory (defaults to music folder)
-            
-        Returns:
-            List of downloaded file paths
+        Download a Spotify playlist using spotify_dl with improved error handling.
+        Refactored for readability and maintainability.
         """
         max_retries = 3
         retry_delay = 2  # seconds
-        
+        output_dir = output_dir or self.download_dir
+
+        if not self._check_spotify_dl_available_and_log():
+            return []
+
         for attempt in range(max_retries):
             try:
-                output_dir = output_dir or self.download_dir
-                
-                # Check if spotify_dl is available
-                if not self._check_spotify_dl_available():
-                    self.logger.warning("spotify_dl not found. Please install it with: pip install spotify_dl")
-                    self.logger.info("Skipping music download - you can add music files manually to the music/ folder")
+                downloaded_files, error, should_retry = self._attempt_single_download(
+                    playlist_url, output_dir, attempt, max_retries, retry_delay
+                )
+                if downloaded_files:
+                    return downloaded_files
+                if not should_retry:
+                    self._handle_download_failure(error, attempt, max_retries)
                     return []
-                
-                # Create temp directory for downloads
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    # Build spotify_dl command using the cached working command
-                    if self._spotify_dl_command is None:
-                        # Fallback if command wasn't cached
-                        self._spotify_dl_command = ["spotify_dl"]
-                    
-                    cmd = self._spotify_dl_command + [
-                        "-l", playlist_url,
-                        "-o", str(temp_dir),
-                        "-mc", "2",  # Reduced cores to avoid network congestion
-                        "--format", "mp3"  # Specify format
-                    ]
-                    
-                    # Run the download command with network retry handling
-                    self.logger.info(f"Downloading playlist (attempt {attempt + 1}/{max_retries}): {playlist_url}")
-                    
-                    try:
-                        result = subprocess.run(
-                            cmd,
-                            capture_output=True,
-                            text=True,
-                            timeout=600,  # 10 minute timeout
-                            check=False  # Don't raise on non-zero exit
-                        )
-                        
-                        # Check for network-related errors in output
-                        error_output = result.stderr.lower() if result.stderr else ""
-                        network_errors = [
-                            "network", "timeout", "connection", "unavailable",
-                            "http error", "ssl", "certificate", "dns"
-                        ]
-                        
-                        is_network_error = any(error in error_output for error in network_errors)
-                        
-                        if result.returncode != 0:
-                            if is_network_error and attempt < max_retries - 1:
-                                self.logger.warning(f"Network error detected, retrying in {retry_delay} seconds...")
-                                self.logger.debug(f"Error details: {result.stderr}")
-                                import time
-                                time.sleep(retry_delay)
-                                retry_delay *= 2  # Exponential backoff
-                                continue
-                            else:
-                                self.logger.error(f"Download failed after {attempt + 1} attempts: {result.stderr}")
-                                if "No tracks found" in result.stderr:
-                                    self.logger.info("Playlist might be empty or private")
-                                return []
-                        
-                        # Move downloaded files to music directory
-                        downloaded_files = []
-                        for root, _, files in os.walk(temp_dir):
-                            for file in files:
-                                if file.endswith((".mp3", ".m4a", ".wav", ".flac")):
-                                    src_path = Path(root) / file
-                                    # Create safe filename
-                                    safe_filename = sanitize_filename(file)
-                                    dest_path = output_dir / safe_filename
-                                    
-                                    # Avoid overwriting existing files
-                                    counter = 1
-                                    while dest_path.exists():
-                                        name, ext = safe_filename.rsplit('.', 1)
-                                        dest_path = output_dir / f"{name}_{counter}.{ext}"
-                                        counter += 1
-                                    
-                                    try:
-                                        shutil.move(str(src_path), str(dest_path))
-                                        downloaded_files.append(dest_path)
-                                        self.logger.debug(f"Downloaded: {dest_path.name}")
-                                    except Exception as move_error:
-                                        self.logger.warning(f"Failed to move file {file}: {move_error}")
-                        
-                        self.logger.info(f"Successfully downloaded {len(downloaded_files)} tracks from {playlist_url}")
-                        return downloaded_files
-                        
-                    except subprocess.TimeoutExpired:
-                        if attempt < max_retries - 1:
-                            self.logger.warning(f"Download timeout (attempt {attempt + 1}), retrying...")
-                            continue
-                        else:
-                            self.logger.error("Download timeout after all retries")
-                            return []
-                    
+                # Exponential backoff for retry
+                import time
+                time.sleep(retry_delay)
+                retry_delay *= 2
             except Exception as e:
                 if attempt < max_retries - 1:
-                    self.logger.warning(f"Error on attempt {attempt + 1}: {e}, retrying...")
+                    import random
+                    jitter = random.uniform(-0.2, 0.2) * retry_delay
+                    actual_delay = max(1, retry_delay + jitter)
+                    self.logger.warning(f"Error on attempt {attempt + 1}: {e}, retrying after {actual_delay:.1f}s...")
                     import time
-                    time.sleep(retry_delay)
+                    time.sleep(actual_delay)
                     retry_delay *= 2
                     continue
                 else:
                     self.logger.error(f"Error downloading playlist after {max_retries} attempts: {e}")
                     return []
-        
         self.logger.error("All download attempts failed")
         return []
-    
+
+    def _check_spotify_dl_available_and_log(self) -> bool:
+        if not self._check_spotify_dl_available():
+            self.logger.warning("spotify_dl not found. Please install it with: pip install spotify_dl")
+            self.logger.info("Skipping music download - you can add music files manually to the music/ folder")
+            return False
+        return True
+
+    def _attempt_single_download(self, playlist_url, output_dir, attempt, max_retries, retry_delay):
+        import time
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cmd = self._get_spotify_dl_command(playlist_url, temp_dir)
+            self.logger.info(f"Downloading playlist (attempt {attempt + 1}/{max_retries}): {playlist_url}")
+            result, timeout = self._run_spotify_dl_command(cmd)
+            if timeout:
+                if attempt < max_retries - 1:
+                    self.logger.warning(f"Download timeout (attempt {attempt + 1}), retrying...")
+                    return None, "timeout", True
+                else:
+                    return None, "timeout", False
+            should_retry = self._should_retry_download(result, attempt, max_retries)
+            if result and result.returncode == 0:
+                downloaded_files = self._move_downloaded_files(temp_dir, output_dir)
+                self.logger.info(f"Successfully downloaded {len(downloaded_files)} tracks from {playlist_url}")
+                return downloaded_files, None, False
+            else:
+                return None, result.stderr if result else "unknown error", should_retry
+
+    def _get_spotify_dl_command(self, playlist_url, temp_dir):
+        if self._spotify_dl_command is None:
+            self._spotify_dl_command = ["spotify_dl"]
+        return self._spotify_dl_command + [
+            "-l", playlist_url,
+            "-o", str(temp_dir),
+            "-mc", "2",
+            "--format", "mp3"
+        ]
+
+    def _run_spotify_dl_command(self, cmd):
+        import subprocess
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                check=False
+            )
+            return result, False
+        except subprocess.TimeoutExpired:
+            return None, True
+
+    def _should_retry_download(self, result, attempt, max_retries):
+        if not result or result.returncode == 0:
+            return False
+        error_output = result.stderr.lower() if result.stderr else ""
+        network_errors = [
+            "network", "timeout", "connection", "unavailable",
+            "http error", "ssl", "certificate", "dns"
+        ]
+        is_network_error = any(error in error_output for error in network_errors)
+        return is_network_error and attempt < max_retries - 1
+
+    def _handle_download_failure(self, error, attempt, max_retries):
+        if error == "timeout":
+            self.logger.error("Download timeout after all retries")
+        else:
+            self.logger.error(f"Download failed after {attempt + 1} attempts: {error}")
+            if error and "No tracks found" in error:
+                self.logger.info("Playlist might be empty or private")
+
+    def _move_downloaded_files(self, temp_dir, output_dir):
+        from pathlib import Path
+        import shutil
+        from src.utils.common_utils import sanitize_filename
+        downloaded_files = []
+        for root, _, files in os.walk(temp_dir):
+            for file in files:
+                if file.endswith((".mp3", ".m4a", ".wav", ".flac")):
+                    src_path = Path(root) / file
+                    safe_filename = sanitize_filename(file)
+                    dest_path = output_dir / safe_filename
+                    counter = 1
+                    while dest_path.exists():
+                        name, ext = safe_filename.rsplit('.', 1)
+                        dest_path = output_dir / f"{name}_{counter}.{ext}"
+                        counter += 1
+                    try:
+                        shutil.move(str(src_path), str(dest_path))
+                        downloaded_files.append(dest_path)
+                        self.logger.debug(f"Downloaded: {dest_path.name}")
+                    except Exception as move_error:
+                        self.logger.warning(f"Failed to move file {file}: {move_error}")
+        return downloaded_files
     def download_top_charts(self, country: str = "US", limit: int = 10) -> List[Path]:
         """
         Download top charts using Spotify's official playlist IDs

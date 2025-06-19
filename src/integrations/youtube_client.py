@@ -66,108 +66,90 @@ class YouTubeClient:
             await asyncio.to_thread(self._initialize_services)
             self._services_initialized = True
     
-    def _get_credentials(self):
+    def _load_credentials_from_source(self, token_data: Dict[str, Any], source_name: str) -> Optional[Credentials]:
+        """Load credentials from token data with scope validation"""
+        # Try with current scopes first
+        creds = Credentials.from_authorized_user_info(token_data, self.scopes)
+        self.logger.info(f"Loaded credentials from {source_name}")
+
+        # Validate scopes
+        if not self._validate_scopes(creds, self.scopes):
+            self.logger.warning(f"{source_name} credentials have scope issues, trying with basic scopes")
+            # Fallback to basic scopes
+            basic_scopes = [
+                'https://www.googleapis.com/auth/youtube.upload',
+                'https://www.googleapis.com/auth/youtube.force-ssl',
+                'https://www.googleapis.com/auth/youtubepartner'
+            ]
+            creds = Credentials.from_authorized_user_info(token_data, basic_scopes)
+        
+        return creds
+
+    def _refresh_credentials(self, creds: Credentials, source_name: str, token_file: Optional[Path] = None) -> Optional[Credentials]:
+        """Attempt to refresh credentials and update storage"""
+        try:
+            creds.refresh(Request())
+            self.logger.info(f"Successfully refreshed credentials from {source_name}")
+            
+            # Update storage based on source
+            if source_name == "environment variable":
+                self._update_token_in_env(creds)
+            elif source_name == "token file" and token_file:
+                with open(token_file, 'w') as f:
+                    f.write(creds.to_json())
+                self.logger.info(f"Updated token file: {token_file}")
+            
+            return creds
+        except Exception as refresh_error:
+            self.logger.warning(f"Failed to refresh {source_name} credentials: {refresh_error}")
+            return None
+
+    def _get_credentials(self) -> Optional[Credentials]:
         """Get YouTube API credentials from environment variable or file"""
         try:
             import os
             import json
             from pathlib import Path
-            
-            # First try YOUTUBE_TOKEN_JSON environment variable
-            youtube_token_env = os.getenv('YOUTUBE_TOKEN_JSON')
-            if youtube_token_env:
+
+            # Helper function to load credentials from a source
+            def load_credentials(token_str: str, source_name: str, token_file: Optional[Path] = None) -> Optional[Credentials]:
                 try:
-                    token_data = json.loads(youtube_token_env)
+                    token_data = json.loads(token_str)
+                    creds = self._load_credentials_from_source(token_data, source_name)
                     
-                    # Try with current scopes first
-                    creds = Credentials.from_authorized_user_info(token_data, self.scopes)
-                    self.logger.info("Loaded credentials from YOUTUBE_TOKEN_JSON environment variable")
-                    
-                    # Validate scopes
-                    if not self._validate_scopes(creds, self.scopes):
-                        self.logger.warning("Environment credentials have scope issues, trying with basic scopes")
-                        # Fallback to basic scopes
-                        basic_scopes = [
-                            'https://www.googleapis.com/auth/youtube.upload',
-                            'https://www.googleapis.com/auth/youtube.force-ssl',
-                            'https://www.googleapis.com/auth/youtubepartner'
-                        ]
-                        creds = Credentials.from_authorized_user_info(token_data, basic_scopes)
-                    
-                    # If credentials are valid, return them immediately
                     if creds and creds.valid:
-                        self.logger.info("Environment credentials are valid and ready to use")
+                        self.logger.info(f"{source_name} credentials are valid and ready to use")
                         return creds
                     
-                    # If credentials exist but are expired, try to refresh
                     if creds and creds.expired and creds.refresh_token:
-                        try:
-                            creds.refresh(Request())
-                            self.logger.info("Successfully refreshed credentials from environment variable")
-                            # Update the environment variable with refreshed token
-                            self._update_token_in_env(creds)
-                            return creds
-                        except Exception as refresh_error:
-                            self.logger.warning(f"Failed to refresh credentials from env var: {refresh_error}")
-                            # Fall through to try file-based approach
+                        return self._refresh_credentials(creds, source_name, token_file)
                     
+                    self.logger.warning(f"Credentials from {source_name} are invalid")
+                    return None
                 except json.JSONDecodeError as e:
-                    self.logger.error(f"Invalid JSON in YOUTUBE_TOKEN_JSON environment variable: {e}")
-                    # Fall through to try file-based approach
+                    self.logger.error(f"Invalid JSON in {source_name}: {e}")
                 except Exception as e:
-                    self.logger.warning(f"Error loading credentials from environment variable: {e}")
-                    # Fall through to try file-based approach
-            
+                    self.logger.warning(f"Error loading credentials from {source_name}: {e}")
+                return None
+
+            # Try environment variable first
+            youtube_token_env = os.getenv('YOUTUBE_TOKEN_JSON')
+            if youtube_token_env:
+                creds = load_credentials(youtube_token_env, "environment variable")
+                if creds:
+                    return creds
+
             # Try file-based approach as fallback
             token_file = self.config.paths.youtube_token_file
             if token_file and token_file.exists():
                 try:
                     with open(token_file, 'r') as f:
-                        token_data = json.load(f)
-                    
-                    # Try with current scopes first
-                    creds = Credentials.from_authorized_user_info(token_data, self.scopes)
-                    self.logger.info(f"Loaded credentials from token file: {token_file}")
-                    
-                    # Validate scopes
-                    if not self._validate_scopes(creds, self.scopes):
-                        self.logger.warning("File credentials have scope issues, trying with basic scopes")
-                        # Fallback to basic scopes
-                        basic_scopes = [
-                            'https://www.googleapis.com/auth/youtube.upload',
-                            'https://www.googleapis.com/auth/youtube.force-ssl',
-                            'https://www.googleapis.com/auth/youtubepartner'
-                        ]
-                        creds = Credentials.from_authorized_user_info(token_data, basic_scopes)
-                    
-                    # If credentials are valid, return them immediately
-                    if creds and creds.valid:
-                        self.logger.info("File-based credentials are valid and ready to use")
-                        return creds
-                    
-                    # If credentials exist but are expired, try to refresh
-                    if creds and creds.expired and creds.refresh_token:
-                        try:
-                            creds.refresh(Request())
-                            self.logger.info("Successfully refreshed credentials from token file")
-                            # Update the token file with refreshed credentials
-                            with open(token_file, 'w') as f:
-                                f.write(creds.to_json())
-                            self.logger.info(f"Updated token file: {token_file}")
-                            return creds
-                        except Exception as refresh_error:
-                            self.logger.error(f"Failed to refresh credentials from file: {refresh_error}")
-                            self.logger.info("This might be due to scope issues. Try running 'python auth_youtube.py' to re-authenticate")
-                            return None
-                    else:
-                        self.logger.error("File-based credentials are invalid and cannot be refreshed")
-                        self.logger.info("Try running 'python auth_youtube.py' to re-authenticate with proper scopes")
-                        return None
-                        
+                        token_str = f.read()
+                    return load_credentials(token_str, "token file", token_file)
                 except (json.JSONDecodeError, FileNotFoundError) as e:
                     self.logger.error(f"Error loading credentials from token file: {e}")
-                    return None
             
+            # No valid credentials found
             self.logger.warning("No valid YouTube credentials found. YouTube functionality will be disabled.")
             self.logger.info("To fix this:")
             self.logger.info("1. Run 'python auth_youtube.py' to create proper credentials with required scopes")
@@ -374,9 +356,95 @@ class YouTubeClient:
             self.logger.error(f"Failed to get video info for {video_id}: {e}")
             return None
     
+    async def _fetch_analytics(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Internal method to fetch analytics data without timeout handling.
+        """
+        await self._ensure_services_initialized()
+        if not self.analytics_service:
+            return None
+
+        # Get video statistics from main API
+        video_info = await self.get_video_info(video_id)
+        if not video_info:
+            return None
+
+        stats = video_info.get('statistics', {})
+
+        # Basic analytics from video statistics
+        analytics = {
+            'video_id': video_id,
+            'views': int(stats.get('viewCount', 0)),
+            'likes': int(stats.get('likeCount', 0)),
+            'dislikes': int(stats.get('dislikeCount', 0)),
+            'comments': int(stats.get('commentCount', 0)),
+            'shares': 0,  # Would need additional API calls
+            'impressions': 0,  # Legacy field for backward compatibility
+            'clicks': 0,  # Legacy field for backward compatibility
+            'ctr': 0.0,  # Legacy field for backward compatibility
+            'average_view_percentage': 0.0,  # Legacy field for backward compatibility
+            'estimated_minutes_watched': 0,  # From YouTube Analytics API
+            'average_view_duration': 0.0,  # From YouTube Analytics API
+            'subscribers_gained': 0,  # From YouTube Analytics API
+            'retrieved_at': datetime.now().isoformat()
+        }
+
+        # Try to get additional analytics if possible
+        try:
+            detailed_analytics = await self._get_detailed_analytics(video_id)
+            if detailed_analytics:
+                analytics.update(detailed_analytics)
+        except Exception as e:
+            self.logger.warning(f"Detailed analytics unavailable: {e}")
+
+        return analytics
+
+    async def _fetch_analytics(self, video_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Internal method to fetch analytics data without timeout handling.
+        """
+        await self._ensure_services_initialized()
+        if not self.analytics_service:
+            return None
+
+        # Get video statistics from main API
+        video_info = await self.get_video_info(video_id)
+        if not video_info:
+            return None
+
+        stats = video_info.get('statistics', {})
+
+        # Basic analytics from video statistics
+        analytics = {
+            'video_id': video_id,
+            'views': int(stats.get('viewCount', 0)),
+            'likes': int(stats.get('likeCount', 0)),
+            'dislikes': int(stats.get('dislikeCount', 0)),
+            'comments': int(stats.get('commentCount', 0)),
+            'shares': 0,  # Would need additional API calls
+            'impressions': 0,  # Legacy field for backward compatibility
+            'clicks': 0,  # Legacy field for backward compatibility
+            'ctr': 0.0,  # Legacy field for backward compatibility
+            'average_view_percentage': 0.0,  # Legacy field for backward compatibility
+            'estimated_minutes_watched': 0,  # From YouTube Analytics API
+            'average_view_duration': 0.0,  # From YouTube Analytics API
+            'subscribers_gained': 0,  # From YouTube Analytics API
+            'retrieved_at': datetime.now().isoformat()
+        }
+
+        # Try to get additional analytics if possible
+        try:
+            detailed_analytics = await self._get_detailed_analytics(video_id)
+            if detailed_analytics:
+                analytics.update(detailed_analytics)
+        except Exception as e:
+            self.logger.warning(f"Detailed analytics unavailable: {e}")
+
+        return analytics
+
     async def get_video_analytics(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
-        Get video analytics data
+        Get video analytics data with timeout handling
         
         Args:
             video_id: YouTube video ID
@@ -385,45 +453,10 @@ class YouTubeClient:
             Analytics data or None if failed
         """
         try:
-            await self._ensure_services_initialized()
-            if not self.analytics_service:
-                return None
-            
-            # Get video statistics from main API
-            video_info = await self.get_video_info(video_id)
-            if not video_info:
-                return None
-            
-            stats = video_info.get('statistics', {})
-            
-            # Basic analytics from video statistics
-            analytics = {
-                'video_id': video_id,
-                'views': int(stats.get('viewCount', 0)),
-                'likes': int(stats.get('likeCount', 0)),
-                'dislikes': int(stats.get('dislikeCount', 0)),
-                'comments': int(stats.get('commentCount', 0)),
-                'shares': 0,  # Would need additional API calls
-                'impressions': 0,  # Legacy field for backward compatibility
-                'clicks': 0,  # Legacy field for backward compatibility
-                'ctr': 0.0,  # Legacy field for backward compatibility
-                'average_view_percentage': 0.0,  # Legacy field for backward compatibility
-                'estimated_minutes_watched': 0,  # From YouTube Analytics API
-                'average_view_duration': 0.0,  # From YouTube Analytics API
-                'subscribers_gained': 0,  # From YouTube Analytics API
-                'retrieved_at': datetime.now().isoformat()
-            }
-            
-            # Try to get additional analytics if possible
-            try:
-                detailed_analytics = await self._get_detailed_analytics(video_id)
-                if detailed_analytics:
-                    analytics.update(detailed_analytics)
-            except Exception as e:
-                self.logger.warning(f"Detailed analytics unavailable: {e}")
-            
-            return analytics
-            
+            return await asyncio.wait_for(self._fetch_analytics(video_id), timeout=20)
+        except asyncio.TimeoutError:
+            self.logger.error(f"Analytics retrieval for {video_id} timed out after 20 seconds")
+            return None
         except Exception as e:
             self.logger.error(f"Analytics retrieval failed for {video_id}: {e}")
             return None
@@ -552,16 +585,32 @@ class YouTubeClient:
             self.logger.error(f"Failed to get recent videos: {e}")
             return []
     
+    def _process_comment(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        """Process a comment thread item into a standardized dictionary"""
+        top_comment = item['snippet']['topLevelComment']
+        snippet = top_comment['snippet']
+        
+        return {
+            'id': top_comment['id'],
+            'textDisplay': snippet['textDisplay'],
+            'textOriginal': snippet['textOriginal'],
+            'authorDisplayName': snippet['authorDisplayName'],
+            'authorProfileImageUrl': snippet['authorProfileImageUrl'],
+            'publishedAt': snippet['publishedAt'],
+            'likeCount': snippet['likeCount'],
+            'totalReplyCount': item['snippet']['totalReplyCount']
+        }
+
     async def get_video_comments(self, video_id: str, max_results: int = 50) -> List[Dict[str, Any]]:
         """
-        Get comments for a video
+        Get top-level comments for a YouTube video
         
         Args:
             video_id: YouTube video ID
             max_results: Maximum number of comments to retrieve
             
         Returns:
-            List of comment data
+            List of comment dictionaries with basic metadata
         """
         try:
             await self._ensure_services_initialized()
@@ -582,23 +631,7 @@ class YouTubeClient:
             if not response or not response.get('items'):
                 return []
             
-            comments = []
-            for item in response['items']:
-                comment_data = item['snippet']['topLevelComment']['snippet']
-                
-                comment = {
-                    'id': item['snippet']['topLevelComment']['id'],
-                    'textDisplay': comment_data['textDisplay'],
-                    'textOriginal': comment_data['textOriginal'],
-                    'authorDisplayName': comment_data['authorDisplayName'],
-                    'authorProfileImageUrl': comment_data['authorProfileImageUrl'],
-                    'publishedAt': comment_data['publishedAt'],
-                    'likeCount': comment_data['likeCount'],
-                    'totalReplyCount': item['snippet']['totalReplyCount']
-                }
-                comments.append(comment)
-            
-            return comments
+            return [self._process_comment(item) for item in response['items']]
             
         except Exception as e:
             self.logger.error(f"Failed to get comments for {video_id}: {e}")

@@ -86,16 +86,15 @@ class GPUMemoryManager:
             
             # Only log GPU info once per application run
             if not GPUMemoryManager._gpu_info_logged:
+                # Check if we have sufficient VRAM for typical models (only log once)
+                if total_vram_gb < 4.0:
+                    self.logger.warning(f"Low VRAM detected ({total_vram_gb:.1f}GB). Consider using CPU or optimized models.")
                 self.logger.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
                 self.logger.info(f"Total VRAM: {total_vram_gb:.1f}GB")
                 GPUMemoryManager._gpu_info_logged = True
-            
+
             # Always log VRAM limit as it may vary per instance
             self.logger.debug(f"VRAM limit set to: {self.vram_limit_mb}MB ({self.max_vram_usage*100:.0f}%)")
-            
-            # Check if we have sufficient VRAM for typical models (only log once)
-            if total_vram_gb < 4.0 and not GPUMemoryManager._gpu_info_logged:
-                self.logger.warning(f"Low VRAM detected ({total_vram_gb:.1f}GB). Consider using CPU or optimized models.")
     
     def get_vram_info(self) -> Optional[Dict[str, int]]:
         """
