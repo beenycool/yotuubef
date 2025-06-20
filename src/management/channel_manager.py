@@ -117,7 +117,12 @@ class ChannelManager:
         import yaml
         import shutil
 
-        config_path = getattr(self.config, "config_file", None)
+        try:
+            config_path = self.config.config_file
+        except AttributeError:
+            self.logger.error("self.config.config_file is not set. Cannot update configuration.")
+            return False
+
         if not config_path or not Path(config_path).exists():
             self.logger.error("Active config file not found. Cannot update configuration.")
             return False

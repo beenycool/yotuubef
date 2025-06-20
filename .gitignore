@@ -64,6 +64,11 @@ data/results/*
 data/databases/*
 data/logs/*
 !data/README.md
+data/temp/*
+data/results/*
+data/databases/*
+data/logs/*
+!data/README.md
 
 # OS specific
 .DS_Store

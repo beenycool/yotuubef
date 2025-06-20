@@ -289,6 +289,10 @@ video_processing:
   video_bitrate: 5M
   video_codec: libx264
   video_quality_profile: speed
+analytics_report_limit: 30
+successful_topics_limit: 10
+recent_recommendations_limit: 5
+
 youtube:
   add_performance_hashtags: true
   auto_generate_description: true

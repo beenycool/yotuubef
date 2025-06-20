@@ -5,6 +5,7 @@ Feeds analytics insights back into the main YouTube processing system for contin
 
 import logging
 import json
+import re
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -115,23 +116,48 @@ class AnalyticsFeedbackSystem:
             self.logger.error(f"Failed to process analytics recommendations: {e}")
             return {'success': False, 'error': str(e)}
     
+    def _parse_ai_feedback(self, recommendations: str) -> Optional[Dict[str, Any]]:
+        """
+        Try to parse AI feedback as JSON, fallback to regex with named groups if needed.
+        """
+        if not recommendations:
+            return None
+        # Try JSON first
+        try:
+            return json.loads(recommendations)
+        except Exception:
+            pass
+        # Fallback: regex for key fields
+        pattern = re.compile(
+            r'"?(?P<key>\w+)"?\s*:\s*(?P<value>\[.*?\]|".*?"|\d+|true|false|null)',
+            re.DOTALL | re.IGNORECASE
+        )
+        result = {}
+        for m in pattern.finditer(recommendations):
+            key = m.group("key")
+            value = m.group("value")
+            try:
+                value = json.loads(value)
+            except Exception:
+                value = value.strip('"')
+            result[key] = value
+        return result if result else None
+
     def _extract_content_insights(self, recommendations: str) -> Dict[str, Any]:
         """Extract content-related insights from recommendations"""
+        # Try to parse as structured data
+        parsed = self._parse_ai_feedback(recommendations)
+        if parsed and "content_insights" in parsed:
+            return parsed["content_insights"]
         content_insights = {
             'preferred_keywords': [],
             'successful_topics': [],
             'content_types': [],
             'length_recommendations': {}
         }
-        
-        # Handle None recommendations gracefully
         if not recommendations:
             return content_insights
-        
-        # Extract keywords and topics mentioned in recommendations
         rec_lower = recommendations.lower()
-        
-        # Look for content type recommendations
         if 'tutorial' in rec_lower or 'how to' in rec_lower:
             content_insights['content_types'].append('tutorial')
         if 'entertainment' in rec_lower:
@@ -140,76 +166,60 @@ class AnalyticsFeedbackSystem:
             content_insights['content_types'].append('educational')
         if 'comedy' in rec_lower or 'funny' in rec_lower:
             content_insights['content_types'].append('comedy')
-        
-        # Extract length recommendations
         if 'short' in rec_lower and ('60' in rec_lower or 'minute' in rec_lower):
             content_insights['length_recommendations']['optimal_max'] = 60
         if '30' in rec_lower and 'second' in rec_lower:
             content_insights['length_recommendations']['optimal_min'] = 30
-        
-        # Look for keyword patterns
         if 'numbers' in rec_lower:
             content_insights['preferred_keywords'].extend(['numbers', 'list_format'])
         if 'amazing' in rec_lower or 'incredible' in rec_lower:
             content_insights['preferred_keywords'].extend(['amazing', 'incredible'])
-        
         return content_insights
     
     def _extract_timing_insights(self, recommendations: str) -> Dict[str, Any]:
         """Extract timing-related insights from recommendations"""
+        parsed = self._parse_ai_feedback(recommendations)
+        if parsed and "timing_insights" in parsed:
+            return parsed["timing_insights"]
         timing_insights = {
             'optimal_days': [],
             'optimal_hours': [],
             'posting_frequency': {}
         }
-        
-        # Handle None recommendations gracefully
         if not recommendations:
             return timing_insights
-        
         rec_lower = recommendations.lower()
-        
-        # Extract day recommendations
         days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday']
         for day in days:
             if day in rec_lower:
                 timing_insights['optimal_days'].append(day)
-        
-        # Extract time recommendations
         if 'morning' in rec_lower:
             timing_insights['optimal_hours'].extend([9, 10, 11])
         if 'afternoon' in rec_lower:
             timing_insights['optimal_hours'].extend([14, 15, 16])
         if 'evening' in rec_lower:
             timing_insights['optimal_hours'].extend([19, 20, 21])
-        
-        # Extract specific times (e.g., "2-4 PM")
-        import re
-        time_pattern = r'(\d{1,2})[-\s]*(\d{1,2})?\s*(pm|am)'
-        time_matches = re.findall(time_pattern, rec_lower)
-        for match in time_matches:
-            hour_start = int(match[0])
-            if match[2] == 'pm' and hour_start != 12:
+        time_pattern = r'(?P<hour>\d{1,2})[-\s]*(\d{1,2})?\s*(?P<ampm>pm|am)'
+        for match in re.finditer(time_pattern, rec_lower):
+            hour_start = int(match.group("hour"))
+            if match.group("ampm") == 'pm' and hour_start != 12:
                 hour_start += 12
             timing_insights['optimal_hours'].append(hour_start)
-        
         return timing_insights
     
     def _extract_optimization_insights(self, recommendations: str) -> Dict[str, Any]:
         """Extract optimization-related insights from recommendations"""
+        parsed = self._parse_ai_feedback(recommendations)
+        if parsed and "optimization_insights" in parsed:
+            return parsed["optimization_insights"]
         optimization_insights = {
             'title_strategies': [],
             'thumbnail_strategies': [],
             'engagement_strategies': []
         }
-        
-        # Handle None recommendations gracefully
         if not recommendations:
             return optimization_insights
-        
         rec_lower = recommendations.lower()
-        
-        # Title optimization
         if 'title' in rec_lower:
             if 'number' in rec_lower:
                 optimization_insights['title_strategies'].append('include_numbers')
@@ -217,8 +227,6 @@ class AnalyticsFeedbackSystem:
                 optimization_insights['title_strategies'].append('how_to_format')
             if 'question' in rec_lower:
                 optimization_insights['title_strategies'].append('question_format')
-        
-        # Thumbnail optimization
         if 'thumbnail' in rec_lower:
             if 'contrast' in rec_lower:
                 optimization_insights['thumbnail_strategies'].append('high_contrast')
@@ -226,15 +234,12 @@ class AnalyticsFeedbackSystem:
                 optimization_insights['thumbnail_strategies'].append('include_text')
             if 'face' in rec_lower:
                 optimization_insights['thumbnail_strategies'].append('include_face')
-        
-        # Engagement strategies
         if 'hook' in rec_lower:
             optimization_insights['engagement_strategies'].append('strong_opening_hook')
         if 'caption' in rec_lower:
             optimization_insights['engagement_strategies'].append('add_captions')
         if 'end screen' in rec_lower:
             optimization_insights['engagement_strategies'].append('optimize_end_screen')
-        
         return optimization_insights
     
     def _analyze_performance_patterns(self, analytics_summary: Dict[str, Any]) -> Dict[str, Any]:
@@ -308,11 +313,11 @@ class AnalyticsFeedbackSystem:
             for key in ['successful_topics', 'successful_keywords']:
                 if key in self.feedback_data['content_preferences']:
                     items = self.feedback_data['content_preferences'][key]
-                    self.feedback_data['content_preferences'][key] = list(set(items))[-10:]  # Keep last 10 unique items
+                    self.feedback_data['content_preferences'][key] = list(set(items))[-self.config.successful_topics_limit:]  # Configurable limit
             
             # Limit recent recommendations
             recent_recs = self.feedback_data['ai_insights'].get('recent_recommendations', [])
-            self.feedback_data['ai_insights']['recent_recommendations'] = recent_recs[-5:]  # Keep last 5
+            self.feedback_data['ai_insights']['recent_recommendations'] = recent_recs[-self.config.recent_recommendations_limit:]  # Configurable limit
             
         except Exception as e:
             self.logger.warning(f"Failed to clean feedback data: {e}")

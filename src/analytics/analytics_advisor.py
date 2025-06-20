@@ -479,13 +479,14 @@ Unfortunately, analytics data could not be retrieved at this time.
                 json.dump(report, f, indent=2, ensure_ascii=False, default=str)
             
             self.logger.info(f"Analytics report saved to {filepath}")
-            
-            # Keep only last 30 reports
+            # Keep only last N reports (configurable)
             reports = list(analytics_dir.glob("analytics_report_*.json"))
-            if len(reports) > 30:
+            limit = getattr(self.config, "analytics_report_limit", 30)
+            if len(reports) > limit:
                 reports.sort()
-                for old_report in reports[:-30]:
+                for old_report in reports[:-limit]:
                     old_report.unlink()
+            
             
         except Exception as e:
             self.logger.warning(f"Failed to save analytics report: {e}")

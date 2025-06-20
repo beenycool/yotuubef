@@ -194,7 +194,7 @@ class SpotifyDownloader:
         return downloaded_files
     def download_top_charts(self, country: str = "US", limit: int = 10) -> List[Path]:
         """
-        Download top charts using Spotify's official playlist IDs
+        Download top charts using Spotify's official API (featured and toplists playlists).
         
         Args:
             country: Country code (2 letters)
@@ -204,22 +204,36 @@ class SpotifyDownloader:
             List of downloaded file paths
         """
         try:
-            # Get global top 50 playlist
-            global_top = "37i9dQZEVXbMDoHDwVN2tF"
-            global_files = self.download_playlist(global_top)[:limit//2]
-            
-            # Get country-specific top playlist
-            try:
-                # Correct country-specific playlist format
-                country_top = f"37i9dQZEVXbL0GavIqMTeb{country.upper()}"
-                country_files = self.download_playlist(country_top)[:limit//2]
-            except Exception as country_error:
-                self.logger.warning(f"Couldn't download country charts: {country_error}")
-                # Fallback to global charts if country-specific fails
-                country_files = self.download_playlist(global_top)[:limit//2]
-            
-            return global_files + country_files
-            
+            # Use SpotifyClient to fetch top chart playlist IDs dynamically
+            from src.integrations.spotify_client import SpotifyClient
+            import asyncio
+
+            client = SpotifyClient()
+            # Run the async method in a synchronous context
+            playlist_ids = []
+            loop = asyncio.get_event_loop()
+            featured_data = loop.run_until_complete(
+                client._make_request("browse/featured-playlists", {"country": country, "limit": 10})
+            )
+            if featured_data and "playlists" in featured_data:
+                playlist_ids = [pl["id"] for pl in featured_data["playlists"]["items"]]
+
+            category_data = loop.run_until_complete(
+                client._make_request("browse/categories/toplists/playlists", {"country": country, "limit": 5})
+            )
+            if category_data and "playlists" in category_data:
+                playlist_ids += [pl["id"] for pl in category_data["playlists"]["items"]]
+
+            playlist_ids = list(dict.fromkeys(playlist_ids))
+
+            # Download from these playlists
+            all_files = []
+            for pid in playlist_ids:
+                files = self.download_playlist(pid)[:max(1, limit // len(playlist_ids))]
+                all_files.extend(files)
+
+            return all_files[:limit]
+
         except Exception as e:
             self.logger.error(f"Error downloading top charts: {e}")
             return []

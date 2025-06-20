@@ -464,10 +464,10 @@ class SpotifyClient:
             return tracks[:config.max_tracks]
     
     async def get_top_chart_tracks(self,
-                                 country: str = "US",
-                                 limit: int = 50) -> List[SpotifyTrack]:
+                                   country: str = "US",
+                                   limit: int = 50) -> List[SpotifyTrack]:
         """
-        Get top chart tracks from Spotify's global and country-specific charts
+        Get top chart tracks from Spotify's featured playlists and categories (official API).
         
         Args:
             country: Country code for localized results
@@ -477,28 +477,47 @@ class SpotifyClient:
             List of top Spotify tracks
         """
         try:
-            # Get global top tracks playlist (Top 50 Global)
-            global_top = await self.get_playlist_tracks("37i9dQZEVXbMDoHDwVN2tF")
-            
-            # Get country-specific top tracks
-            country_top = await self.get_playlist_tracks(f"37i9dQZEVXbIPWwFssbupI{country}")
-            
-            # Combine and deduplicate
-            all_tracks = global_top + country_top
+            # Fetch featured playlists for the country
+            featured_data = await self._make_request(
+                "browse/featured-playlists",
+                {"country": country, "limit": 10}
+            )
+            playlist_ids = []
+            if featured_data and "playlists" in featured_data:
+                playlist_ids = [pl["id"] for pl in featured_data["playlists"]["items"]]
+
+            # Optionally, fetch playlists for the "toplists" category
+            category_data = await self._make_request(
+                "browse/categories/toplists/playlists",
+                {"country": country, "limit": 5}
+            )
+            if category_data and "playlists" in category_data:
+                playlist_ids += [pl["id"] for pl in category_data["playlists"]["items"]]
+
+            # Deduplicate playlist IDs
+            playlist_ids = list(dict.fromkeys(playlist_ids))
+
+            # Gather tracks from these playlists
+            all_tracks = []
+            for pid in playlist_ids:
+                tracks = await self.get_playlist_tracks(pid)
+                all_tracks.extend(tracks[:10])  # Take top 10 from each
+
+            # Deduplicate tracks by track_id
             unique_tracks = {}
             for track in all_tracks:
                 if track.track_id not in unique_tracks:
                     unique_tracks[track.track_id] = track
-            
+
             # Sort by popularity
             sorted_tracks = sorted(
                 unique_tracks.values(),
                 key=lambda x: x.popularity,
                 reverse=True
             )
-            
+
             return sorted_tracks[:limit]
-            
+
         except Exception as e:
             self.logger.error(f"Error getting top chart tracks: {e}")
             return []

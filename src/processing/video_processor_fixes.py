@@ -14,6 +14,21 @@ from moviepy import (
 
 class MoviePyCompat:
     """Compatibility layer for MoviePy API changes"""
+
+    @staticmethod
+    def apply_fx_effect(clip, fx_effect, *args, **kwargs):
+        """Apply fx effect using compatibility layer"""
+        return MoviePyCompat.apply_fx_effect(clip, fx_effect, *args, **kwargs)
+
+    @staticmethod
+    def get_audio_channels(clip):
+        """Get audio channels using compatibility layer"""
+        return MoviePyCompat.get_audio_channels(clip)
+
+    @staticmethod
+    def with_audio(video_clip, audio_clip):
+        """Set audio for video clip using compatibility layer"""
+        return MoviePyCompat.with_audio(video_clip, audio_clip)
     
     @staticmethod
     def subclip(clip, start_time, end_time=None):
@@ -578,19 +593,3 @@ def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> 
     logger.info(f"Resized to {target_width}x{target_height} for YouTube Shorts")
     
     return clip
-
-    
-    @staticmethod
-    def apply_fx_effect(clip, fx_effect, *args, **kwargs):
-        """Apply fx effect using compatibility layer"""
-        return MoviePyCompat.apply_fx_effect(clip, fx_effect, *args, **kwargs)
-    
-    @staticmethod
-    def get_audio_channels(clip):
-        """Get audio channels using compatibility layer"""
-        return MoviePyCompat.get_audio_channels(clip)
-    
-    @staticmethod
-    def with_audio(video_clip, audio_clip):
-        """Set audio for video clip using compatibility layer"""
-        return MoviePyCompat.with_audio(video_clip, audio_clip)

@@ -324,3 +324,49 @@ def safe_get(dictionary, keys, default=None):
         else:
             return default
     return current
+def sanitize_filename(filename: str, max_length: int = 200) -> str:
+    """
+    Sanitize filenames by removing invalid characters and normalizing.
+    Preserves spaces and common punctuation.
+    
+    Args:
+        filename: Original filename
+        max_length: Maximum allowed filename length
+        
+    Returns:
+        Sanitized filename
+    """
+    import re
+    import unicodedata
+    
+    # Normalize unicode characters
+    filename = unicodedata.normalize('NFKD', filename)
+    
+    # Remove invalid characters except allowed ones: letters, digits, spaces, and some punctuation
+    filename = re.sub(r'[^\w\s\-_.()\[\]]', '', filename)
+    
+    # Replace spaces with underscores
+    filename = re.sub(r'\s+', '_', filename)
+    
+    # Remove leading and trailing spaces/underscores
+    filename = filename.strip('_').strip()
+    
+    # Truncate if too long
+    if len(filename) > max_length:
+        filename = filename[:max_length]
+    
+    return filename
+
+
+def safe_get(dictionary, keys, default=None):
+    """
+    Safely get a value from a nested dictionary using a list of keys.
+    Returns the value if all keys exist, otherwise returns default.
+    """
+    current = dictionary
+    for key in keys:
+        if isinstance(current, dict) and key in current:
+            current = current[key]
+        else:
+            return default
+    return current

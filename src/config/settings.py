@@ -240,6 +240,9 @@ class ConfigManager:
         self.api = APIConfig()
         self.content = ContentConfig()
         self.paths = PathConfig()
+        self.analytics_report_limit = 30  # Default, can be overridden by YAML
+        self.successful_topics_limit = 10  # Default, can be overridden by YAML
+        self.recent_recommendations_limit = 5  # Default, can be overridden by YAML
         
         # Load configurations in order of precedence
         self._load_yaml_config()
@@ -275,13 +278,34 @@ class ConfigManager:
             
             # Update configurations from YAML
             self._update_from_dict(self.video, yaml_config.get('video', {}))
-            # Also check for video_processing section 
+            # Also check for video_processing section
             self._update_from_dict(self.video, yaml_config.get('video_processing', {}))
             self._update_from_dict(self.text_overlay, yaml_config.get('text_overlay', {}))
             self._update_from_dict(self.effects, yaml_config.get('effects', {}))
             self._update_from_dict(self.audio, yaml_config.get('audio', {}))
             self._update_from_dict(self.api, yaml_config.get('apis', {}))
             self._update_from_dict(self.content, yaml_config.get('content', {}))
+            
+            # Handle analytics_report_limit
+            if 'analytics_report_limit' in yaml_config:
+                try:
+                    self.analytics_report_limit = int(yaml_config['analytics_report_limit'])
+                except Exception as e:
+                    self.logger.warning(f"Invalid analytics_report_limit in config.yaml: {e}")
+
+            # Handle successful_topics_limit
+            if 'successful_topics_limit' in yaml_config:
+                try:
+                    self.successful_topics_limit = int(yaml_config['successful_topics_limit'])
+                except Exception as e:
+                    self.logger.warning(f"Invalid successful_topics_limit in config.yaml: {e}")
+
+            # Handle recent_recommendations_limit
+            if 'recent_recommendations_limit' in yaml_config:
+                try:
+                    self.recent_recommendations_limit = int(yaml_config['recent_recommendations_limit'])
+                except Exception as e:
+                    self.logger.warning(f"Invalid recent_recommendations_limit in config.yaml: {e}")
             
             # Handle subtitles config specifically
             subtitles_config = yaml_config.get('subtitles', {})
