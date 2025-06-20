@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import List, Optional
 import shutil
 import tempfile
+import time
+import random
 
 from src.config.settings import get_config
 from src.utils.common_utils import sanitize_filename
@@ -57,42 +59,50 @@ class SpotifyDownloader:
         Download a Spotify playlist using spotify_dl with improved error handling.
         Refactored for readability and maintainability.
         """
-        max_retries = 3
-        retry_delay = 2  # seconds
         output_dir = output_dir or self.download_dir
 
         if not self._check_spotify_dl_available_and_log():
             return []
 
+        def attempt():
+            # This function signature matches what _retry_with_backoff expects
+            return self._attempt_single_download(
+                playlist_url, output_dir, 0, 0, 0
+            )
+
+        result = self._retry_with_backoff(
+            attempt_fn=attempt,
+            max_retries=3,
+            initial_delay=2
+        )
+        return result or []
+
+    def _retry_with_backoff(self, attempt_fn, max_retries=3, initial_delay=2):
+        """
+        Helper to retry a function with exponential backoff and jitter.
+        Returns the first element of the tuple from attempt_fn if successful, else None.
+        """
+        delay = initial_delay
         for attempt in range(max_retries):
             try:
-                downloaded_files, error, should_retry = self._attempt_single_download(
-                    playlist_url, output_dir, attempt, max_retries, retry_delay
-                )
+                downloaded_files, error, should_retry = attempt_fn()
                 if downloaded_files:
                     return downloaded_files
                 if not should_retry:
                     self._handle_download_failure(error, attempt, max_retries)
-                    return []
-                # Exponential backoff for retry
-                import time
-                time.sleep(retry_delay)
-                retry_delay *= 2
+                    return None
+                self.logger.warning(f"Attempt {attempt + 1} failed: {error}. Retrying in {delay}s...")
             except Exception as e:
+                error = str(e)
                 if attempt < max_retries - 1:
-                    import random
-                    jitter = random.uniform(-0.2, 0.2) * retry_delay
-                    actual_delay = max(1, retry_delay + jitter)
-                    self.logger.warning(f"Error on attempt {attempt + 1}: {e}, retrying after {actual_delay:.1f}s...")
-                    import time
-                    time.sleep(actual_delay)
-                    retry_delay *= 2
-                    continue
+                    self.logger.warning(f"Exception on attempt {attempt + 1}: {e}, retrying in {delay}s...")
                 else:
                     self.logger.error(f"Error downloading playlist after {max_retries} attempts: {e}")
-                    return []
+                    return None
+            time.sleep(delay + random.uniform(-0.2, 0.2) * delay)
+            delay *= 2
         self.logger.error("All download attempts failed")
-        return []
+        return None
 
     def _check_spotify_dl_available_and_log(self) -> bool:
         if not self._check_spotify_dl_available():
@@ -102,7 +112,6 @@ class SpotifyDownloader:
         return True
 
     def _attempt_single_download(self, playlist_url, output_dir, attempt, max_retries, retry_delay):
-        import time
         with tempfile.TemporaryDirectory() as temp_dir:
             cmd = self._get_spotify_dl_command(playlist_url, temp_dir)
             self.logger.info(f"Downloading playlist (attempt {attempt + 1}/{max_retries}): {playlist_url}")
@@ -132,7 +141,6 @@ class SpotifyDownloader:
         ]
 
     def _run_spotify_dl_command(self, cmd):
-        import subprocess
         try:
             result = subprocess.run(
                 cmd,
@@ -165,9 +173,6 @@ class SpotifyDownloader:
                 self.logger.info("Playlist might be empty or private")
 
     def _move_downloaded_files(self, temp_dir, output_dir):
-        from pathlib import Path
-        import shutil
-        from src.utils.common_utils import sanitize_filename
         downloaded_files = []
         for root, _, files in os.walk(temp_dir):
             for file in files:
@@ -201,13 +206,17 @@ class SpotifyDownloader:
         try:
             # Get global top 50 playlist
             global_top = "37i9dQZEVXbMDoHDwVN2tF"
+            global_files = self.download_playlist(global_top)[:limit//2]
             
             # Get country-specific top playlist
-            country_top = f"37i9dQZEVXbIPWwFssbupI{country.upper()}"
-            
-            # Download both playlists
-            global_files = self.download_playlist(global_top)[:limit//2]
-            country_files = self.download_playlist(country_top)[:limit//2]
+            try:
+                # Correct country-specific playlist format
+                country_top = f"37i9dQZEVXbL0GavIqMTeb{country.upper()}"
+                country_files = self.download_playlist(country_top)[:limit//2]
+            except Exception as country_error:
+                self.logger.warning(f"Couldn't download country charts: {country_error}")
+                # Fallback to global charts if country-specific fails
+                country_files = self.download_playlist(global_top)[:limit//2]
             
             return global_files + country_files
             

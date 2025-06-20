@@ -157,10 +157,10 @@ class TTSService:
         output_path = Path(output_path)
         if output_path.is_dir():
             raise ValueError("Output path must be a file, not a directory.")
-        # Optionally, restrict to a specific parent directory (e.g., self.config.paths.audio_folder)
-        # allowed_dir = Path(self.config.paths.audio_folder)
-        # if not allowed_dir in output_path.parents:
-        #     raise ValueError("Output path is outside allowed directory.")
+        # Restrict output path to the configured audio folder for security
+        allowed_dir = Path(self.config.paths.audio_folder).resolve()
+        if allowed_dir not in output_path.resolve().parents:
+            raise ValueError("Output path is outside allowed audio directory.")
         # Check for forbidden characters or patterns
         forbidden = ["..", "~", "//", "\\", "|", ":", "*", "?", "\"", "<", ">"]
         if any(f in str(output_path) for f in forbidden):

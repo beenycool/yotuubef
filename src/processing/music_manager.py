@@ -314,8 +314,9 @@ class MusicManager:
             List of downloaded file paths
         """
         try:
+            import asyncio
             self.logger.info(f"Downloading top {limit} charts for {country}")
-            downloaded_files = self.spotify_downloader.download_top_charts(country, limit)
+            downloaded_files = await asyncio.to_thread(self.spotify_downloader.download_top_charts, country, limit)
             self.logger.info(f"Downloaded {len(downloaded_files)} chart tracks")
             return downloaded_files
             

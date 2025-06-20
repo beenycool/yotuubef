@@ -579,64 +579,6 @@ def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> 
     
     return clip
 
-
-class VideoProcessorFixes:
-    """Wrapper class for video processing fixes and compatibility methods"""
-    
-    @staticmethod
-    def create_text_clip(text, **kwargs):
-        """Create text clip using compatibility layer"""
-        return MoviePyCompat.create_text_clip(text, **kwargs)
-    
-    @staticmethod
-    def crossfadein(clip, duration):
-        """Apply crossfade in effect using compatibility layer"""
-        return MoviePyCompat.crossfadein(clip, duration)
-    
-    @staticmethod
-    def crossfadeout(clip, duration):
-        """Apply crossfade out effect using compatibility layer"""
-        return MoviePyCompat.crossfadeout(clip, duration)
-    
-    @staticmethod
-    def resize(clip, new_size_or_func):
-        """Resize clip using compatibility layer"""
-        return MoviePyCompat.resize(clip, new_size_or_func)
-    
-    @staticmethod
-    def with_opacity(clip, opacity):
-        """Set opacity using compatibility layer"""
-        return MoviePyCompat.with_opacity(clip, opacity)
-    
-    @staticmethod
-    def with_position(clip, position):
-        """Set position using compatibility layer"""
-        return MoviePyCompat.with_position(clip, position)
-    
-    @staticmethod
-    def with_start(clip, start_time):
-        """Set start time using compatibility layer"""
-        return MoviePyCompat.with_start(clip, start_time)
-    
-    @staticmethod
-    def with_duration(clip, duration):
-        """Set duration using compatibility layer"""
-        return MoviePyCompat.with_duration(clip, duration)
-    
-    @staticmethod
-    def subclip(clip, start_time, end_time=None):
-        """Create subclip using compatibility layer"""
-        return MoviePyCompat.subclip(clip, start_time, end_time)
-    
-    @staticmethod
-    def crop(clip, x1=None, y1=None, x2=None, y2=None, width=None, height=None):
-        """Crop clip using compatibility layer"""
-        return MoviePyCompat.crop(clip, x1=x1, y1=y1, x2=x2, y2=y2, width=width, height=height)
-    
-    @staticmethod
-    def apply_effect(clip, effect_func):
-        """Apply effect using compatibility layer"""
-        return MoviePyCompat.apply_effect(clip, effect_func)
     
     @staticmethod
     def apply_fx_effect(clip, fx_effect, *args, **kwargs):

@@ -107,6 +107,52 @@ class ChannelManager:
     async def run_proactive_management(self):
         """Main loop for proactive channel management"""
         self.logger.info("Starting proactive channel management...")
+
+    def update_config_parameters(self, updates: dict):
+        """
+        Update the loaded YAML config file with new parameters, backing up the file first.
+        Args:
+            updates (dict): Dictionary of config parameters to update (dot notation supported for nested).
+        """
+        import yaml
+        import shutil
+
+        config_path = getattr(self.config, "config_file", None)
+        if not config_path or not Path(config_path).exists():
+            self.logger.error("Active config file not found. Cannot update configuration.")
+            return False
+
+        # Backup
+        backup_path = Path(str(config_path) + ".bak")
+        try:
+            shutil.copy2(config_path, backup_path)
+            self.logger.info(f"Backed up config to {backup_path}")
+        except Exception as e:
+            self.logger.error(f"Failed to backup config: {e}")
+            return False
+
+        # Load, update, and write
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                config_data = yaml.safe_load(f) or {}
+
+            # Support dot notation for nested updates
+            for key, value in updates.items():
+                parts = key.split(".")
+                d = config_data
+                for p in parts[:-1]:
+                    if p not in d or not isinstance(d[p], dict):
+                        d[p] = {}
+                    d = d[p]
+                d[parts[-1]] = value
+
+            with open(config_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(config_data, f, default_flow_style=False, allow_unicode=True)
+            self.logger.info(f"Updated config file {config_path} with {updates}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to update config: {e}")
+            return False
         
         try:
             while True:
@@ -859,12 +905,19 @@ class ChannelManager:
                             return candidate
                 
                 # Also search through all files in the directory that contain the video ID
+                # Limit the number of files scanned in large directories for performance
+                MAX_FILES_SCANNED = 200
                 try:
+                    scanned = 0
                     for file_path in search_dir.iterdir():
+                        if scanned >= MAX_FILES_SCANNED:
+                            self.logger.warning(f"Stopped scanning {search_dir} after {MAX_FILES_SCANNED} files for video_id {video_id}")
+                            break
                         if file_path.is_file() and video_id in file_path.name:
                             if any(file_path.name.lower().endswith(ext) for ext in video_extensions):
                                 self.logger.info(f"Found video file by pattern match: {file_path}")
                                 return file_path
+                        scanned += 1
                 except PermissionError:
                     continue
             

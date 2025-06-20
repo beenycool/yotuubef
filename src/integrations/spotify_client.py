@@ -35,13 +35,25 @@ class SpotifyClient:
         
         # Spotify API configuration with graceful fallback
         try:
-            self.client_id = getattr(self.config, 'spotify', {}).get('client_id') or os.getenv('SPOTIFY_CLIENT_ID')
-            self.client_secret = getattr(self.config, 'spotify', {}).get('client_secret') or os.getenv('SPOTIFY_CLIENT_SECRET')
+            config_client_id = getattr(self.config, 'spotify', {}).get('client_id')
+            config_client_secret = getattr(self.config, 'spotify', {}).get('client_secret')
+            env_client_id = os.getenv('SPOTIFY_CLIENT_ID')
+            env_client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
+
+            self.client_id = config_client_id
+            if env_client_id is not None and env_client_id.strip() != "":
+                self.client_id = env_client_id.strip()
+
+            self.client_secret = config_client_secret
+            if env_client_secret is not None and env_client_secret.strip() != "":
+                self.client_secret = env_client_secret.strip()
         except (AttributeError, TypeError):
             # Fallback to environment variables if config doesn't have spotify section
-            self.client_id = os.getenv('SPOTIFY_CLIENT_ID')
-            self.client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
-        
+            env_client_id = os.getenv('SPOTIFY_CLIENT_ID')
+            env_client_secret = os.getenv('SPOTIFY_CLIENT_SECRET')
+            self.client_id = env_client_id.strip() if env_client_id is not None and env_client_id.strip() != "" else None
+            self.client_secret = env_client_secret.strip() if env_client_secret is not None and env_client_secret.strip() != "" else None
+
         if not self.client_id or not self.client_secret:
             self.logger.warning("Spotify API credentials not found. Spotify features will be disabled.")
             self.logger.info("Set SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET environment variables to enable Spotify features")

@@ -399,49 +399,6 @@ class YouTubeClient:
 
         return analytics
 
-    async def _fetch_analytics(self, video_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Internal method to fetch analytics data without timeout handling.
-        """
-        await self._ensure_services_initialized()
-        if not self.analytics_service:
-            return None
-
-        # Get video statistics from main API
-        video_info = await self.get_video_info(video_id)
-        if not video_info:
-            return None
-
-        stats = video_info.get('statistics', {})
-
-        # Basic analytics from video statistics
-        analytics = {
-            'video_id': video_id,
-            'views': int(stats.get('viewCount', 0)),
-            'likes': int(stats.get('likeCount', 0)),
-            'dislikes': int(stats.get('dislikeCount', 0)),
-            'comments': int(stats.get('commentCount', 0)),
-            'shares': 0,  # Would need additional API calls
-            'impressions': 0,  # Legacy field for backward compatibility
-            'clicks': 0,  # Legacy field for backward compatibility
-            'ctr': 0.0,  # Legacy field for backward compatibility
-            'average_view_percentage': 0.0,  # Legacy field for backward compatibility
-            'estimated_minutes_watched': 0,  # From YouTube Analytics API
-            'average_view_duration': 0.0,  # From YouTube Analytics API
-            'subscribers_gained': 0,  # From YouTube Analytics API
-            'retrieved_at': datetime.now().isoformat()
-        }
-
-        # Try to get additional analytics if possible
-        try:
-            detailed_analytics = await self._get_detailed_analytics(video_id)
-            if detailed_analytics:
-                analytics.update(detailed_analytics)
-        except Exception as e:
-            self.logger.warning(f"Detailed analytics unavailable: {e}")
-
-        return analytics
-
     async def get_video_analytics(self, video_id: str) -> Optional[Dict[str, Any]]:
         """
         Get video analytics data with timeout handling
