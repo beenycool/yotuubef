@@ -29,6 +29,8 @@ ENV/
 .env.*
 .venv
 
+aider-venv/
+aider-venv-py311/
 # IDE
 .idea/
 .vscode/
@@ -42,6 +44,10 @@ ENV/
 *.mkv
 *.wmv
 *.flv
+sound_effects/
+music/
+fonts/
+thumbnails/
 *.webm
 *.m4v
 *.mpg
