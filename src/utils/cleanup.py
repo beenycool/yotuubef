@@ -57,4 +57,4 @@ def clear_logs():
         except Exception as e:
             logger.error(f"Failed to clear log file {log_file}: {e}")
     else:
-        logger.warning(f"Log file not found at '{log_file}', skipping cleanup.") 
+        logger.warning(f"Log file not found at '{log_file}', skipping cleanup.")

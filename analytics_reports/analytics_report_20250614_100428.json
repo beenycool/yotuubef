@@ -1,0 +1,1370 @@
+{
+  "success": true,
+  "timestamp": "2025-06-14T10:04:28.022028",
+  "analytics_summary": {
+    "analysis_period": "30 days",
+    "videos_analyzed": 20,
+    "channel_totals": {
+      "total_views": 27,
+      "total_watch_time": 17,
+      "total_subscribers_gained": 0,
+      "total_videos": 35
+    },
+    "channel_averages": {
+      "avg_views": 1.35,
+      "avg_watch_time": 0.85,
+      "avg_subscribers_gained": 0.0
+    },
+    "top_performers": [
+      {
+        "video_id": "cVbhr29c0qQ",
+        "views": 10,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 3,
+        "average_view_duration": 27.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.763051",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "n3dStiMMf5U",
+        "views": 3,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.454236",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "KW26tb4cIZc",
+        "views": 3,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 9,
+        "average_view_duration": 188.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.750858",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "PZGUlyDrfFU",
+        "views": 3,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 2,
+        "average_view_duration": 48.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.903014",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "jz7ro41xwNU",
+        "views": 2,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 2,
+        "average_view_duration": 75.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.604916",
+        "video_title": "Unknown",
+        "published_at": null
+      }
+    ]
+  },
+  "recommendations": "## 📊 ANALYTICS SUMMARY\n- **Total views in last 30 days**: A very low 27 views across 20 analyzed videos.\n- **Best performing video**:\n    *   **\"Unknown\" (ID: cVbhr29c0qQ)**: 10 views, 3 estimated minutes watched, 27 seconds average view duration.\n    *   **\"Unknown\" (ID: KW26tb4cIZc)**: 3 views, 9 estimated minutes watched, 188 seconds (3 minutes 8 seconds) average view duration. This video, despite fewer views, shows significantly better watch time and average view duration, indicating higher audience engagement for those who did watch.\n- **Engagement trends**: Critically low and stagnant. The channel gained 0 subscribers, and most recent uploads have 0 views, impressions, clicks, likes, and comments. This indicates a severe lack of discoverability and audience interaction.\n- **Audience retention insights**: While many videos show 0% retention (due to 0 views), for the few videos with views:\n    *   Average view durations are generally very short (e.g., 27s, 48s, 75s).\n    *   The video \"Unknown\" (ID: KW26tb4cIZc) stands out with 188 seconds (3:08) average view duration and 9 minutes estimated watch time, suggesting that *if* a viewer clicks, some content can hold attention better. However, the average view percentage is 0.0% for all top performers, which is unusual and suggests a data retrieval issue or extremely short videos, but the duration data contradicts this. Assuming the average view duration is the more reliable metric here, retention is a significant challenge.\n\n## 🎯 KEY RECOMMENDATIONS\n1.  **Content Strategy**:\n    *   **Identify & Replicate Success (Limited Data):** The video \"KW26tb4cIZc\" (despite being \"Unknown\" title) has the highest average view duration and watch time. Try to identify what this video was about and create more content in a similar style or topic. This suggests that longer, more engaging content *can* work.\n    *   **Experiment with Top Performer Topics:** Given the \"Unknown\" titles, it's hard to pinpoint exact content. However, the single Minecraft video (\"TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME\") received 3 views, which is tied for the second-highest. Consider creating more gaming content if this is a niche you enjoy.\n    *   **Avoid \"Zero View\" Content:** The vast majority of recent uploads have 0 views. This indicates a disconnect between content and audience interest/discoverability. Stop producing content that isn't generating any initial traction.\n2.  **Upload Timing**: The data does not provide specific daily or hourly performance trends. Focus on consistency rather than optimal timing for now. Pick a schedule (e.g., 1-2 videos per week) and stick to it.\n3.  **Thumbnail Optimization**:\n    *   **CRITICAL ISSUE: 0 Impressions & Clicks:** The fact that most videos have 0 impressions and 0 clicks is the most pressing problem. This means YouTube is not showing your videos to anyone, or if it is, no one is clicking.\n    *   **High-Impact, Clear Thumbnails:** Design thumbnails that are visually appealing, clearly convey the video's topic, and stand out. Use bright colors, clear text, and intriguing imagery.\n    *   **A/B Test Thumbnails:** If possible, create 2-3 distinct thumbnails for your next few videos and track which performs better (even with low numbers).\n4.  **Title Optimization**:\n    *   **Missing Data:** The \"Unknown\" titles for top performers hinder analysis. Ensure all future videos have descriptive, keyword-rich titles.\n    *   **Clarity & Keywords:** Titles like \"Wire straightening tool\" are descriptive but might lack intrigue. Combine clarity with curiosity or a strong benefit. For example, \"Oddly Satisfying Wire Straightening Tool! (Must See)\" is better than just \"Wire straightening tool.\"\n    *   **Searchability:** Include keywords people are searching for related to your content.\n    *   **Clickability:** Use strong action verbs, numbers, or emotional triggers where appropriate (e.g., \"You Won't Believe...\" or \"Heartwarming...\"). However, ensure they deliver on the promise.\n5.  **Retention Improvements**:\n    *   **Strong Hooks:** The first 15-30 seconds are crucial. Start with a compelling hook that immediately grabs attention and clearly states what the viewer will gain.\n    *   **Pacing & Editing:** Keep the video engaging with dynamic cuts, B-roll, and avoid dead air.\n    *   **Value Proposition:** Ensure every segment of the video provides value, entertainment, or information.\n    *   **Call to Action:** Encourage viewers to watch other videos or subscribe *after* delivering value, not just at the end.\n\n## ⚠️ IMMEDIATE ACTIONS\n-   **Rectify \"Unknown\" Titles/Thumbnails:** If the \"Unknown\" titles are due to a data issue or missing metadata on YouTube, *immediately* update the titles and add custom thumbnails to all existing videos, especially the ones with some views.\n-   **Analyze Your Niche:** Given the very low engagement, clearly define your channel's niche. Are you a gaming channel, a DIY channel, a heartwarming moments channel? Trying to do too many different things can confuse the algorithm and potential viewers.\n-   **Focus on Foundational SEO:** For every new upload, ensure you are using relevant keywords in your title, description, and tags. Research what your target audience is searching for.\n-   **Promote Existing Content:** Share your existing videos on other social media platforms (Twitter, Instagram, TikTok, Facebook) to drive initial traffic, as YouTube's algorithm isn't currently pushing your content.\n\n## 📈 GROWTH OPPORTUNITIES\n-   **Address the Zero Impressions/Clicks:** This is the highest improvement potential. Without impressions and clicks, no other metric matters. Focus relentlessly on improving titles and thumbnails to make your videos irresistible to click.\n-   **Community Engagement (Even with Low Numbers):** Respond to any comments you receive (even if few). Engage with other creators in your niche. This can help build a tiny, but dedicated, initial audience.\n-   **YouTube Shorts:** Given the extremely low long-form video performance, experiment heavily with YouTube Shorts. They have a different discovery mechanism and can provide quick bursts of views and potential subscribers. Adapt some of your longer content into short, punchy clips.\n-   **Collaborations:** As your channel grows slightly, consider collaborating with smaller channels in your niche to cross-promote.\n\n## 🎬 NEXT VIDEO SUGGESTIONS\n-   **3 specific video ideas based on analytics patterns:**\n    1.  **\"Minecraft Speedrun with Chat Challenges\":** Building on the \"Minecraft\" video that got 3 views, focus on a challenge-based gameplay, which tends to be highly engaging.\n    2.  **\"Top 5 Oddly Satisfying Tools You Need\":** Expanding on the \"Wire straightening tool\" idea, but making it a listicle for broader appeal and better watch time potential.\n    3.  **\"Heartwarming Animal Rescue Story Compilation\":** Capitalize on the \"Heartwarming/Animal Friendship\" theme, but make it a compilation for more content and emotional impact, similar to what might have been in the higher watch-time \"Unknown\" video.\n-   **Optimal video length based on retention data:** Aim for **3-5 minutes** initially. While one video showed good retention at ~3 minutes AVD, overall engagement is too low for consistently longer content. Focus on making these shorter videos highly engaging from start to finish.\n-   **Suggested posting schedule:** Start with **1 video per week**, consistently. This allows you time to focus on quality, strong titles, and compelling thumbnails, which are your biggest hurdles right now. As performance improves, you can consider increasing frequency.",
+  "raw_analytics": {
+    "video_analytics": [
+      {
+        "video_id": "TkDtVo7pKNc",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:05.759711",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "2g1_veZqa-Q",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:06.225563",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "3GAWIpbpwP8",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:06.376605",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "zbgLZSaYXyc",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:06.526842",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "FceEGPAASYQ",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:06.684638",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "VKdQ39Ajn2E",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:06.837147",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "k63Mx6H_K68",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.017459",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "BvWby5MQCa4",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.158805",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "KmRo5GI0w10",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.309050",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "n3dStiMMf5U",
+        "views": 3,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.454236",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "jz7ro41xwNU",
+        "views": 2,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 2,
+        "average_view_duration": 75.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.604916",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "KW26tb4cIZc",
+        "views": 3,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 9,
+        "average_view_duration": 188.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.750858",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "TUtTK8mb74w",
+        "views": 1,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 47.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:07.895838",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "_8CI7xx8-as",
+        "views": 1,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 1,
+        "average_view_duration": 101.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.030042",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "UMAxmSfet8Y",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.182853",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "0Gypgo28Y2s",
+        "views": 2,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 6.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.346438",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "-hDKpphDSrU",
+        "views": 0,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 0.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.494655",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "H5MD_lXpaBU",
+        "views": 2,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 0,
+        "average_view_duration": 6.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.631366",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "cVbhr29c0qQ",
+        "views": 10,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 3,
+        "average_view_duration": 27.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.763051",
+        "video_title": "Unknown",
+        "published_at": null
+      },
+      {
+        "video_id": "PZGUlyDrfFU",
+        "views": 3,
+        "likes": 0,
+        "dislikes": 0,
+        "comments": 0,
+        "shares": 0,
+        "impressions": 0,
+        "clicks": 0,
+        "ctr": 0.0,
+        "average_view_percentage": 0.0,
+        "estimated_minutes_watched": 2,
+        "average_view_duration": 48.0,
+        "subscribers_gained": 0,
+        "retrieved_at": "2025-06-14T10:04:08.903014",
+        "video_title": "Unknown",
+        "published_at": null
+      }
+    ],
+    "recent_videos": [
+      {
+        "id": "TkDtVo7pKNc",
+        "title": "You Won&#39;t Believe What Happens Next!",
+        "description": "Super post Like & Share! SMASH that LIKE button if you enjoyed this! SUBSCRIBE for more amazing content! What ...",
+        "publishedAt": "2025-06-13T22:02:23Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/TkDtVo7pKNc/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/TkDtVo7pKNc/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/TkDtVo7pKNc/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "2g1_veZqa-Q",
+        "title": "Cutest Encounter! Unexpected Animal Friendship 😍",
+        "description": "A friendly encounter Like & Share! SMASH that LIKE button if you enjoyed this! SUBSCRIBE for more amazing content!",
+        "publishedAt": "2025-06-13T21:56:54Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/2g1_veZqa-Q/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/2g1_veZqa-Q/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/2g1_veZqa-Q/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "3GAWIpbpwP8",
+        "title": "Oddly Satisfying Wire Straightening Tool!",
+        "description": "Wire straightening tool Like & Share! SMASH that LIKE button if you enjoyed this! SUBSCRIBE for more amazing content!",
+        "publishedAt": "2025-06-13T21:45:26Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/3GAWIpbpwP8/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/3GAWIpbpwP8/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/3GAWIpbpwP8/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "zbgLZSaYXyc",
+        "title": "Heartwarming: Dog Checks on Baby Every Night 🥹",
+        "description": "Dog checks on whether baby is asleep every night Like & Share! SMASH that LIKE button if you enjoyed this!",
+        "publishedAt": "2025-06-13T21:37:15Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/zbgLZSaYXyc/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/zbgLZSaYXyc/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/zbgLZSaYXyc/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "FceEGPAASYQ",
+        "title": "This Man&#39;s Act Will Melt Your Heart ❤️",
+        "description": "We need more people like him Like & Share! SMASH that LIKE button if you enjoyed this! SUBSCRIBE for more amazing ...",
+        "publishedAt": "2025-06-13T21:20:13Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/FceEGPAASYQ/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/FceEGPAASYQ/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/FceEGPAASYQ/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "VKdQ39Ajn2E",
+        "title": "Unbelievable Animal Friendship! ❤️",
+        "description": "A friendly encounter Like & Share! SMASH that LIKE button if you enjoyed this! SUBSCRIBE for more amazing content!",
+        "publishedAt": "2025-06-13T17:14:44Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/VKdQ39Ajn2E/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/VKdQ39Ajn2E/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/VKdQ39Ajn2E/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "k63Mx6H_K68",
+        "title": "Wire straightening tool",
+        "description": "Wire straightening tool Enhanced with AI-powered editing for maximum engagement! Follow for more amazing content!",
+        "publishedAt": "2025-06-13T16:14:25Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/k63Mx6H_K68/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/k63Mx6H_K68/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/k63Mx6H_K68/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "BvWby5MQCa4",
+        "title": "A friendly encounter",
+        "description": "A friendly encounter Enhanced with AI-powered editing for maximum engagement! Follow for more amazing content!",
+        "publishedAt": "2025-06-13T16:08:45Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/BvWby5MQCa4/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/BvWby5MQCa4/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/BvWby5MQCa4/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "KmRo5GI0w10",
+        "title": "Loyal Dog Checks on Baby Every Night 🥺❤️",
+        "description": "Dog checks on whether baby is asleep every night Enhanced with AI-powered editing for maximum engagement! Follow for ...",
+        "publishedAt": "2025-06-12T19:42:19Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/KmRo5GI0w10/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/KmRo5GI0w10/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/KmRo5GI0w10/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "n3dStiMMf5U",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-11T08:29:29Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/n3dStiMMf5U/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/n3dStiMMf5U/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/n3dStiMMf5U/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "jz7ro41xwNU",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-11T07:14:40Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/jz7ro41xwNU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/jz7ro41xwNU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/jz7ro41xwNU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "KW26tb4cIZc",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-09T09:02:16Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/KW26tb4cIZc/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/KW26tb4cIZc/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/KW26tb4cIZc/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "TUtTK8mb74w",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-09T06:41:37Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/TUtTK8mb74w/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/TUtTK8mb74w/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/TUtTK8mb74w/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "_8CI7xx8-as",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-09T05:48:40Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/_8CI7xx8-as/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/_8CI7xx8-as/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/_8CI7xx8-as/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "UMAxmSfet8Y",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-08T17:44:10Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/UMAxmSfet8Y/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/UMAxmSfet8Y/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/UMAxmSfet8Y/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "0Gypgo28Y2s",
+        "title": "Blue Fighters?! What is going on?!",
+        "description": "These blue fighters are taking no prisoners! You won't believe what happens next in this epic showdown. Subscribe for more ...",
+        "publishedAt": "2025-06-08T08:36:53Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/0Gypgo28Y2s/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/0Gypgo28Y2s/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/0Gypgo28Y2s/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "-hDKpphDSrU",
+        "title": "Amazing AnimalsBeingBros Video: Dog checks on whether baby is asleep every night",
+        "description": "Check out this incredible video from r/AnimalsBeingBros! Subscribe for more! SMASH that LIKE button if you enjoyed this!",
+        "publishedAt": "2025-06-08T07:52:36Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/-hDKpphDSrU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/-hDKpphDSrU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/-hDKpphDSrU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "H5MD_lXpaBU",
+        "title": "Daddy&#39;s Home! ❤️",
+        "description": "A heartwarming moment when a little girl finds her dad in the crowd at a school event. Get ready to smile! Like and Share!",
+        "publishedAt": "2025-06-07T20:35:08Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/H5MD_lXpaBU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/H5MD_lXpaBU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/H5MD_lXpaBU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "cVbhr29c0qQ",
+        "title": "Ultra-Cycling Pit Stop!",
+        "description": "Witness a rapid pit stop during a grueling 200-mile ultra-endurance cycling race! Teamwork at its finest. Like & Share!",
+        "publishedAt": "2025-06-07T20:36:13Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/cVbhr29c0qQ/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/cVbhr29c0qQ/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/cVbhr29c0qQ/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "PZGUlyDrfFU",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-07T00:28:31Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/PZGUlyDrfFU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/PZGUlyDrfFU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/PZGUlyDrfFU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "sRJrkM5cwDc",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-06T08:39:29Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/sRJrkM5cwDc/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/sRJrkM5cwDc/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/sRJrkM5cwDc/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "XnudrxiMQh4",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-03T22:20:43Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/XnudrxiMQh4/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/XnudrxiMQh4/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/XnudrxiMQh4/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "FZKFIDtqtKM",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-03T15:28:55Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/FZKFIDtqtKM/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/FZKFIDtqtKM/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/FZKFIDtqtKM/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "Y5leaw_Jfig",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-02T21:29:28Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/Y5leaw_Jfig/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/Y5leaw_Jfig/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/Y5leaw_Jfig/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "eH4NIJvYr9Q",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-02T21:28:13Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/eH4NIJvYr9Q/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/eH4NIJvYr9Q/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/eH4NIJvYr9Q/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "O_WbM6XejK4",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-02T09:17:43Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/O_WbM6XejK4/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/O_WbM6XejK4/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/O_WbM6XejK4/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "nOX27RIj3mA",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-02T09:02:29Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/nOX27RIj3mA/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/nOX27RIj3mA/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/nOX27RIj3mA/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "3JtCUvVyw88",
+        "title": "TRYING TO BEAT MIENCRAFT BUT CHAT TRIES TO STOP ME",
+        "description": "Support the stream: https://streamlabs.com/sl_id_ec6bb0aa-69e1-3677-93e3-fc49e34cdff3.",
+        "publishedAt": "2025-06-02T07:41:37Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/3JtCUvVyw88/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/3JtCUvVyw88/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/3JtCUvVyw88/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "0Cj7x7FY6CU",
+        "title": "Instant Fingernail Growth Nightmare",
+        "description": "",
+        "publishedAt": "2025-05-27T18:24:50Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/0Cj7x7FY6CU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/0Cj7x7FY6CU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/0Cj7x7FY6CU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "monNO1pculU",
+        "title": "Plant",
+        "description": "",
+        "publishedAt": "2025-05-27T18:21:12Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/monNO1pculU/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/monNO1pculU/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/monNO1pculU/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "xDXJD1A9ytg",
+        "title": "Pigeon surveilance camera",
+        "description": "",
+        "publishedAt": "2025-05-26T19:03:55Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/xDXJD1A9ytg/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/xDXJD1A9ytg/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/xDXJD1A9ytg/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "atJHcy81tjc",
+        "title": "Noodles Like Never Seen!",
+        "description": "Watch noodles being made the traditional way using a fascinating hand-operated tool! This unique noodle-making process is ...",
+        "publishedAt": "2025-05-18T13:48:54Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/atJHcy81tjc/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/atJHcy81tjc/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/atJHcy81tjc/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "BOJJs_UI4bg",
+        "title": "Stick Jump! Cliffside Trick",
+        "description": "Check out this incredible jump with a stick! This guy uses a stick to jump across a rocky cliffside. It's more impressive than it looks!",
+        "publishedAt": "2025-05-18T13:30:06Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/BOJJs_UI4bg/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/BOJJs_UI4bg/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/BOJJs_UI4bg/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "1nLB0lW6qQ0",
+        "title": "Tuna Submarine! 🐟 Stealth Feeding",
+        "description": "Check out this incredible tuna's feeding technique! It grabs food without breaking the surface. So satisfying to watch this ...",
+        "publishedAt": "2025-05-18T13:20:44Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/1nLB0lW6qQ0/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/1nLB0lW6qQ0/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/1nLB0lW6qQ0/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      },
+      {
+        "id": "xlaIx2lEH8M",
+        "title": "Thatching MAGIC! ✨",
+        "description": "Watch a skilled thatcher transform a roof with traditional techniques. The satisfying process of applying straw and shaping the roof ...",
+        "publishedAt": "2025-05-18T13:09:15Z",
+        "thumbnails": {
+          "default": {
+            "url": "https://i.ytimg.com/vi/xlaIx2lEH8M/default.jpg",
+            "width": 120,
+            "height": 90
+          },
+          "medium": {
+            "url": "https://i.ytimg.com/vi/xlaIx2lEH8M/mqdefault.jpg",
+            "width": 320,
+            "height": 180
+          },
+          "high": {
+            "url": "https://i.ytimg.com/vi/xlaIx2lEH8M/hqdefault.jpg",
+            "width": 480,
+            "height": 360
+          }
+        }
+      }
+    ]
+  },
+  "action_items": [
+    "**Rectify \"Unknown\" Titles/Thumbnails:** If the \"Unknown\" titles are due to a data issue or missing metadata on YouTube, *immediately* update the titles and add custom thumbnails to all existing videos, especially the ones with some views.",
+    "**Analyze Your Niche:** Given the very low engagement, clearly define your channel's niche. Are you a gaming channel, a DIY channel, a heartwarming moments channel? Trying to do too many different things can confuse the algorithm and potential viewers.",
+    "**Focus on Foundational SEO:** For every new upload, ensure you are using relevant keywords in your title, description, and tags. Research what your target audience is searching for.",
+    "**Promote Existing Content:** Share your existing videos on other social media platforms (Twitter, Instagram, TikTok, Facebook) to drive initial traffic, as YouTube's algorithm isn't currently pushing your content."
+  ],
+  "feedback_insights": {
+    "content_insights": {
+      "preferred_keywords": [
+        "numbers",
+        "list_format"
+      ],
+      "successful_topics": [],
+      "content_types": [
+        "entertainment"
+      ],
+      "length_recommendations": {
+        "optimal_max": 60,
+        "optimal_min": 30
+      }
+    },
+    "timing_insights": {
+      "optimal_days": [],
+      "optimal_hours": [],
+      "posting_frequency": {}
+    },
+    "optimization_insights": {
+      "title_strategies": [
+        "include_numbers"
+      ],
+      "thumbnail_strategies": [
+        "include_text",
+        "include_face"
+      ],
+      "engagement_strategies": [
+        "strong_opening_hook"
+      ]
+    },
+    "performance_patterns": {
+      "top_performing_characteristics": {
+        "title_length": 7,
+        "high_performance_threshold": 10,
+        "successful_characteristics": []
+      },
+      "underperforming_patterns": {},
+      "growth_trends": {
+        "total_views": 27,
+        "subscriber_growth": 0,
+        "average_performance": {
+          "avg_views": 1.35,
+          "avg_watch_time": 0.85,
+          "avg_subscribers_gained": 0.0
+        }
+      }
+    }
+  },
+  "optimization_params": {
+    "content_filtering": {
+      "preferred_types": [
+        "entertainment"
+      ],
+      "length_preferences": {
+        "optimal_max": 60,
+        "optimal_min": 30
+      }
+    },
+    "title_optimization": {
+      "include_numbers": true,
+      "use_how_to_format": false,
+      "use_question_format": false
+    },
+    "thumbnail_optimization": {
+      "use_high_contrast": false,
+      "include_text_overlay": true,
+      "include_faces": true
+    },
+    "timing_optimization": {
+      "optimal_days": [],
+      "optimal_hours": [],
+      "scheduling_enabled": false
+    },
+    "processing_preferences": {
+      "add_strong_hooks": true,
+      "add_captions": false,
+      "optimize_end_screens": false
+    }
+  }
+}

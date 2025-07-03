@@ -64,6 +64,11 @@ data/results/*
 data/databases/*
 data/logs/*
 !data/README.md
+data/temp/*
+data/results/*
+data/databases/*
+data/logs/*
+!data/README.md
 
 # OS specific
 .DS_Store
@@ -82,3 +87,8 @@ config/optimal_parameters.json
 .roomodes
 aigi.md
 /.cursor
+/thumbnails
+youtube-token.json
+youtube_token.json
+client_secret_*.json
+/analytics_reports

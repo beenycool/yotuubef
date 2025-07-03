@@ -14,6 +14,21 @@ from moviepy import (
 
 class MoviePyCompat:
     """Compatibility layer for MoviePy API changes"""
+
+    @staticmethod
+    def apply_fx_effect(clip, fx_effect, *args, **kwargs):
+        """Apply fx effect using compatibility layer"""
+        return MoviePyCompat.apply_fx_effect(clip, fx_effect, *args, **kwargs)
+
+    @staticmethod
+    def get_audio_channels(clip):
+        """Get audio channels using compatibility layer"""
+        return MoviePyCompat.get_audio_channels(clip)
+
+    @staticmethod
+    def with_audio(video_clip, audio_clip):
+        """Set audio for video clip using compatibility layer"""
+        return MoviePyCompat.with_audio(video_clip, audio_clip)
     
     @staticmethod
     def subclip(clip, start_time, end_time=None):
@@ -274,7 +289,7 @@ class MoviePyCompat:
             try:
                 result = attempt()
                 if i > 0:
-                    logging.warning(f"Text clip created using fallback method {i+1}")
+                    logging.debug(f"Text clip created using fallback method {i+1}")
                 return result
             except Exception as e:
                 logging.debug(f"Text clip attempt {i+1} failed: {e}")
@@ -316,6 +331,50 @@ class MoviePyCompat:
             return clip
     
     @staticmethod
+    def with_volume_scaled(clip, factor):
+        """Compatible volume scaling method for audio clips"""
+        try:
+            # Try MoviePy 2.x method first
+            if hasattr(clip, 'with_volume_scaled'):
+                return clip.with_volume_scaled(factor)
+            # Fall back to MoviePy 1.x method
+            elif hasattr(clip, 'volumex'):
+                return clip.volumex(factor)
+            # Alternative method names
+            elif hasattr(clip, 'multiply_volume'):
+                return clip.multiply_volume(factor)
+            elif hasattr(clip, 'with_volume'):
+                return clip.with_volume(factor)
+            # Use fx method as fallback
+            elif hasattr(clip, 'fx'):
+                try:
+                    from moviepy.audio.fx import multiply_volume
+                    return clip.fx(multiply_volume, factor)
+                except ImportError:
+                    pass
+            # Use with_effects method for newer versions
+            elif hasattr(clip, 'with_effects'):
+                try:
+                    from moviepy.audio.fx import multiply_volume
+                    return clip.with_effects([multiply_volume(factor)])
+                except ImportError:
+                    pass
+            
+            # Manual implementation as last resort
+            if hasattr(clip, 'fl'):
+                def volume_effect(get_frame, t):
+                    frame = get_frame(t)
+                    return frame * factor
+                return clip.fl(volume_effect)
+            else:
+                logging.warning(f"No volume scaling method found for {type(clip).__name__}")
+                return clip
+                
+        except Exception as e:
+            logging.warning(f"Error scaling volume: {e}")
+            return clip
+    
+    @staticmethod
     def get_audio_channels(clip):
         """Safely get number of audio channels"""
         try:
@@ -332,6 +391,46 @@ class MoviePyCompat:
         except Exception as e:
             logging.warning(f"Could not determine audio channels: {e}")
             return 2
+    
+    @staticmethod
+    def with_audio(video_clip, audio_clip):
+        """Set audio for video clip with compatibility between MoviePy versions"""
+        # First check if neither method exists
+        if not hasattr(video_clip, 'with_audio') and not hasattr(video_clip, 'set_audio'):
+            raise AttributeError("Neither 'with_audio' nor 'set_audio' method found on video clip")
+        
+        # Try MoviePy 2.x method first
+        if hasattr(video_clip, 'with_audio'):
+            try:
+                return video_clip.with_audio(audio_clip)
+            except Exception as e:
+                # If with_audio fails, try set_audio if available
+                if hasattr(video_clip, 'set_audio'):
+                    try:
+                        return video_clip.set_audio(audio_clip)
+                    except Exception as e2:
+                        # If both fail, log and return original clip
+                        import logging
+                        logger = logging.getLogger(__name__)
+                        logger.warning(f"Failed to set audio on video clip with both methods: {e}, {e2}")
+                        return video_clip
+                else:
+                    # Only with_audio available but it failed
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Failed to set audio on video clip: {e}")
+                    return video_clip
+        
+        # Fall back to MoviePy 1.x method (set_audio only)
+        elif hasattr(video_clip, 'set_audio'):
+            try:
+                return video_clip.set_audio(audio_clip)
+            except Exception as e:
+                # If set_audio fails, log and return original clip
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to set audio on video clip: {e}")
+                return video_clip
     
     @staticmethod
     def crossfadein(clip, duration):
@@ -395,7 +494,7 @@ class MoviePyCompat:
     def crossfadeout(clip, duration):
         """Compatible crossfadeout method"""
         if clip is None:
-            logging.warning("No crossfadeout method available for NoneType")
+            logging.debug("No crossfadeout method available for NoneType")
             return None
         try:
             if hasattr(clip, 'crossfadeout'):

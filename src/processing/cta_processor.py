@@ -447,3 +447,235 @@ class CTAProcessor:
         except Exception as e:
             self.logger.warning(f"Error creating subscribe button image: {e}")
             return None
+    
+    def add_auditory_ctas(self,
+                         audio_clip: AudioFileClip,
+                         analysis: VideoAnalysis,
+                         video_duration: float) -> AudioFileClip:
+        """
+        Add auditory CTAs (voice prompts, sound effects) to enhance engagement
+        
+        Args:
+            audio_clip: Source audio clip
+            analysis: AI analysis with CTA requirements
+            video_duration: Duration of the video
+            
+        Returns:
+            Audio with auditory CTAs added
+        """
+        try:
+            from src.integrations.tts_service import TTSService
+            from src.processing.sound_effects_manager import SoundEffectsManager
+            from src.models import NarrativeSegment, EmotionType, PacingType
+            
+            audio_elements = [audio_clip] if audio_clip else []
+            
+            # Initialize services
+            tts_service = TTSService()
+            sound_manager = SoundEffectsManager()
+            
+            # Add voice prompts at strategic moments
+            voice_ctas = self._generate_voice_ctas(analysis, video_duration)
+            
+            for cta_segment in voice_ctas:
+                try:
+                    # Generate TTS for voice CTA
+                    voice_clips = tts_service.generate_narrative_audio([cta_segment])
+                    
+                    if voice_clips:
+                        # Position the voice CTA at the right time with reduced volume
+                        voice_clip = voice_clips[0]
+                        voice_clip = MoviePyCompat.with_volume_scaled(voice_clip, 0.8)  # Slightly quieter
+                        voice_clip = MoviePyCompat.with_start(voice_clip, cta_segment.time_seconds)
+                        audio_elements.append(voice_clip)
+                        
+                        self.logger.info(f"Added voice CTA at {cta_segment.time_seconds}s: '{cta_segment.text[:30]}...'")
+                
+                except Exception as e:
+                    self.logger.warning(f"Failed to generate voice CTA: {e}")
+                    continue
+            
+            # Add notification sound effects for CTAs
+            sound_ctas = self._generate_sound_ctas(analysis, video_duration)
+            
+            for sound_cta in sound_ctas:
+                try:
+                    # Find appropriate sound effect
+                    sound_file = sound_manager.find_sound_effect(
+                        sound_cta['effect_name'],
+                        preferred_category=sound_cta.get('category', 'notification')
+                    )
+                    
+                    if sound_file and sound_file.exists():
+                        # Load and position sound effect
+                        sfx_clip = AudioFileClip(str(sound_file))
+                        sfx_clip = MoviePyCompat.with_volume_scaled(sfx_clip, sound_cta['volume'])
+                        sfx_clip = MoviePyCompat.with_start(sfx_clip, sound_cta['timestamp'])
+                        audio_elements.append(sfx_clip)
+                        
+                        self.logger.info(f"Added sound CTA '{sound_cta['effect_name']}' at {sound_cta['timestamp']}s")
+                
+                except Exception as e:
+                    self.logger.warning(f"Failed to add sound CTA: {e}")
+                    continue
+            
+            # Composite all audio elements
+            if len(audio_elements) > 1:
+                final_audio = concatenate_audioclips(audio_elements)
+                self.logger.info(f"Auditory CTAs processing completed: {len(voice_ctas)} voice prompts, {len(sound_ctas)} sound effects")
+                return final_audio
+            else:
+                self.logger.info("No auditory CTAs added, returning original audio")
+                return audio_clip
+            
+        except Exception as e:
+            self.logger.error(f"Error adding auditory CTAs: {e}")
+            return audio_clip
+    
+    def _generate_voice_ctas(self, analysis: VideoAnalysis, video_duration: float) -> List['NarrativeSegment']:
+        """Generate voice CTA segments based on video analysis"""
+        from src.models import NarrativeSegment, EmotionType, PacingType
+        
+        voice_ctas = []
+        
+        try:
+            # Generate contextual voice CTAs based on content
+            cta_text = self._get_voice_cta_text(analysis)
+            
+            # Add voice CTA at strategic moments
+            # Primary CTA at 70% through video (before end screen)
+            primary_time = min(video_duration * 0.7, video_duration - 8.0)
+            if primary_time > 5.0:  # Ensure enough time has passed
+                primary_cta = NarrativeSegment(
+                    text=cta_text,
+                    time_seconds=primary_time,
+                    intended_duration_seconds=3.0,
+                    emotion=EmotionType.EXCITED,
+                    pacing=PacingType.NORMAL
+                )
+                voice_ctas.append(primary_cta)
+            
+            # Secondary CTA for longer videos (>45 seconds)
+            if video_duration > 45.0:
+                secondary_time = video_duration * 0.4
+                secondary_text = self._get_secondary_voice_cta_text(analysis)
+                
+                secondary_cta = NarrativeSegment(
+                    text=secondary_text,
+                    time_seconds=secondary_time,
+                    intended_duration_seconds=2.5,
+                    emotion=EmotionType.CALM,
+                    pacing=PacingType.FAST
+                )
+                voice_ctas.append(secondary_cta)
+            
+            self.logger.info(f"Generated {len(voice_ctas)} voice CTA segments")
+            return voice_ctas
+            
+        except Exception as e:
+            self.logger.warning(f"Error generating voice CTAs: {e}")
+            return []
+    
+    def _generate_sound_ctas(self, analysis: VideoAnalysis, video_duration: float) -> List[Dict[str, Any]]:
+        """Generate sound effect CTAs for engagement moments"""
+        sound_ctas = []
+        
+        try:
+            # Add notification sounds before voice CTAs
+            if video_duration > 30.0:
+                # Attention-grabbing sound before main CTA
+                attention_time = max(5.0, video_duration * 0.7 - 1.0)
+                sound_ctas.append({
+                    'timestamp': attention_time,
+                    'effect_name': 'chime',
+                    'category': 'notification',
+                    'volume': 0.6
+                })
+            
+            # Add subtle engagement sounds during hook moments
+            if hasattr(analysis, 'visual_hook_moment') and analysis.visual_hook_moment:
+                hook_time = analysis.visual_hook_moment.timestamp_seconds
+                if hook_time > 2.0 and hook_time < video_duration - 10.0:
+                    sound_ctas.append({
+                        'timestamp': hook_time - 0.5,
+                        'effect_name': 'swoosh',
+                        'category': 'transition',
+                        'volume': 0.4
+                    })
+            
+            # Add completion sound for longer videos
+            if video_duration > 40.0:
+                completion_time = video_duration - 3.0
+                sound_ctas.append({
+                    'timestamp': completion_time,
+                    'effect_name': 'bell',
+                    'category': 'notification',
+                    'volume': 0.5
+                })
+            
+            self.logger.info(f"Generated {len(sound_ctas)} sound CTA effects")
+            return sound_ctas
+            
+        except Exception as e:
+            self.logger.warning(f"Error generating sound CTAs: {e}")
+            return []
+    
+    def _get_voice_cta_text(self, analysis: VideoAnalysis) -> str:
+        """Generate contextual voice CTA text based on analysis"""
+        try:
+            # Generate based on content mood first for better customization
+            mood = getattr(analysis, 'mood', '').lower()
+            
+            if 'funny' in mood or 'comedy' in mood:
+                return "If this made you laugh, hit subscribe for daily comedy gold!"
+            elif 'amazing' in mood or 'incredible' in mood:
+                return "Mind blown? Subscribe for more incredible content like this!"
+            elif 'satisfying' in mood:
+                return "Feeling satisfied? Subscribe for your daily dose of satisfaction!"
+            elif 'educational' in mood or 'learning' in mood:
+                return "Learned something new? Subscribe for educational content every day!"
+            elif 'inspiring' in mood or 'motivational' in mood:
+                return "Feeling inspired? Subscribe for daily motivation and inspiration!"
+            elif 'exciting' in mood:
+                return "Excited? Subscribe for more thrilling content like this!"
+            
+            # Use AI-provided CTA if available and no specific mood match
+            if analysis.call_to_action and analysis.call_to_action.text:
+                base_text = analysis.call_to_action.text
+                # Convert to voice-friendly format
+                if "subscribe" in base_text.lower():
+                    return "Don't forget to hit that subscribe button and turn on notifications!"
+                elif "like" in base_text.lower():
+                    return "If you enjoyed this, smash that like button!"
+                else:
+                    return f"{base_text} And don't forget to subscribe!"
+            
+            # Default fallback
+            return "Enjoyed this? Hit subscribe and ring the notification bell!"
+            
+        except Exception as e:
+            self.logger.warning(f"Error generating voice CTA text: {e}")
+            return "Don't forget to like and subscribe for more amazing content!"
+    
+    def _get_secondary_voice_cta_text(self, analysis: VideoAnalysis) -> str:
+        """Generate secondary voice CTA for longer videos"""
+        try:
+            secondary_ctas = [
+                "Loving this content? More coming your way!",
+                "This is just getting started - stay tuned!",
+                "Wait until you see what's next!",
+                "Make sure you're subscribed for the best part!",
+                "Don't miss what's coming up next!"
+            ]
+            
+            # Choose based on content characteristics
+            if hasattr(analysis, 'has_clear_narrative') and analysis.has_clear_narrative:
+                return "This story gets even better - keep watching!"
+            elif hasattr(analysis, 'mood') and 'exciting' in analysis.mood.lower():
+                return "The excitement is just beginning!"
+            else:
+                return secondary_ctas[0]  # Default
+            
+        except Exception as e:
+            self.logger.warning(f"Error generating secondary voice CTA: {e}")
+            return "Keep watching for more!"

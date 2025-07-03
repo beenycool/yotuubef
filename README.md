@@ -40,6 +40,25 @@ An advanced, AI-driven system for automatically creating engaging YouTube Shorts
 - **Engagement Optimization**: Identify and promote high-value interactions
 - **Community Building**: Proactive audience engagement strategies
 
+## 📦 Dependencies & Recent Updates
+
+### Recent Updates (June 2025)
+- ✅ **Migrated to Google GenAI unified SDK** (breaking change from google-generativeai)
+- ✅ **Updated to MoviePy 2.2** (latest stable with improvements)
+- ✅ **Updated to Transformers 4.48.0** (support for latest AI models like Zamba2)
+- ✅ **Updated to PyTorch 2.4.0** (better compatibility and performance)
+- ✅ **Added Accelerate and Evaluate** (enhanced ML capabilities)
+
+**Migration Required**: If upgrading from an older version, run `python migrate_dependencies.py` or see `MIGRATION_GUIDE.md` for detailed instructions.
+
+### Key Dependencies
+- **Video Processing**: MoviePy 2.2+, OpenCV, FFmpeg
+- **AI Integration**: Google GenAI (unified SDK), Transformers 4.48+
+- **Audio Processing**: Librosa, SoundFile
+- **Machine Learning**: PyTorch 2.4+, Accelerate, Evaluate
+- **Database**: SQLite with enhanced analytics
+- **APIs**: YouTube Data API, Reddit API, Spotify API
+
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -288,6 +307,30 @@ python main_enhanced.py --profile --test-video-limit 60
    - Verify all API keys are correct
    - Check YouTube OAuth token validity
    - Ensure proper file permissions
+
+4. **YouTube Analytics API Error (403 accessNotConfigured)**
+   ```
+   ERROR - Google API request failed: HttpError 403 when requesting
+   https://youtubeanalytics.googleapis.com/v2/reports?...
+   "YouTube Analytics API has not been used in project before or it is disabled"
+   ```
+   
+   **Solution:**
+   ```bash
+   # Run the diagnostic script
+   python check_youtube_analytics_api.py
+   
+   # Follow the steps to:
+   # 1. Enable YouTube Analytics API in Google Cloud Console
+   # 2. Re-authenticate with updated scopes
+   # 3. Wait for API activation
+   ```
+   
+   **Manual Steps:**
+   - Go to [Google Cloud Console](https://console.developers.google.com/apis/api/youtubeanalytics.googleapis.com/overview)
+   - Select your project and click "Enable"
+   - Delete `youtube_token.json` and run `python auth_youtube.py`
+   - Wait 2-5 minutes for API activation
 
 ### Logging
 
