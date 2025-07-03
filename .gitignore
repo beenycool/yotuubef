@@ -29,6 +29,8 @@ ENV/
 .env.*
 .venv
 
+aider-venv/
+aider-venv-py311/
 # IDE
 .idea/
 .vscode/
@@ -42,6 +44,10 @@ ENV/
 *.mkv
 *.wmv
 *.flv
+sound_effects/
+music/
+fonts/
+thumbnails/
 *.webm
 *.m4v
 *.mpg
@@ -59,11 +65,6 @@ tmp/
 data/logs/
 
 # Data directories (keep structure but ignore contents)
-data/temp/*
-data/results/*
-data/databases/*
-data/logs/*
-!data/README.md
 data/temp/*
 data/results/*
 data/databases/*
@@ -87,8 +88,5 @@ config/optimal_parameters.json
 .roomodes
 aigi.md
 /.cursor
-/thumbnails
-youtube-token.json
-youtube_token.json
-client_secret_*.json
-/analytics_reports
+.aider*
+aiders

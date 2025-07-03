@@ -397,98 +397,20 @@ class EnhancementOptimizer:
             return False
     
     def _update_config_parameters(self, updates: Dict[str, float]):
-        """Update configuration parameters in config.yaml"""
+        """Update configuration parameters"""
         try:
-            import yaml
-            from pathlib import Path
+            # This would update the actual config.yaml file in production
+            # For now, we'll just log the intended changes
+            self.logger.info(f"Configuration updates: {updates}")
             
-            # Find config.yaml file
-            config_files = [
-                self.config.paths.base_dir / "config.yaml",
-                self.config.paths.base_dir / "config_enhanced.yaml",
-                Path("config.yaml"),
-                Path("config_enhanced.yaml")
-            ]
-            
-            config_file = None
-            for file_path in config_files:
-                if file_path.exists():
-                    config_file = file_path
-                    break
-            
-            if not config_file:
-                self.logger.warning("No config.yaml file found, creating new one with updates")
-                config_file = self.config.paths.base_dir / "config_enhanced.yaml"
-                config_data = {}
-            else:
-                # Load existing config
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    config_data = yaml.safe_load(f) or {}
-            
-            # Update configuration parameters
-            updated_sections = set()
-            
-            for param_name, value in updates.items():
-                if param_name == 'sound_effects_volume':
-                    if 'effects' not in config_data:
-                        config_data['effects'] = {}
-                    config_data['effects']['sound_effects_volume'] = float(value)
-                    updated_sections.add('effects')
-                    
-                elif param_name == 'visual_effects_intensity':
-                    if 'effects' not in config_data:
-                        config_data['effects'] = {}
-                    config_data['effects']['visual_effects_intensity'] = float(value)
-                    updated_sections.add('effects')
-                    
-                elif param_name == 'text_overlay_duration':
-                    if 'text_overlay' not in config_data:
-                        config_data['text_overlay'] = {}
-                    config_data['text_overlay']['default_duration'] = float(value)
-                    updated_sections.add('text_overlay')
-                    
-                elif param_name == 'background_music_volume':
-                    if 'audio' not in config_data:
-                        config_data['audio'] = {}
-                    config_data['audio']['background_music_volume'] = float(value)
-                    updated_sections.add('audio')
-                    
-                elif param_name == 'hook_text_font_size':
-                    if 'text_overlay' not in config_data:
-                        config_data['text_overlay'] = {}
-                    config_data['text_overlay']['hook_font_size'] = int(value)
-                    updated_sections.add('text_overlay')
-                    
-                else:
-                    # Generic enhancement parameter
-                    if 'enhancement_optimizer' not in config_data:
-                        config_data['enhancement_optimizer'] = {}
-                    config_data['enhancement_optimizer'][param_name] = float(value)
-                    updated_sections.add('enhancement_optimizer')
-            
-            # Add metadata about the optimization
-            if 'enhancement_optimizer' not in config_data:
-                config_data['enhancement_optimizer'] = {}
-            
-            config_data['enhancement_optimizer']['last_updated'] = datetime.now().isoformat()
-            config_data['enhancement_optimizer']['updates_applied'] = list(updates.keys())
-            
-            # Save updated config
-            with open(config_file, 'w', encoding='utf-8') as f:
-                yaml.dump(config_data, f, default_flow_style=False, indent=2)
-            
-            self.logger.info(f"Configuration updated in {config_file}: {updates}")
-            self.logger.info(f"Updated sections: {', '.join(updated_sections)}")
-            
-            # Update internal state to reflect changes
-            if 'current_parameters' not in self.optimization_state:
-                self.optimization_state['current_parameters'] = {}
-            self.optimization_state['current_parameters'].update(updates)
+            # In production, this would:
+            # 1. Load config.yaml
+            # 2. Update relevant sections
+            # 3. Save config.yaml
+            # 4. Reload configuration
             
         except Exception as e:
             self.logger.error(f"Config update failed: {e}")
-            # Fallback: just log the intended changes
-            self.logger.info(f"Fallback - Configuration updates that would be applied: {updates}")
     
     def _get_current_parameter_value(self, parameter_name: str) -> float:
         """Get current value of a parameter"""

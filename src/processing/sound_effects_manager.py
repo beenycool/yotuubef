@@ -35,9 +35,6 @@ class SoundEffectsManager:
     Follows the directory structure defined in sound_effects/README.md
     """
     
-    # Class attribute to track if cache has been logged
-    _cache_logged = False
-    
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
@@ -144,10 +141,7 @@ class SoundEffectsManager:
             if root_files:
                 self._sound_cache['uncategorized'] = root_files
             
-            # Only log sound effects cache info once per application run
-            if not SoundEffectsManager._cache_logged:
-                self.logger.info(f"Sound effects cache refreshed: {total_effects} effects across {len(self._sound_cache)} categories")
-                SoundEffectsManager._cache_logged = True
+            self.logger.info(f"Sound effects cache refreshed: {total_effects} effects across {len(self._sound_cache)} categories")
             
         except Exception as e:
             self.logger.error(f"Error refreshing sound effects cache: {e}")

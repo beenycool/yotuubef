@@ -7,14 +7,14 @@ ai_features:
   fallback_confidence_threshold: 0.6
   use_fallback_analysis: true
 api:
-  gemini_api_key: ""
+  gemini_api_key: your_gemini_api_key
   gemini_model: gemini-2.0-flash
   gemini_rate_limit_daily: 500
   gemini_rate_limit_rpm: 10
-  reddit_client_id: ""
-  reddit_client_secret: ""
+  reddit_client_id: your_reddit_client_id
+  reddit_client_secret: your_reddit_client_secret
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
-  youtube_api_key: ""
+  youtube_api_key: your_youtube_api_key
   youtube_client_secrets_file: youtube_credentials.json
 audio:
   audio_enhancement:
@@ -289,10 +289,6 @@ video_processing:
   video_bitrate: 5M
   video_codec: libx264
   video_quality_profile: speed
-analytics_report_limit: 30
-successful_topics_limit: 10
-recent_recommendations_limit: 5
-
 youtube:
   add_performance_hashtags: true
   auto_generate_description: true

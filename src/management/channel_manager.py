@@ -107,57 +107,6 @@ class ChannelManager:
     async def run_proactive_management(self):
         """Main loop for proactive channel management"""
         self.logger.info("Starting proactive channel management...")
-
-    def update_config_parameters(self, updates: dict):
-        """
-        Update the loaded YAML config file with new parameters, backing up the file first.
-        Args:
-            updates (dict): Dictionary of config parameters to update (dot notation supported for nested).
-        """
-        import yaml
-        import shutil
-
-        try:
-            config_path = self.config.config_file
-        except AttributeError:
-            self.logger.error("self.config.config_file is not set. Cannot update configuration.")
-            return False
-
-        if not config_path or not Path(config_path).exists():
-            self.logger.error("Active config file not found. Cannot update configuration.")
-            return False
-
-        # Backup
-        backup_path = Path(str(config_path) + ".bak")
-        try:
-            shutil.copy2(config_path, backup_path)
-            self.logger.info(f"Backed up config to {backup_path}")
-        except Exception as e:
-            self.logger.error(f"Failed to backup config: {e}")
-            return False
-
-        # Load, update, and write
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                config_data = yaml.safe_load(f) or {}
-
-            # Support dot notation for nested updates
-            for key, value in updates.items():
-                parts = key.split(".")
-                d = config_data
-                for p in parts[:-1]:
-                    if p not in d or not isinstance(d[p], dict):
-                        d[p] = {}
-                    d = d[p]
-                d[parts[-1]] = value
-
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(config_data, f, default_flow_style=False, allow_unicode=True)
-            self.logger.info(f"Updated config file {config_path} with {updates}")
-            return True
-        except Exception as e:
-            self.logger.error(f"Failed to update config: {e}")
-            return False
         
         try:
             while True:
@@ -180,22 +129,11 @@ class ChannelManager:
         except Exception as e:
             self.logger.error(f"Proactive management loop failed: {e}")
     
-    async def get_recent_videos(self, days: int = 30) -> List[Dict[str, Any]]:
-        """Get recent videos from the channel"""
-        try:
-            # Get videos from the specified number of days
-            videos = await self.youtube_client.get_recent_videos(days=days)
-            return videos
-            
-        except Exception as e:
-            self.logger.error(f"Failed to get recent videos: {e}")
-            return []
-
     async def _get_recent_videos(self) -> List[Dict[str, Any]]:
         """Get recent videos that need management"""
         try:
             # Get videos from last 7 days
-            videos = await self.get_recent_videos(days=7)
+            videos = await self.youtube_client.get_recent_videos(days=7)
             return videos
             
         except Exception as e:
@@ -568,59 +506,9 @@ class ChannelManager:
         except Exception as e:
             self.logger.error(f"Thumbnail management failed for {video_id}: {e}")
     
-    def _is_video_ready_for_analytics(self, video_info: Dict[str, Any]) -> bool:
-        """Check if video is old enough to have meaningful analytics data"""
-        try:
-            from datetime import datetime, timezone, timedelta
-            
-            # Get published date from video info
-            published_at = video_info.get('publishedAt')
-            if not published_at:
-                # If no publish date, assume it's recent and skip analytics
-                return False
-            
-            # Parse the published date (YouTube API returns ISO format)
-            try:
-                if isinstance(published_at, str):
-                    # Handle both with and without timezone info
-                    if published_at.endswith('Z'):
-                        published_date = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
-                    else:
-                        published_date = datetime.fromisoformat(published_at)
-                        if published_date.tzinfo is None:
-                            published_date = published_date.replace(tzinfo=timezone.utc)
-                else:
-                    published_date = published_at
-            except (ValueError, TypeError) as e:
-                self.logger.warning(f"Could not parse published date: {published_at}, error: {e}")
-                return False
-            
-            # Check if video is at least 2 hours old (analytics need time to populate)
-            min_age_hours = 2
-            min_age = timedelta(hours=min_age_hours)
-            current_time = datetime.now(timezone.utc)
-            video_age = current_time - published_date
-            
-            is_ready = video_age >= min_age
-            
-            if not is_ready:
-                self.logger.info(f"Video is {video_age.total_seconds()/3600:.1f} hours old, needs at least {min_age_hours} hours for analytics")
-            
-            return is_ready
-            
-        except Exception as e:
-            self.logger.error(f"Error checking video age: {e}")
-            # If we can't determine age, assume it's not ready to be safe
-            return False
-    
     async def _start_thumbnail_ab_test(self, video_id: str, video_info: Dict[str, Any]):
         """Start A/B testing for thumbnail optimization"""
         try:
-            # Check if video is recent enough to have meaningful analytics
-            if not self._is_video_ready_for_analytics(video_info):
-                self.logger.info(f"Video {video_id} is too recent for analytics - skipping A/B test")
-                return
-            
             # Get current video performance
             current_stats = await self.youtube_client.get_video_analytics(video_id)
             
@@ -867,101 +755,10 @@ class ChannelManager:
             self.logger.error(f"Metrics update failed for {video_id}: {e}")
     
     def _get_video_path(self, video_id: str) -> Optional[Path]:
-        """Get local path for video file by searching standard directories"""
-        try:
-            # Search in standard video directories
-            search_dirs = [
-                self.config.paths.processed_dir,
-                self.config.paths.downloads_dir,
-                self.config.paths.base_dir / "processed",
-                self.config.paths.base_dir / "downloads",
-                Path("processed"),
-                Path("downloads"),
-                Path(".")
-            ]
-            
-            # Common video file extensions
-            video_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v']
-            
-            for search_dir in search_dirs:
-                if not search_dir.exists():
-                    continue
-                    
-                # Look for files containing the video ID
-                for ext in video_extensions:
-                    # Try exact match with video ID
-                    exact_match = search_dir / f"{video_id}{ext}"
-                    if exact_match.exists():
-                        self.logger.info(f"Found video file: {exact_match}")
-                        return exact_match
-                    
-                    # Try with common prefixes
-                    prefixed_patterns = [
-                        f"video_{video_id}{ext}",
-                        f"processed_{video_id}{ext}",
-                        f"final_{video_id}{ext}",
-                        f"youtube_{video_id}{ext}"
-                    ]
-                    
-                    for pattern in prefixed_patterns:
-                        candidate = search_dir / pattern
-                        if candidate.exists():
-                            self.logger.info(f"Found video file: {candidate}")
-                            return candidate
-                
-                # Also search through all files in the directory that contain the video ID
-                # Limit the number of files scanned in large directories for performance
-                MAX_FILES_SCANNED = 200
-                try:
-                    scanned = 0
-                    for file_path in search_dir.iterdir():
-                        if scanned >= MAX_FILES_SCANNED:
-                            self.logger.warning(f"Stopped scanning {search_dir} after {MAX_FILES_SCANNED} files for video_id {video_id}")
-                            break
-                        if file_path.is_file() and video_id in file_path.name:
-                            if any(file_path.name.lower().endswith(ext) for ext in video_extensions):
-                                self.logger.info(f"Found video file by pattern match: {file_path}")
-                                return file_path
-                        scanned += 1
-                except PermissionError:
-                    continue
-            
-            # If not found, check database for any recorded path information
-            if hasattr(self, 'db_manager') and self.db_manager:
-                try:
-                    with self.db_manager.get_connection() as conn:
-                        cursor = conn.cursor()
-                        cursor.execute(
-                            "SELECT reddit_url, title FROM uploads WHERE youtube_video_id = ? OR reddit_post_id = ?",
-                            (video_id, video_id)
-                        )
-                        result = cursor.fetchone()
-                        
-                        if result:
-                            # Try to construct a path based on database info
-                            reddit_url, title = result
-                            if title:
-                                # Clean title for filename
-                                clean_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).rstrip()
-                                clean_title = clean_title.replace(' ', '_')[:50]  # Limit length
-                                
-                                # Try with cleaned title
-                                for search_dir in search_dirs[:2]:  # Only check main dirs
-                                    if search_dir.exists():
-                                        for ext in video_extensions:
-                                            candidate = search_dir / f"{clean_title}_{video_id}{ext}"
-                                            if candidate.exists():
-                                                self.logger.info(f"Found video file by title match: {candidate}")
-                                                return candidate
-                except Exception as e:
-                    self.logger.debug(f"Database lookup failed: {e}")
-            
-            self.logger.warning(f"Video file not found for ID: {video_id}")
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Error searching for video file {video_id}: {e}")
-            return None
+        """Get local path for video file (would need to implement)"""
+        # This would return the path to the locally stored video file
+        # In production, this might query a database or file system
+        return None
     
     def _create_analysis_from_video_info(self, video_info: Dict[str, Any]):
         """Create analysis object from video info for thumbnail generation"""

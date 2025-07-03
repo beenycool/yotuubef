@@ -11,8 +11,8 @@ from typing import Dict, Any, Optional, List, Union
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
-# Load environment variables from .env file, but don't override existing system variables
-load_dotenv(override=False)
+# Load environment variables first
+load_dotenv()
 
 @dataclass
 class VideoConfig:
@@ -140,8 +140,7 @@ class APIConfig:
     youtube_scopes: List[str] = field(default_factory=lambda: [
         'https://www.googleapis.com/auth/youtube.upload',
         'https://www.googleapis.com/auth/youtube.force-ssl',
-        'https://www.googleapis.com/auth/youtubepartner',
-        'https://www.googleapis.com/auth/yt-analytics.readonly'
+        'https://www.googleapis.com/auth/youtubepartner'
     ])
     youtube_upload_category_id: str = '24'
     youtube_upload_privacy_status: str = 'public'
@@ -240,9 +239,6 @@ class ConfigManager:
         self.api = APIConfig()
         self.content = ContentConfig()
         self.paths = PathConfig()
-        self.analytics_report_limit = 30  # Default, can be overridden by YAML
-        self.successful_topics_limit = 10  # Default, can be overridden by YAML
-        self.recent_recommendations_limit = 5  # Default, can be overridden by YAML
         
         # Load configurations in order of precedence
         self._load_yaml_config()
@@ -278,34 +274,13 @@ class ConfigManager:
             
             # Update configurations from YAML
             self._update_from_dict(self.video, yaml_config.get('video', {}))
-            # Also check for video_processing section
+            # Also check for video_processing section 
             self._update_from_dict(self.video, yaml_config.get('video_processing', {}))
             self._update_from_dict(self.text_overlay, yaml_config.get('text_overlay', {}))
             self._update_from_dict(self.effects, yaml_config.get('effects', {}))
             self._update_from_dict(self.audio, yaml_config.get('audio', {}))
             self._update_from_dict(self.api, yaml_config.get('apis', {}))
             self._update_from_dict(self.content, yaml_config.get('content', {}))
-            
-            # Handle analytics_report_limit
-            if 'analytics_report_limit' in yaml_config:
-                try:
-                    self.analytics_report_limit = int(yaml_config['analytics_report_limit'])
-                except Exception as e:
-                    self.logger.warning(f"Invalid analytics_report_limit in config.yaml: {e}")
-
-            # Handle successful_topics_limit
-            if 'successful_topics_limit' in yaml_config:
-                try:
-                    self.successful_topics_limit = int(yaml_config['successful_topics_limit'])
-                except Exception as e:
-                    self.logger.warning(f"Invalid successful_topics_limit in config.yaml: {e}")
-
-            # Handle recent_recommendations_limit
-            if 'recent_recommendations_limit' in yaml_config:
-                try:
-                    self.recent_recommendations_limit = int(yaml_config['recent_recommendations_limit'])
-                except Exception as e:
-                    self.logger.warning(f"Invalid recent_recommendations_limit in config.yaml: {e}")
             
             # Handle subtitles config specifically
             subtitles_config = yaml_config.get('subtitles', {})
@@ -337,22 +312,11 @@ class ConfigManager:
     
     def _load_env_config(self):
         """Load configuration from environment variables"""
-        # API credentials - only set if not empty to avoid overriding with empty strings
-        reddit_client_id = os.getenv('REDDIT_CLIENT_ID', '').strip()
-        if reddit_client_id:
-            self.api.reddit_client_id = reddit_client_id
-            
-        reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', '').strip()
-        if reddit_client_secret:
-            self.api.reddit_client_secret = reddit_client_secret
-            
-        reddit_user_agent = os.getenv('REDDIT_USER_AGENT', '').strip()
-        if reddit_user_agent:
-            self.api.reddit_user_agent = reddit_user_agent
-            
-        gemini_api_key = os.getenv('GEMINI_API_KEY', '').strip()
-        if gemini_api_key:
-            self.api.gemini_api_key = gemini_api_key
+        # API credentials
+        self.api.reddit_client_id = os.getenv('REDDIT_CLIENT_ID', '')
+        self.api.reddit_client_secret = os.getenv('REDDIT_CLIENT_SECRET', '')
+        self.api.reddit_user_agent = os.getenv('REDDIT_USER_AGENT', self.api.reddit_user_agent)
+        self.api.gemini_api_key = os.getenv('GEMINI_API_KEY', '')
         
         # File paths
         if os.getenv('GOOGLE_CLIENT_SECRETS_FILE'):
@@ -404,9 +368,9 @@ class ConfigManager:
         
         # Check essential API credentials
         if not self.api.reddit_client_id:
-            warnings.append("REDDIT_CLIENT_ID not set - Reddit functionality will be disabled")
+            errors.append("REDDIT_CLIENT_ID not set")
         if not self.api.reddit_client_secret:
-            warnings.append("REDDIT_CLIENT_SECRET not set - Reddit functionality will be disabled")
+            errors.append("REDDIT_CLIENT_SECRET not set")
         if not self.api.gemini_api_key:
             warnings.append("GEMINI_API_KEY not set - AI analysis will be disabled")
         

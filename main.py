@@ -9,22 +9,16 @@ import logging
 import argparse
 import json
 import sys
-import atexit
-import signal
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from src.enhanced_orchestrator import EnhancedVideoOrchestrator
-from src.integrations.narrative_analyzer import NarrativeAnalyzer
 from src.management.channel_manager import ChannelManager
 from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.integrations.reddit_client import RedditClient
-from src.analytics.analytics_advisor import AnalyticsAdvisor
 from src.config.settings import get_config, setup_logging
 from src.utils.cleanup import clear_temp_files, clear_results, clear_logs
-from src.integrations.spotify_downloader import SpotifyDownloader
-from src.utils.safe_print import safe_print
 
 
 class EnhancedYouTubeGenerator:
@@ -43,22 +37,9 @@ class EnhancedYouTubeGenerator:
         # Initialize management systems
         self.channel_manager = ChannelManager()
         self.enhancement_optimizer = EnhancementOptimizer()
-        self.analytics_advisor = AnalyticsAdvisor()
-        
-        # Initialize music downloader
-        self.spotify_downloader = SpotifyDownloader()
-        self.downloaded_music_files = []
         
         # Initialize Reddit client for automatic video finding (will be initialized async)
         self.reddit_client = None
-        
-        # Initialize narrative analyzer for strategic content curation
-        self.narrative_analyzer = NarrativeAnalyzer()
-        
-        # Register cleanup on exit
-        atexit.register(self._cleanup_music_files)
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
         
         self.logger.info("Enhanced YouTube Generator initialized")
     
@@ -74,75 +55,6 @@ class EnhancedYouTubeGenerator:
         """Clean up resources"""
         if self.reddit_client:
             await self.reddit_client.close()
-        self._cleanup_music_files()
-    
-    def _signal_handler(self, signum, frame):
-        """Handle interrupt signals"""
-        self.logger.info("Received interrupt signal, cleaning up...")
-        self._cleanup_music_files()
-        sys.exit(0)
-    
-    def _cleanup_music_files(self):
-        """Delete downloaded music files"""
-        try:
-            if self.downloaded_music_files:
-                self.logger.info(f"Cleaning up {len(self.downloaded_music_files)} downloaded music files...")
-                for file_path in self.downloaded_music_files:
-                    try:
-                        if file_path.exists():
-                            file_path.unlink()
-                            self.logger.debug(f"Deleted: {file_path}")
-                    except Exception as e:
-                        self.logger.warning(f"Failed to delete {file_path}: {e}")
-                self.downloaded_music_files.clear()
-                self.logger.info("Music cleanup complete")
-        except Exception as e:
-            self.logger.error(f"Error during music cleanup: {e}")
-    
-    def _safe_print(self, message: str):
-        """Safely print Unicode messages, falling back to ASCII if needed"""
-        try:
-            print(message)
-        except UnicodeEncodeError:
-            # Fallback to ASCII-safe version
-            safe_message = message.encode('ascii', 'replace').decode('ascii')
-            print(safe_message)
-    
-    async def _download_top_music(self):
-        """Download top 10 songs at startup"""
-        try:
-            self.logger.info("Downloading top 10 songs for video creation...")
-            safe_print("🎵 Downloading top 10 popular songs...")
-            
-            # Download top charts
-            downloaded_files = self.spotify_downloader.download_top_charts("US", 10)
-            
-            if downloaded_files:
-                self.downloaded_music_files.extend(downloaded_files)
-                self.logger.info(f"Downloaded {len(downloaded_files)} songs successfully")
-                safe_print(f"✅ Downloaded {len(downloaded_files)} songs to music/ folder")
-                
-                # Show downloaded songs
-                for i, file_path in enumerate(downloaded_files[:5], 1):  # Show first 5
-                    safe_print(f"   {i}. {file_path.stem}")
-                if len(downloaded_files) > 5:
-                    safe_print(f"   ... and {len(downloaded_files) - 5} more")
-            else:
-                self.logger.warning("No songs were downloaded")
-                safe_print(f"❌ No songs were downloaded - check your internet connection or install spotify_dl")
-                safe_print(f"💡 You can manually add music files to the music/ folder")
-                
-                # Check if there are existing music files
-                existing_music = list(self.config.paths.music_folder.glob("*.mp3"))
-                if existing_music:
-                    safe_print(f"✅ Found {len(existing_music)} existing music files in music/ folder")
-                    for i, file_path in enumerate(existing_music[:5], 1):
-                        safe_print(f"   {i}. {file_path.stem}")
-                
-        except Exception as e:
-            self.logger.error(f"Failed to download music: {e}")
-            safe_print(f"❌ Failed to download music: {e}")
-            safe_print(f"💡 You can manually add music files to the music/ folder")
     def _print_found_videos_summary(self, result: dict):
         """Print summary of found videos"""
         if not result.get('success') or not result.get('posts'):
@@ -152,22 +64,9 @@ class EnhancedYouTubeGenerator:
         print("=" * 40)
         for i, post in enumerate(result['posts'], 1):
             duration_str = f" ({post.duration:.1f}s)" if post.duration else ""
-            # Handle Unicode characters by encoding/decoding properly
-            try:
-                title = post.title[:60].encode('ascii', 'ignore').decode('ascii')
-                if len(post.title) > 60:
-                    title += "..."
-                print(f"{i}. r/{post.subreddit} - {title}")
-                print(f"   Score: {post.score} | Comments: {post.num_comments}{duration_str}")
-                print(f"   URL: {post.url}")
-            except UnicodeEncodeError:
-                # Fallback: replace problematic characters
-                safe_title = post.title[:60].encode('ascii', 'replace').decode('ascii')
-                if len(post.title) > 60:
-                    safe_title += "..."
-                print(f"{i}. r/{post.subreddit} - {safe_title}")
-                print(f"   Score: {post.score} | Comments: {post.num_comments}{duration_str}")
-                print(f"   URL: {post.url}")
+            print(f"{i}. r/{post.subreddit} - {post.title[:60]}...")
+            print(f"   Score: {post.score} | Comments: {post.num_comments}{duration_str}")
+            print(f"   URL: {post.url}")
             print()
         print("=" * 40)
     
@@ -187,40 +86,8 @@ class EnhancedYouTubeGenerator:
         try:
             self.logger.info(f"Processing single video: {reddit_url}")
             
-            # Apply analytics feedback to options
-            if options is None:
-                options = {}
-            
-            # Apply analytics feedback to processing options
-            enhanced_options = self.analytics_advisor.apply_analytics_feedback_to_options(options)
-            if enhanced_options != options:
-                self.logger.info("Applied analytics feedback to video processing options")
-                options = enhanced_options
-            
             # Enhanced processing with all features
             result = await self.orchestrator.process_enhanced_video(reddit_url, options)
-            
-            # Track performance for future analytics feedback
-            if result.get('success') and result.get('video_id'):
-                try:
-                    # Track basic performance data
-                    performance_data = {
-                        'processed_at': datetime.now().isoformat(),
-                        'reddit_url': reddit_url,
-                        'processing_options': options,
-                        'success': True
-                    }
-                    
-                    # Add any available metrics
-                    if result.get('performance_prediction'):
-                        performance_data['predicted_metrics'] = result['performance_prediction']
-                    
-                    self.analytics_advisor.track_video_performance_feedback(
-                        result['video_id'], performance_data
-                    )
-                    
-                except Exception as e:
-                    self.logger.warning(f"Failed to track video performance: {e}")
             
             # Log results
             if result.get('success'):
@@ -292,26 +159,6 @@ class EnhancedYouTubeGenerator:
         """
         try:
             self.logger.info(f"Finding videos from Reddit (max: {max_videos}, sort: {sort_method})")
-            
-            # Apply analytics feedback to options
-            if options is None:
-                options = {}
-            
-            # Get analytics-driven content recommendations
-            content_recommendations = self.analytics_advisor.get_content_recommendations_for_finder()
-            if content_recommendations:
-                self.logger.info("Applying analytics insights to video selection...")
-                
-                # Use preferred subreddits if none specified
-                if not subreddit_names and content_recommendations.get('preferred_subreddits'):
-                    subreddit_names = content_recommendations['preferred_subreddits'][:5]  # Top 5
-                    self.logger.info(f"Using analytics-recommended subreddits: {subreddit_names}")
-            
-            # Apply analytics feedback to processing options
-            enhanced_options = self.analytics_advisor.apply_analytics_feedback_to_options(options)
-            if enhanced_options != options:
-                self.logger.info("Applied analytics feedback to video processing options")
-                options = enhanced_options
             
             # Initialize Reddit client if not already done
             if self.reddit_client is None:
@@ -414,272 +261,6 @@ class EnhancedYouTubeGenerator:
         except Exception as e:
             self.logger.error(f"Auto video finding failed: {e}")
             return {'success': False, 'error': str(e)}
-    async def find_and_process_narrative_driven_videos(self,
-                                                          max_videos: int = 5,
-                                                          subreddit_names: Optional[List[str]] = None,
-                                                          min_narrative_score: int = 60,
-                                                          sort_method: str = 'hot',
-                                                          time_filter: str = 'day',
-                                                          dry_run: bool = False,
-                                                          options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Find and process videos using the strategic narrative gap approach.
-        
-        This method implements the complete strategic workflow:
-        1. Discovers content with narrative gaps (missing context, unexplained reactions)
-        2. Analyzes storytelling potential using AI
-        3. Processes videos with narrative-optimized settings
-        4. Creates content that transforms passive viewing into active engagement
-        
-        Args:
-            max_videos: Maximum number of videos to find and process
-            subreddit_names: Specific subreddits to search (uses config default if None)
-            min_narrative_score: Minimum narrative potential score (1-100)
-            sort_method: Sorting method ('hot', 'top', 'new', 'rising')
-            time_filter: Time filter for top posts ('hour', 'day', 'week', 'month')
-            dry_run: If True, find videos but don't process them
-            options: Processing options
-            
-        Returns:
-            Dict with processing results and narrative insights
-        """
-        try:
-            self.logger.info(f"🎬 Starting narrative-driven content discovery...")
-            self.logger.info(f"📊 Target: {max_videos} videos with min narrative score: {min_narrative_score}")
-            
-            # Apply analytics feedback to options
-            if options is None:
-                options = {}
-            
-            # Get analytics-driven recommendations
-            content_recommendations = self.analytics_advisor.get_content_recommendations_for_finder()
-            if content_recommendations:
-                self.logger.info("Applying analytics insights to narrative video selection...")
-                
-                # Use preferred subreddits if none specified
-                if not subreddit_names and content_recommendations.get('preferred_subreddits'):
-                    subreddit_names = content_recommendations['preferred_subreddits'][:5]
-                    self.logger.info(f"Using analytics-recommended subreddits: {subreddit_names}")
-            
-            # Enhanced options with analytics feedback
-            enhanced_options = self.analytics_advisor.apply_analytics_feedback_to_options(options)
-            if enhanced_options != options:
-                self.logger.info("Applied analytics feedback to narrative processing options")
-                options = enhanced_options
-            
-            # Initialize Reddit client if needed
-            if self.reddit_client is None:
-                from src.integrations.reddit_client import create_reddit_client
-                self.reddit_client = await create_reddit_client()
-            
-            # Check connection
-            if not self.reddit_client.is_connected():
-                return {
-                    'success': False,
-                    'error': 'Reddit client not connected. Please check your Reddit API credentials.'
-                }
-            
-            # Use narrative-driven discovery
-            self.logger.info("🔍 Searching for content with strong narrative potential...")
-            narrative_posts = await self.reddit_client.get_narrative_driven_video_posts(
-                subreddit_names=subreddit_names,
-                max_posts=max_videos,
-                min_narrative_score=min_narrative_score
-            )
-            
-            if not narrative_posts:
-                return {
-                    'success': False,
-                    'error': f'No videos found with narrative score >= {min_narrative_score}',
-                    'posts_found': 0
-                }
-            
-            self.logger.info(f"✅ Found {len(narrative_posts)} narrative-rich videos")
-            
-            # Print narrative discovery summary
-            self._print_narrative_discovery_summary(narrative_posts)
-            
-            if dry_run:
-                return {
-                    'success': True,
-                    'dry_run': True,
-                    'narrative_driven': True,
-                    'posts_found': len(narrative_posts),
-                    'narrative_insights': [
-                        {
-                            'title': post.title,
-                            'narrative_score': analysis.narrative_potential_score,
-                            'story_arc': analysis.story_arc,
-                            'narrator_persona': analysis.narrator_persona,
-                            'narrative_gaps': len(analysis.narrative_gaps),
-                            'estimated_retention': analysis.estimated_retention
-                        } for post, analysis in narrative_posts
-                    ]
-                }
-            
-            # Process narrative-driven videos
-            self.logger.info("🎭 Starting narrative-driven video processing...")
-            results = []
-            total_start_time = datetime.now()
-            
-            for i, (post, narrative_analysis) in enumerate(narrative_posts):
-                try:
-                    self.logger.info(f"Processing narrative video {i+1}/{len(narrative_posts)}: {post.title[:50]}...")
-                    self.logger.info(f"  📈 Narrative score: {narrative_analysis.narrative_potential_score}/100")
-                    self.logger.info(f"  🎬 Story arc: {narrative_analysis.story_arc}")
-                    self.logger.info(f"  🎙️ Narrator persona: {narrative_analysis.narrator_persona}")
-                    
-                    # Process with narrative-driven approach
-                    result = await self.orchestrator.process_narrative_driven_video(
-                        post, narrative_analysis, options
-                    )
-                    
-                    # Track performance for analytics
-                    if result.get('success') and result.get('video_id'):
-                        try:
-                            performance_data = {
-                                'processed_at': datetime.now().isoformat(),
-                                'narrative_driven': True,
-                                'narrative_score': narrative_analysis.narrative_potential_score,
-                                'story_arc': narrative_analysis.story_arc,
-                                'narrator_persona': narrative_analysis.narrator_persona,
-                                'processing_options': options,
-                                'success': True
-                            }
-                            
-                            if result.get('performance_prediction'):
-                                performance_data['predicted_metrics'] = result['performance_prediction']
-                            
-                            self.analytics_advisor.track_video_performance_feedback(
-                                result['video_id'], performance_data
-                            )
-                            
-                        except Exception as e:
-                            self.logger.warning(f"Failed to track narrative video performance: {e}")
-                    
-                    results.append({
-                        'post': post,
-                        'narrative_analysis': narrative_analysis,
-                        'result': result
-                    })
-                    
-                    if result.get('success'):
-                        self.logger.info(f"✅ Narrative video {i+1} processed successfully")
-                    else:
-                        self.logger.error(f"❌ Narrative video {i+1} failed: {result.get('error')}")
-                        
-                except Exception as e:
-                    self.logger.error(f"Failed to process narrative video {i+1}: {e}")
-                    results.append({
-                        'post': post,
-                        'narrative_analysis': narrative_analysis,
-                        'result': {'success': False, 'error': str(e)}
-                    })
-            
-            total_processing_time = (datetime.now() - total_start_time).total_seconds()
-            
-            # Compile comprehensive results
-            successful_videos = len([r for r in results if r['result'].get('success')])
-            
-            final_result = {
-                'success': True,
-                'narrative_driven': True,
-                'narrative_discovery': {
-                    'posts_found': len(narrative_posts),
-                    'min_narrative_score': min_narrative_score,
-                    'sort_method': sort_method,
-                    'time_filter': time_filter if sort_method == 'top' else None,
-                    'subreddits_searched': subreddit_names or 'default_curated_list'
-                },
-                'processing_summary': {
-                    'total_videos': len(narrative_posts),
-                    'successful_videos': successful_videos,
-                    'failed_videos': len(narrative_posts) - successful_videos,
-                    'total_processing_time_seconds': total_processing_time,
-                    'average_time_per_video': total_processing_time / len(narrative_posts) if narrative_posts else 0
-                },
-                'narrative_insights': {
-                    'average_narrative_score': sum(analysis.narrative_potential_score for _, analysis in narrative_posts) / len(narrative_posts),
-                    'story_arcs_used': list(set(analysis.story_arc for _, analysis in narrative_posts)),
-                    'narrator_personas_used': list(set(analysis.narrator_persona for _, analysis in narrative_posts)),
-                    'total_narrative_gaps_leveraged': sum(len(analysis.narrative_gaps) for _, analysis in narrative_posts)
-                },
-                'individual_results': results
-            }
-            
-            # Print final summary
-            self._print_narrative_processing_summary(final_result)
-            
-            return final_result
-            
-        except Exception as e:
-            self.logger.error(f"Narrative-driven video discovery failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _print_narrative_discovery_summary(self, narrative_posts):
-        """Print summary of discovered narrative-driven videos"""
-        print("\n🎬 Narrative-Driven Content Discovery Results:")
-        print("=" * 60)
-        
-        for i, (post, analysis) in enumerate(narrative_posts, 1):
-            try:
-                # Handle Unicode safely
-                title = post.title[:50].encode('ascii', 'ignore').decode('ascii')
-                if len(post.title) > 50:
-                    title += "..."
-                
-                safe_print(f"\n{i}. 📺 r/{post.subreddit} - {title}")
-                safe_print(f"   📊 Score: {post.score} | 💬 Comments: {post.num_comments}")
-                safe_print(f"   🎭 Narrative Score: {analysis.narrative_potential_score}/100")
-                safe_print(f"   Story Arc: {analysis.story_arc}")
-                safe_print(f"   Narrator: {analysis.narrator_persona}")
-                safe_print(f"   Gaps: {len(analysis.narrative_gaps)} narrative opportunities")
-                if analysis.narrative_gaps:
-                    safe_print(f"   💡 Primary Gap: {analysis.narrative_gaps[0].description}")
-                safe_print(f"   📈 Est. Retention: {analysis.estimated_retention}%")
-                
-            except UnicodeEncodeError:
-                safe_title = post.title[:50].encode('ascii', 'replace').decode('ascii')
-                if len(post.title) > 50:
-                    safe_title += "..."
-                safe_print(f"\n{i}. 📺 r/{post.subreddit} - {safe_title}")
-                safe_print(f"   📊 Score: {post.score} | 💬 Comments: {post.num_comments}")
-                safe_print(f"   🎭 Narrative Score: {analysis.narrative_potential_score}/100")
-        
-        print("\n" + "=" * 60)
-    
-    def _print_narrative_processing_summary(self, result: Dict[str, Any]):
-        """Print summary of narrative-driven processing results"""
-        if not result.get('success'):
-            return
-            
-        print("\n🎬 Narrative-Driven Processing Complete!")
-        print("=" * 50)
-        
-        summary = result['processing_summary']
-        insights = result['narrative_insights']
-        
-        safe_print(f"📊 Processing Results:")
-        safe_print(f"   ✅ Successful: {summary['successful_videos']}/{summary['total_videos']}")
-        safe_print(f"   ⏱️ Total Time: {summary['total_processing_time_seconds']:.1f}s")
-        safe_print(f"   📈 Avg Time/Video: {summary['average_time_per_video']:.1f}s")
-
-        safe_print(f"\n🎭 Narrative Insights:")
-        safe_print(f"   📊 Avg Narrative Score: {insights['average_narrative_score']:.1f}/100")
-        safe_print(f"   📖 Story Arcs: {', '.join(insights['story_arcs_used'])}")
-        safe_print(f"   Personas: {', '.join(insights['narrator_personas_used'])}")
-        safe_print(f"   Total Gaps Leveraged: {insights['total_narrative_gaps_leveraged']}")
-        
-        # Show successful results
-        successful_results = [r for r in result['individual_results'] if r['result'].get('success')]
-        if successful_results:
-            print(f"\n✅ Successfully Processed Videos:")
-            for i, video_result in enumerate(successful_results, 1):
-                video_id = video_result['result'].get('video_id', 'N/A')
-                analysis = video_result['narrative_analysis']
-                print(f"   {i}. Score: {analysis.narrative_potential_score}/100 | Arc: {analysis.story_arc} | ID: {video_id}")
-        
-        print("=" * 50)
     
     async def start_proactive_management(self):
         """
@@ -743,32 +324,6 @@ class EnhancedYouTubeGenerator:
         except Exception as e:
             self.logger.error(f"Status check failed: {e}")
             return {'status': 'error', 'error': str(e)}
-    
-    async def generate_analytics_recommendations(self) -> Dict[str, Any]:
-        """
-        Generate analytics-based recommendations using Gemini AI
-        
-        Returns:
-            Analytics recommendations and insights
-        """
-        try:
-            self.logger.info("Generating analytics recommendations...")
-            
-            # Generate comprehensive recommendations
-            recommendations = await self.analytics_advisor.generate_startup_recommendations()
-            
-            # Print recommendations to console
-            if recommendations.get('success'):
-                self.analytics_advisor.print_recommendations(recommendations)
-            else:
-                safe_print(f"\n❌ Analytics Error: {recommendations.get('error', 'Unknown error')}")
-                safe_print(f"Message: {recommendations.get('message', 'Unable to generate recommendations')}\n")
-            
-            return recommendations
-            
-        except Exception as e:
-            self.logger.error(f"Analytics recommendation generation failed: {e}")
-            return {'success': False, 'error': str(e)}
     
     def _print_processing_summary(self, result: Dict[str, Any]):
         """Print processing summary"""
@@ -1013,9 +568,6 @@ Examples:
     # System status
     status_parser = subparsers.add_parser('status', help='Check system status')
     
-    # Analytics recommendations
-    analytics_parser = subparsers.add_parser('analytics', help='Generate AI-powered analytics recommendations')
-    
     # Cleanup command
     cleanup_parser = subparsers.add_parser('cleanup', help='Clean up temporary files, results, and logs')
     cleanup_parser.add_argument('--logs', action='store_true', help='Also clear log files')
@@ -1025,7 +577,7 @@ Examples:
     
     if not args.command:
         # Default to 'find' command when no command is specified
-        print("No command specified, defaulting to 'find' mode...")
+        print("🔍 No command specified, defaulting to 'find' mode...")
         print("Use 'python main.py find --help' for more options\n")
         
         # Create a mock args object with default find parameters
@@ -1045,15 +597,6 @@ Examples:
     
     # Initialize enhanced generator
     generator = EnhancedYouTubeGenerator()
-    
-    # Download top music on startup (unless it's cleanup command)
-    if args.command != 'cleanup':
-        await generator._download_top_music()
-    
-    # Generate analytics recommendations on startup (unless it's cleanup command)
-    if args.command != 'cleanup':
-        safe_print(f"🎯 Generating analytics recommendations...")
-        await generator.generate_analytics_recommendations()
     
     try:
         if args.command == 'find':
@@ -1078,21 +621,8 @@ Examples:
                 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
                 result_file = Path(f"data/results/results_find_{timestamp}.json")
                 result_file.parent.mkdir(parents=True, exist_ok=True)
-                
-                # Convert Path objects to strings for JSON serialization
-                def convert_paths(obj):
-                    if isinstance(obj, Path):
-                        return str(obj)
-                    elif isinstance(obj, dict):
-                        return {k: convert_paths(v) for k, v in obj.items()}
-                    elif isinstance(obj, list):
-                        return [convert_paths(item) for item in obj]
-                    return obj
-                
-                serializable_result = convert_paths(result)
-                
                 with open(result_file, 'w') as f:
-                    json.dump(serializable_result, f, indent=2)
+                    json.dump(result, f, indent=2)
                 print(f"Results saved to: {result_file}")
             else:
                 print(f"ERROR: Auto video finding failed: {result.get('error')}")
@@ -1120,14 +650,14 @@ Examples:
             # Process batch of videos
             urls_file = Path(args.file)
             if not urls_file.exists():
-                safe_print(f"❌ File not found: {urls_file}")
+                print(f"❌ File not found: {urls_file}")
                 return
             
             with open(urls_file, 'r') as f:
                 urls = [line.strip() for line in f if line.strip()]
             
             if not urls:
-                safe_print(f"❌ No URLs found in file")
+                print("❌ No URLs found in file")
                 return
             
             options = {
@@ -1165,19 +695,6 @@ Examples:
             # Check system status
             await generator.get_system_status()
         
-        elif args.command == 'analytics':
-            # Generate analytics recommendations
-            result = await generator.generate_analytics_recommendations()
-            
-            # Save result
-            if result.get('success'):
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                result_file = Path(f"data/results/analytics_{timestamp}.json")
-                result_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(result_file, 'w') as f:
-                    json.dump(result, f, indent=2, default=str)
-                print(f"Analytics results saved to: {result_file}")
-        
         elif args.command == 'cleanup':
             print("🧹 Starting cleanup process...")
             clear_temp_files()
@@ -1187,14 +704,14 @@ Examples:
             if args.all:
                 # Add any other all-encompassing cleanup here
                 pass
-            safe_print(f"✅ Cleanup process finished.")
+            print("✅ Cleanup process finished.")
     
     except KeyboardInterrupt:
-        safe_print(f"\nOperation interrupted by user")
-        safe_print("Cleaning up resources...")
+        print("\n⏹️ Operation interrupted by user")
+        print("Cleaning up resources...")
         await generator.cleanup()
     except Exception as e:
-        safe_print(f"ERROR: Operation failed: {e}")
+        print(f"🚨 ERROR: Operation failed: {e}")
         logging.getLogger(__name__).exception("Main operation failed")
         await generator.cleanup()
     finally:
@@ -1211,7 +728,7 @@ def run_main():
         # Check if we're already in an async context
         try:
             loop = asyncio.get_running_loop()
-            safe_print(f"⚠️ Already in async context. Use 'await main()' instead.")
+            print("⚠️ Already in async context. Use 'await main()' instead.")
             return 1
         except RuntimeError:
             # No running loop - this is what we want
@@ -1220,10 +737,10 @@ def run_main():
         # Run the main function
         return asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nStartup interrupted by user")
+        print("\n⏹️ Startup interrupted by user")
         return 0
     except Exception as e:
-        print(f"Critical startup error: {e}")
+        print(f"🚨 Critical startup error: {e}")
         return 1
 
 

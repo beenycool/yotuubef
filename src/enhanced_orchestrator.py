@@ -13,9 +13,8 @@ from datetime import datetime
 import asyncprawcore.exceptions
 
 from src.config.settings import get_config
-from src.models import VideoAnalysis, VideoAnalysisEnhanced, PerformanceMetrics
+from src.models import VideoAnalysisEnhanced, PerformanceMetrics
 from src.integrations.reddit_client import RedditClient
-from src.integrations.narrative_analyzer import NarrativeAnalyzer, NarrativeAnalysis
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
 from src.processing.cinematic_editor import CinematicEditor
@@ -192,7 +191,7 @@ class EnhancedVideoOrchestrator:
             }
             
         except asyncprawcore.exceptions.ResponseException as e:
-            if e.response.status == 404:
+            if e.response.status_code == 404:
                 self.logger.error(f"Error fetching post from URL {reddit_url}: received 404 HTTP response")
                 return {'success': False, 'error': f"Reddit post not found: {reddit_url}"}
             raise # Re-raise other ResponseExceptions
@@ -305,15 +304,10 @@ class EnhancedVideoOrchestrator:
         try:
             self.logger.info("Processing video with advanced enhancements...")
             
-            # Select appropriate background music based on analysis
-            background_music_path = self._select_background_music(analysis)
-            
             # This calls the main video processor
             output_file = self.config.paths.processed_dir / f"enhanced_{video_path.stem}.mp4"
             processing_result = self.video_processor.process_video(
-                video_path, output_file, analysis,
-                background_music_path=background_music_path,
-                generate_thumbnail=False
+                video_path, output_file, analysis, generate_thumbnail=False
             )
             
             self.logger.info("Advanced enhancement processing complete")
@@ -426,31 +420,16 @@ class EnhancedVideoOrchestrator:
         description_parts = [
             analysis.summary_for_description,
             "",
-            "🔥 Like & Share!",
+            "🔥 Enhanced with AI-powered editing for maximum engagement!",
             "",
-            "👍 SMASH that LIKE button if you enjoyed this!",
-            "🔔 SUBSCRIBE for more amazing content!",
-            "💬 What was your favorite moment? Let us know in the comments!",
-            "📤 SHARE this with friends who need to see this!",
+            "📱 Follow for more amazing content!",
             "",
-            "💬 ENGAGE WITH US:",
-            "🤔 What did you think would happen?",
-            "📊 Rate this from 1-10 in the comments!",
-            "",
-            "🔍 DISCOVER MORE:",
-            "✨ Turn on notifications to never miss a video!",
-            "🌟 Check out our other viral content!",
-            "",
-            f"📈 {' '.join(analysis.hashtags)}",
-            "",
-            "📍 SOURCE:",
-            "Original post from Reddit",
-            "Enhanced with AI-powered editing for maximum engagement!"
+            "🏷️ Tags: " + " ".join(analysis.hashtags),
         ]
         
-        # Add call to action if available
+        # Add call to action
         if hasattr(analysis, 'call_to_action') and analysis.call_to_action:
-            description_parts.insert(-3, f"👍 {analysis.call_to_action.text}")
+            description_parts.insert(-2, f"👍 {analysis.call_to_action.text}")
         
         return "\n".join(description_parts)
     
@@ -789,374 +768,3 @@ class EnhancedVideoOrchestrator:
                 'error': str(e),
                 'partial_results': results if 'results' in locals() else []
             }
-    
-    def _select_background_music(self, analysis: VideoAnalysis) -> Optional[Path]:
-        """
-        Select appropriate background music based on video analysis
-        
-        Args:
-            analysis: Video analysis containing mood and genre information
-            
-        Returns:
-            Path to selected music file or None if no suitable music found
-        """
-        try:
-            music_folder = self.config.paths.music_folder
-            
-            if not music_folder.exists():
-                self.logger.warning("Music folder not found")
-                return None
-            
-            # Determine mood/genre from analysis
-            mood = getattr(analysis, 'mood', 'upbeat').lower()
-            music_genres = getattr(analysis, 'music_genres', ['upbeat'])
-            
-            # Map moods to music categories
-            mood_mapping = {
-                'exciting': 'upbeat',
-                'dramatic': 'suspenseful', 
-                'calm': 'relaxing',
-                'peaceful': 'relaxing',
-                'funny': 'funny',
-                'humorous': 'funny',
-                'emotional': 'emotional',
-                'sad': 'emotional',
-                'heartwarming': 'emotional',
-                'informative': 'informative',
-                'educational': 'informative',
-                'mysterious': 'suspenseful',
-                'tense': 'suspenseful'
-            }
-            
-            # Get music category from mood or genres
-            target_category = mood_mapping.get(mood, 'upbeat')
-            
-            # If analysis has specific genres, use the first one
-            if music_genres and music_genres[0] in ['upbeat', 'emotional', 'suspenseful', 'relaxing', 'funny', 'informative']:
-                target_category = music_genres[0]
-            
-            # Look for music in the target category folder first
-            category_folder = music_folder / target_category
-            if category_folder.exists():
-                music_files = list(category_folder.glob("*.mp3"))
-                if music_files:
-                    selected = music_files[0]  # Take first available
-                    self.logger.info(f"Selected background music from {target_category}: {selected.name}")
-                    return selected
-            
-            # Fallback: look in main music folder
-            main_music_files = list(music_folder.glob("*.mp3"))
-            if main_music_files:
-                selected = main_music_files[0]  # Take first available
-                self.logger.info(f"Selected fallback background music: {selected.name}")
-                return selected
-            
-            # Last resort: look in any subfolder
-            for subfolder in ['upbeat', 'relaxing', 'informative', 'funny', 'emotional', 'suspenseful']:
-                subfolder_path = music_folder / subfolder
-                if subfolder_path.exists():
-                    music_files = list(subfolder_path.glob("*.mp3"))
-                    if music_files:
-                        selected = music_files[0]
-                        self.logger.info(f"Selected background music from {subfolder}: {selected.name}")
-                        return selected
-            
-            self.logger.warning("No background music files found")
-            return None
-            
-        except Exception as e:
-            self.logger.error(f"Failed to select background music: {e}")
-            return None
-    
-    async def process_narrative_driven_video(self,
-                                           reddit_post,
-                                           narrative_analysis: NarrativeAnalysis,
-                                           enhanced_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Process video using the narrative-driven approach for strategic storytelling.
-        
-        This method implements the complete narrative gap workflow:
-        1. Uses pre-analyzed narrative gaps and character profiles
-        2. Leverages strategic Hook-Story-Payoff structure
-        3. Applies persona-specific AI prompts
-        4. Optimizes all processing for narrative coherence
-        
-        Args:
-            reddit_post: RedditPost object with video content
-            narrative_analysis: Pre-computed narrative analysis
-            enhanced_options: Optional enhanced processing options
-            
-        Returns:
-            Comprehensive processing results optimized for narrative storytelling
-        """
-        try:
-            self.logger.info(f"Starting narrative-driven video processing (score: {narrative_analysis.narrative_potential_score}/100)")
-            self.logger.info(f"Story arc: {narrative_analysis.story_arc} | Persona: {narrative_analysis.narrator_persona}")
-            self.logger.info(f"Narrative gaps: {len(narrative_analysis.narrative_gaps)} opportunities identified")
-            
-            # Log initial GPU memory state
-            self.gpu_manager.log_memory_status("Narrative Processing Start")
-            
-            # Step 1: Download video
-            download_result = await self._download_video_from_post(reddit_post)
-            if not download_result['success']:
-                return download_result
-            
-            video_path = download_result['video_path']
-            
-            # Step 2: Narrative-enhanced AI analysis
-            enhanced_analysis = await self._perform_narrative_enhanced_analysis(
-                video_path, reddit_post, narrative_analysis
-            )
-            
-            # Step 3: Apply narrative-specific cinematic editing
-            if self.enable_cinematic_editing:
-                enhanced_analysis = await self._apply_narrative_cinematic_analysis(
-                    video_path, enhanced_analysis, narrative_analysis
-                )
-            
-            # Step 4: Process with narrative-optimized enhancements
-            processing_result = await self._process_with_narrative_enhancements(
-                video_path, enhanced_analysis, narrative_analysis, enhanced_options
-            )
-            
-            if not processing_result['success']:
-                return processing_result
-            
-            # Step 5: Generate narrative-focused thumbnails
-            thumbnail_results = []
-            if self.enable_ab_testing:
-                thumbnail_results = await self._generate_narrative_thumbnails(
-                    video_path, enhanced_analysis, narrative_analysis, processing_result
-                )
-            
-            # Step 6: Upload with narrative-optimized metadata
-            upload_result = await self._upload_narrative_video(
-                processing_result, enhanced_analysis, narrative_analysis, thumbnail_results
-            )
-            
-            # Step 7: Initialize narrative-specific management
-            if self.enable_proactive_management and upload_result.get('video_id'):
-                await self._initiate_narrative_management(upload_result['video_id'], narrative_analysis)
-            
-            # Step 8: Run optimization analysis
-            if self.enable_auto_optimization:
-                await self._run_optimization_analysis()
-            
-            # Final GPU cleanup
-            self.gpu_manager.clear_gpu_cache()
-            self.gpu_manager.log_memory_status("Narrative Processing Complete")
-            
-            # Compile comprehensive narrative results
-            results = self._compile_narrative_results(
-                download_result, processing_result, thumbnail_results,
-                upload_result, enhanced_analysis, narrative_analysis
-            )
-            
-            self.logger.info("Narrative-driven video processing completed successfully")
-            self.logger.info(f"Final retention prediction: {enhanced_analysis.predicted_performance.get('retention_score', 'N/A')}")
-            
-            return results
-            
-        except Exception as e:
-            self.logger.error(f"Narrative-driven video processing failed: {e}")
-            self.gpu_manager.clear_gpu_cache()  # Cleanup on error
-            return {
-                'success': False,
-                'error': str(e),
-                'stage': 'narrative_processing',
-                'narrative_analysis': narrative_analysis.__dict__ if narrative_analysis else None
-            }
-    
-    async def _download_video_from_post(self, reddit_post) -> Dict[str, Any]:
-        """Download video from RedditPost object"""
-        try:
-            if not reddit_post.video_url:
-                return {'success': False, 'error': 'No video URL in Reddit post'}
-            
-            # Download video using the VideoDownloader component
-            output_file = self.config.paths.temp_dir / f"narrative_video_{reddit_post.id}"
-            success = self.video_processor.downloader.download_video(
-                reddit_post.video_url,
-                output_file
-            )
-            
-            if not success:
-                return {'success': False, 'error': 'Video download failed'}
-            
-            # Find the actual downloaded file
-            video_path = None
-            for ext in ['.mp4', '.webm', '.mkv', '.avi']:
-                potential_path = output_file.with_suffix(ext)
-                if potential_path.exists():
-                    video_path = potential_path
-                    break
-            
-            if not video_path:
-                return {'success': False, 'error': 'Downloaded video file not found'}
-            
-            return {
-                'success': True,
-                'video_path': video_path,
-                'reddit_post': reddit_post
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Video download failed: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    async def _perform_narrative_enhanced_analysis(self,
-                                                 video_path: Path,
-                                                 reddit_post,
-                                                 narrative_analysis: NarrativeAnalysis) -> VideoAnalysisEnhanced:
-        """Perform AI analysis enhanced with narrative insights"""
-        try:
-            self.logger.info("Performing narrative-enhanced AI analysis...")
-            
-            # Use narrative-enhanced analysis from Gemini
-            enhanced_analysis = await self.ai_client.gemini_client.analyze_video_content_with_narrative(
-                video_path, reddit_post, narrative_analysis
-            )
-            
-            if not enhanced_analysis:
-                self.logger.warning("Narrative-enhanced analysis failed, using standard analysis")
-                enhanced_analysis = await self.ai_client.analyze_video_content(video_path, reddit_post)
-            
-            # Add narrative-specific performance predictions
-            if enhanced_analysis:
-                enhanced_analysis.predicted_performance = await self._predict_narrative_performance(
-                    enhanced_analysis, narrative_analysis
-                )
-                
-                # Add narrative-specific enhancement recommendations
-                enhanced_analysis.enhancement_recommendations = self._generate_narrative_recommendations(
-                    enhanced_analysis, narrative_analysis
-                )
-            
-            self.logger.info("Narrative-enhanced AI analysis completed")
-            return enhanced_analysis
-            
-        except Exception as e:
-            self.logger.error(f"Narrative-enhanced analysis failed: {e}")
-            # Fallback to standard analysis
-            return await self.ai_client.analyze_video_content(video_path, reddit_post)
-    
-    async def _apply_narrative_cinematic_analysis(self,
-                                                video_path: Path,
-                                                analysis: VideoAnalysisEnhanced,
-                                                narrative_analysis: NarrativeAnalysis) -> VideoAnalysisEnhanced:
-        """Apply cinematic editing optimized for narrative storytelling"""
-        try:
-            self.logger.info("Applying narrative-focused cinematic analysis...")
-            
-            # Enhance cinematic analysis with narrative context
-            enhanced_analysis = self.cinematic_editor.analyze_video_cinematically(
-                video_path, analysis
-            )
-            
-            # Add narrative-specific visual cues
-            narrative_cues = self._generate_narrative_visual_cues(narrative_analysis, analysis)
-            enhanced_analysis.visual_cues.extend(narrative_cues)
-            
-            self.logger.info(f"Narrative cinematic analysis complete: {len(enhanced_analysis.camera_movements)} movements, {len(narrative_cues)} narrative cues")
-            return enhanced_analysis
-            
-        except Exception as e:
-            self.logger.error(f"Narrative cinematic analysis failed: {e}")
-            return analysis
-    
-    def _generate_narrative_visual_cues(self, narrative_analysis: NarrativeAnalysis,
-                                      video_analysis: VideoAnalysisEnhanced) -> List:
-        """Generate visual cues that support the narrative structure"""
-        try:
-            from src.models import VisualCue
-            
-            narrative_cues = []
-            duration = getattr(video_analysis, 'original_duration', 30)
-            
-            # Hook moment emphasis (0-3 seconds)
-            if narrative_analysis.hook_story_payoff.get('hook'):
-                narrative_cues.append(VisualCue(
-                    timestamp_seconds=1.0,
-                    description="Hook moment - create immediate intrigue",
-                    effect_type="zoom",
-                    intensity=1.2,
-                    duration=2.0
-                ))
-            
-            # Story development emphasis (middle section)
-            if narrative_analysis.hook_story_payoff.get('story') and duration > 10:
-                story_timestamp = duration * 0.4
-                narrative_cues.append(VisualCue(
-                    timestamp_seconds=story_timestamp,
-                    description="Story development - maintain engagement",
-                    effect_type="highlight",
-                    intensity=1.1,
-                    duration=3.0
-                ))
-            
-            # Payoff moment emphasis (final section)
-            if narrative_analysis.hook_story_payoff.get('payoff') and duration > 15:
-                payoff_timestamp = duration * 0.8
-                narrative_cues.append(VisualCue(
-                    timestamp_seconds=payoff_timestamp,
-                    description="Payoff moment - narrative resolution",
-                    effect_type="zoom",
-                    intensity=1.3,
-                    duration=2.0
-                ))
-            
-            # Character reaction emphasis (if character-based narrative)
-            if (narrative_analysis.character_profile and
-                narrative_analysis.character_profile.type in ['animal', 'person']):
-                reaction_timestamp = duration * 0.6
-                narrative_cues.append(VisualCue(
-                    timestamp_seconds=reaction_timestamp,
-                    description=f"Character reaction - {narrative_analysis.character_profile.emotional_state}",
-                    effect_type="zoom",
-                    intensity=1.25,
-                    duration=1.5
-                ))
-            
-            return narrative_cues
-            
-        except Exception as e:
-            self.logger.error(f"Failed to generate narrative visual cues: {e}")
-            return []
-    
-    def _compile_narrative_results(self,
-                                 download_result: Dict[str, Any],
-                                 processing_result: Dict[str, Any],
-                                 thumbnail_results: List[Dict[str, Any]],
-                                 upload_result: Dict[str, Any],
-                                 analysis: VideoAnalysisEnhanced,
-                                 narrative_analysis: NarrativeAnalysis) -> Dict[str, Any]:
-        """Compile comprehensive results from narrative-driven processing"""
-        base_results = self._compile_enhanced_results(
-            download_result, processing_result, thumbnail_results, upload_result, analysis
-        )
-        
-        # Add narrative-specific results
-        base_results.update({
-            'narrative_driven': True,
-            'narrative_analysis': {
-                'potential_score': narrative_analysis.narrative_potential_score,
-                'story_arc': narrative_analysis.story_arc,
-                'narrator_persona': narrative_analysis.narrator_persona,
-                'narrative_gaps_leveraged': len(narrative_analysis.narrative_gaps),
-                'character_profile': {
-                    'type': narrative_analysis.character_profile.type if narrative_analysis.character_profile else None,
-                    'emotional_state': narrative_analysis.character_profile.emotional_state if narrative_analysis.character_profile else None
-                } if narrative_analysis.character_profile else None,
-                'hook_story_payoff': narrative_analysis.hook_story_payoff,
-                'estimated_retention': narrative_analysis.estimated_retention
-            },
-            'strategic_enhancements': {
-                'narrative_gaps_addressed': [gap.description for gap in narrative_analysis.narrative_gaps],
-                'storytelling_approach': f"{narrative_analysis.narrator_persona} {narrative_analysis.story_arc}",
-                'engagement_strategy': 'narrative gap filling',
-                'retention_optimization': 'hook-story-payoff structure'
-            }
-        })
-        
-        return base_results

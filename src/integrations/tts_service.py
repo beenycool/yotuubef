@@ -20,6 +20,13 @@ try:
     ELEVENLABS_AVAILABLE = True
 except ImportError:
     ELEVENLABS_AVAILABLE = False
+    # Fallback VoiceSettings definition if elevenlabs is not available
+    class VoiceSettings:
+        def __init__(self, stability=0.5, similarity_boost=0.75, style=0.5, use_speaker_boost=True):
+            self.stability = stability
+            self.similarity_boost = similarity_boost
+            self.style = style
+            self.use_speaker_boost = use_speaker_boost
 
 try:
     import torch
@@ -49,9 +56,6 @@ class TTSService:
     Comprehensive Text-to-Speech service supporting multiple providers
     """
     
-    # Class variable to track if TTS has been initialized
-    _tts_initialized = False
-    
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
@@ -64,18 +68,14 @@ class TTSService:
         if ELEVENLABS_AVAILABLE and self.config.api.elevenlabs_api_key:
             try:
                 elevenlabs.set_api_key(self.config.api.elevenlabs_api_key)
-                if not TTSService._tts_initialized:
-                    self.logger.info("ElevenLabs TTS service initialized")
+                self.logger.info("ElevenLabs TTS service initialized")
             except Exception as e:
                 self.logger.warning(f"Failed to initialize ElevenLabs: {e}")
         
         if DIA_AVAILABLE:
-            if not TTSService._tts_initialized:
-                self.logger.info("Local Dia-1.6B TTS model is available for use.")
-                TTSService._tts_initialized = True
+            self.logger.info("Local Dia-1.6B TTS model is available for use.")
         else:
-            if not TTSService._tts_initialized:
-                self.logger.warning("Dia TTS not available - install dia package")
+            self.logger.warning("Dia TTS not available - install dia package")
     
     def _initialize_dia(self):
         """Lazy initialization of the local Dia model with GPU memory optimization."""
@@ -141,31 +141,6 @@ class TTSService:
         """
         if output_path is None:
             output_path = Path(tempfile.mktemp(suffix='.wav'))
-        
-        # Validate and sanitize output path for security
-        try:
-            output_path = self._validate_audio_output_path(output_path)
-        except ValueError as e:
-            self.logger.error(f"Invalid output path: {e}")
-            return None
-
-    def _validate_audio_output_path(self, output_path):
-        """
-        Inline validation for audio output path security.
-        Ensures the path is a file, not a directory, and is within allowed directories.
-        """
-        output_path = Path(output_path)
-        if output_path.is_dir():
-            raise ValueError("Output path must be a file, not a directory.")
-        # Restrict output path to the configured audio folder for security
-        allowed_dir = Path(self.config.paths.audio_folder).resolve()
-        if allowed_dir not in output_path.resolve().parents:
-            raise ValueError("Output path is outside allowed audio directory.")
-        # Check for forbidden characters or patterns
-        forbidden = ["..", "~", "//", "\\", "|", ":", "*", "?", "\"", "<", ">"]
-        if any(f in str(output_path) for f in forbidden):
-            raise ValueError("Output path contains forbidden characters or patterns.")
-        return output_path
         
         # Prioritize local Dia model if available
         if DIA_AVAILABLE:
@@ -495,38 +470,6 @@ class TTSService:
         if DIA_AVAILABLE:
             services.append("dia")
         return services
-    
-    def generate_narrative_audio(self, segments: List['NarrativeSegment']) -> List[Optional[AudioFileClip]]:
-        """
-        Generate audio clips for narrative segments (used by CTA processor)
-        
-        Args:
-            segments: List of NarrativeSegment objects
-            
-        Returns:
-            List of AudioFileClip objects (or None for failed generations)
-        """
-        audio_clips = []
-        
-        for segment in segments:
-            try:
-                # Generate speech for this segment
-                audio_path = self.generate_speech(segment)
-                
-                if audio_path and audio_path.exists():
-                    # Load as AudioFileClip
-                    audio_clip = AudioFileClip(str(audio_path))
-                    audio_clips.append(audio_clip)
-                    self.logger.debug(f"Generated narrative audio for: '{segment.text[:30]}...'")
-                else:
-                    audio_clips.append(None)
-                    self.logger.warning(f"Failed to generate audio for segment: '{segment.text[:30]}...'")
-                    
-            except Exception as e:
-                self.logger.warning(f"Error generating narrative audio: {e}")
-                audio_clips.append(None)
-        
-        return audio_clips
     def _generate_with_pyttsx3(self,
                                segment: NarrativeSegment,
                                output_path: Path) -> Optional[Path]:
