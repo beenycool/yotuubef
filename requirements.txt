@@ -1,0 +1,163 @@
+# Enhanced AI-Powered YouTube Shorts Generator Requirements
+
+# Core dependencies
+-r requirements.txt
+
+# Enhanced AI and Machine Learning
+google-generativeai>=0.3.0       # Google Gemini API for advanced analysis
+transformers>=4.30.0             # Hugging Face transformers for local AI models
+torch>=2.0.0                     # PyTorch for GPU-accelerated processing
+torchvision>=0.15.0              # Computer vision models
+torchaudio>=2.0.0                # Audio processing models
+
+# Advanced Audio Processing
+librosa>=0.10.0                  # Advanced audio analysis and processing
+soundfile>=0.12.1                # Audio file I/O
+scipy>=1.10.0                    # Scientific computing for audio processing
+resampy>=0.4.2                   # Audio resampling
+
+# Computer Vision and Image Processing
+opencv-python>=4.8.0             # Computer vision for video analysis
+scikit-image>=0.20.0             # Image processing algorithms
+pillow>=10.0.0                   # Image manipulation
+imageio>=2.28.0                  # Image I/O operations
+
+# Advanced Video Processing
+ffmpeg-python>=0.2.0             # FFmpeg Python bindings
+av>=10.0.0                       # PyAV for advanced video processing
+
+# GPU Memory Management
+nvidia-ml-py3>=7.352.0           # NVIDIA GPU monitoring (optional)
+psutil>=5.9.0                    # System resource monitoring
+gpustat>=1.1.0                   # GPU statistics (optional)
+
+# Google APIs (Enhanced)
+google-api-python-client>=2.88.0 # YouTube API
+google-auth-httplib2>=0.1.0      # Google authentication
+google-auth-oauthlib>=1.0.0      # OAuth for Google APIs
+googleapis-common-protos>=1.59.0 # Google API protocols
+
+# Database and Analytics
+sqlite3                          # Built-in SQLite (part of Python)
+pandas>=2.0.0                    # Data analysis and manipulation
+numpy>=1.24.0                    # Numerical computing
+matplotlib>=3.7.0                # Plotting and visualization
+seaborn>=0.12.0                  # Statistical visualization
+
+# Web APIs and HTTP
+aiohttp>=3.8.0                   # Async HTTP client/server
+requests>=2.31.0                 # HTTP library
+urllib3>=2.0.0                   # HTTP client
+
+# Async Programming
+asyncio                          # Built-in async library (part of Python)
+aiofiles>=23.0.0                 # Async file operations
+aiodns>=3.0.0                    # Async DNS resolution
+
+# Data Validation and Models
+pydantic>=2.0.0                  # Data validation with type hints
+typing-extensions>=4.5.0         # Extended typing support
+
+# Configuration and Environment
+python-dotenv>=1.0.0             # Environment variable management
+pyyaml>=6.0                      # YAML configuration files
+configparser                     # Built-in config parser (part of Python)
+
+# Logging and Monitoring
+loguru>=0.7.0                    # Advanced logging
+rich>=13.0.0                     # Rich text and beautiful formatting
+tqdm>=4.65.0                     # Progress bars
+
+# Development and Testing
+pytest>=7.3.0                    # Testing framework
+pytest-asyncio>=0.21.0           # Async testing support
+pytest-cov>=4.1.0                # Coverage testing
+black>=23.0.0                    # Code formatting
+flake8>=6.0.0                    # Code linting
+mypy>=1.3.0                      # Type checking
+pre-commit>=3.3.0                # Pre-commit hooks
+
+# Performance and Optimization
+numba>=0.57.0                    # JIT compilation for performance
+cython>=0.29.0                   # C extensions for Python
+joblib>=1.2.0                    # Parallel computing
+
+# Image and Video Codecs
+imageio-ffmpeg>=0.4.8            # FFmpeg wrapper for imageio
+opencv-contrib-python>=4.8.0     # Additional OpenCV modules
+
+# Audio Codecs and Processing
+pyaudio>=0.2.11                  # Audio I/O (optional, for real-time processing)
+wave                             # Built-in wave file support (part of Python)
+
+# Statistical Analysis
+statsmodels>=0.14.0              # Statistical modeling
+scikit-learn>=1.2.0              # Machine learning library
+
+# Visualization and Reporting
+plotly>=5.14.0                   # Interactive plotting
+dash>=2.10.0                     # Web apps for analytics dashboards
+
+# Memory and Performance Profiling
+memory-profiler>=0.60.0          # Memory usage profiling
+line-profiler>=4.0.0             # Line-by-line profiling
+py-spy>=0.3.14                   # Sampling profiler
+
+# Cloud Storage and APIs (Optional)
+google-cloud-storage>=2.8.0      # Google Cloud Storage (optional)
+boto3>=1.26.0                    # AWS SDK (optional)
+azure-storage-blob>=12.16.0      # Azure Blob Storage (optional)
+
+
+# GPU Acceleration (Optional)
+cupy-cuda11x>=12.0.0             # GPU-accelerated NumPy (CUDA 11.x)
+# cupy-cuda12x>=12.0.0           # GPU-accelerated NumPy (CUDA 12.x) - alternative
+
+# Text Processing and NLP
+nltk>=3.8.0                      # Natural language processing
+spacy>=3.5.0                     # Industrial-strength NLP
+textblob>=0.17.1                 # Simple text processing
+
+# Date and Time
+python-dateutil>=2.8.0           # Date utilities
+pytz>=2023.3                     # Timezone support
+
+# File and Path Handling
+pathlib                          # Built-in path handling (part of Python)
+glob                             # Built-in file globbing (part of Python)
+shutil                           # Built-in file operations (part of Python)
+tempfile                         # Built-in temporary files (part of Python)
+
+# JSON and Data Serialization
+orjson>=3.8.0                    # Fast JSON library
+ujson>=5.7.0                     # Ultra-fast JSON encoder/decoder
+
+# Security and Hashing
+cryptography>=41.0.0             # Cryptographic libraries
+hashlib                          # Built-in hashing (part of Python)
+secrets                          # Built-in secure random generation (part of Python)
+
+# System Integration
+psutil>=5.9.0                    # System and process utilities
+platform                        # Built-in platform information (part of Python)
+subprocess                       # Built-in subprocess management (part of Python)
+
+# Optional GPU Deep Learning Frameworks
+# tensorflow>=2.12.0             # TensorFlow (alternative to PyTorch)
+# keras>=2.12.0                  # High-level neural networks API
+
+# Optional Computer Vision Models
+# mediapipe>=0.10.0              # Google's ML framework for perception
+# face-recognition>=1.3.0        # Face recognition library
+
+# Optional Audio Models
+# demucs>=4.0.0                  # Audio source separation
+# asteroid>=0.6.0                # Audio source separation toolkit
+
+# Monitoring and Alerting (Optional)
+# sentry-sdk>=1.25.0             # Error tracking and performance monitoring
+# prometheus-client>=0.16.0      # Metrics collection
+
+# API Documentation (Optional)
+# fastapi>=0.95.0                # Fast API framework for web services
+# uvicorn>=0.22.0                # ASGI server for FastAPI
