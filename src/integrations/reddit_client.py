@@ -10,9 +10,17 @@ from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-import asyncpraw
-import asyncprawcore
-from asyncpraw.models import Submission
+try:
+    import asyncpraw
+    import asyncprawcore
+    from asyncpraw.models import Submission
+    ASYNCPRAW_AVAILABLE = True
+except ImportError:
+    # Fallback when asyncpraw is not available
+    ASYNCPRAW_AVAILABLE = False
+    asyncpraw = None
+    asyncprawcore = None
+    Submission = None
 
 from src.config.settings import get_config
 
@@ -212,7 +220,7 @@ class RedditClient:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
-        self.reddit: Optional[asyncpraw.Reddit] = None
+        self.reddit: Optional[Any] = None  # Use Any instead of asyncpraw.Reddit for fallback
         self.content_filter = ContentFilter()
         self._initialized = False
     
@@ -235,6 +243,10 @@ class RedditClient:
     async def _initialize_client(self):
         """Initialize the async Reddit client"""
         if self._initialized:
+            return
+            
+        if not ASYNCPRAW_AVAILABLE:
+            self.logger.error("asyncpraw is not installed. Please install it with: pip install asyncpraw")
             return
             
         if not all([self.config.api.reddit_client_id, self.config.api.reddit_client_secret]):
@@ -266,7 +278,7 @@ class RedditClient:
     
     def is_connected(self) -> bool:
         """Check if Reddit client is properly initialized"""
-        return self.reddit is not None and self._initialized
+        return ASYNCPRAW_AVAILABLE and self.reddit is not None and self._initialized
     
     async def fetch_posts_from_subreddit(self,
                                         subreddit_name: str,

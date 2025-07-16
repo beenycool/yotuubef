@@ -11,9 +11,18 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
+
+try:
     import asyncprawcore.exceptions
+    ASYNCPRAWCORE_AVAILABLE = True
 except ImportError:
     asyncprawcore = None
+    ASYNCPRAWCORE_AVAILABLE = False
 
 from src.config.settings import get_config
 from src.models import VideoAnalysisEnhanced, PerformanceMetrics
@@ -41,24 +50,48 @@ class EnhancedVideoOrchestrator:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         
-        # Initialize core components
-        self.ai_client = AIClient()
-        self.youtube_client = YouTubeClient()
-        self.video_processor = VideoProcessor()
+        # Check for required dependencies
+        if not NUMPY_AVAILABLE:
+            self.logger.warning("NumPy not available - some features will be limited")
         
-        # Initialize enhanced components
-        self.cinematic_editor = CinematicEditor()
-        self.advanced_audio_processor = AdvancedAudioProcessor()
-        self.enhanced_thumbnail_generator = EnhancedThumbnailGenerator()
-        self.enhancement_optimizer = EnhancementOptimizer()
-        self.channel_manager = ChannelManager()
-        self.engagement_monitor = EngagementMonitor()
-        
-        # Initialize long-form video generator
-        self.long_form_generator = LongFormVideoGenerator()
-        
-        # Enhanced GPU memory management
-        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)
+        # Initialize core components with error handling
+        try:
+            self.ai_client = AIClient()
+            self.youtube_client = YouTubeClient()
+            self.video_processor = VideoProcessor()
+            
+            # Initialize enhanced components
+            self.cinematic_editor = CinematicEditor()
+            self.advanced_audio_processor = AdvancedAudioProcessor()
+            self.enhanced_thumbnail_generator = EnhancedThumbnailGenerator()
+            self.enhancement_optimizer = EnhancementOptimizer()
+            self.channel_manager = ChannelManager()
+            self.engagement_monitor = EngagementMonitor()
+            
+            # Initialize long-form video generator
+            from src.processing.long_form_video_generator import LongFormVideoGenerator
+            self.long_form_generator = LongFormVideoGenerator()
+            
+            # Enhanced GPU memory management
+            self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)
+            
+            self.components_initialized = True
+            
+        except Exception as e:
+            self.logger.warning(f"Some components could not be initialized: {e}")
+            # Set fallback values
+            self.ai_client = None
+            self.youtube_client = None
+            self.video_processor = None
+            self.cinematic_editor = None
+            self.advanced_audio_processor = None
+            self.enhanced_thumbnail_generator = None
+            self.enhancement_optimizer = None
+            self.channel_manager = None
+            self.engagement_monitor = None
+            self.long_form_generator = None
+            self.gpu_manager = None
+            self.components_initialized = False
         
         # Enhanced workflow parameters
         self.enable_cinematic_editing = True

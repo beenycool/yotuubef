@@ -12,8 +12,15 @@ from datetime import datetime
 import tempfile
 import json
 
-from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips
-from moviepy import TextClip, ColorClip, ImageClip
+try:
+    from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, concatenate_videoclips
+    from moviepy import TextClip, ColorClip, ImageClip
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    MOVIEPY_AVAILABLE = False
+    # Create placeholder classes for type checking
+    VideoFileClip = AudioFileClip = CompositeVideoClip = concatenate_videoclips = None
+    TextClip = ColorClip = ImageClip = None
 
 from src.config.settings import get_config
 from src.models import (
@@ -39,15 +46,28 @@ class LongFormVideoGenerator:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         
-        # Initialize core components
-        self.ai_client = AIClient()
-        self.tts_service = TTSService()
-        self.video_processor = VideoProcessor()
-        self.cinematic_editor = CinematicEditor()
-        self.audio_processor = AdvancedAudioProcessor()
+        # Check for required dependencies
+        if not MOVIEPY_AVAILABLE:
+            self.logger.warning("MoviePy not available - video generation features will be limited")
+        
+        # Initialize core components (with error handling)
+        try:
+            self.ai_client = AIClient()
+            self.tts_service = TTSService()
+            self.video_processor = VideoProcessor()
+            self.cinematic_editor = CinematicEditor()
+            self.audio_processor = AdvancedAudioProcessor()
+        except Exception as e:
+            self.logger.warning(f"Some components could not be initialized: {e}")
+            # Set fallback values
+            self.ai_client = None
+            self.tts_service = None
+            self.video_processor = None
+            self.cinematic_editor = None
+            self.audio_processor = None
         
         # Long-form specific configuration
-        self.long_form_config = self.config.get('long_form_video', {})
+        self.long_form_config = self.config.long_form_video.__dict__
         self.enable_long_form = self.long_form_config.get('enable_long_form_generation', True)
         
         self.logger.info("Long-form video generator initialized")

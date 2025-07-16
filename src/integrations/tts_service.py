@@ -43,12 +43,30 @@ except ImportError:
     except ImportError:
         DIA_AVAILABLE = False
 
-import numpy as np
-from moviepy import AudioFileClip
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
+
+try:
+    from moviepy import AudioFileClip
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    MOVIEPY_AVAILABLE = False
+    AudioFileClip = None
 
 from src.config.settings import get_config
 from src.models import NarrativeSegment, EmotionType, PacingType
-from src.utils.gpu_memory_manager import GPUMemoryManager
+
+# Try to import GPU memory manager
+try:
+    from src.utils.gpu_memory_manager import GPUMemoryManager
+    GPU_MANAGER_AVAILABLE = True
+except ImportError:
+    GPU_MANAGER_AVAILABLE = False
+    GPUMemoryManager = None
 
 
 class TTSService:
@@ -60,7 +78,22 @@ class TTSService:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self._dia_model = None
-        self.gpu_manager = GPUMemoryManager(max_vram_usage=0.75)  # Increased for better TTS performance
+        
+        # Check for required dependencies
+        if not NUMPY_AVAILABLE:
+            self.logger.warning("NumPy not available - TTS features will be limited")
+        if not MOVIEPY_AVAILABLE:
+            self.logger.warning("MoviePy not available - audio processing will be limited")
+        
+        try:
+            if GPU_MANAGER_AVAILABLE:
+                self.gpu_manager = GPUMemoryManager(max_vram_usage=0.75)  # Increased for better TTS performance
+            else:
+                self.gpu_manager = None
+        except Exception as e:
+            self.logger.warning(f"GPU memory manager not available: {e}")
+            self.gpu_manager = None
+        
         self._initialize_services()
     
     def _initialize_services(self):
@@ -261,21 +294,21 @@ class TTSService:
             if isinstance(audio_output, tuple):
                 # If Dia returns (audio_tensor, sample_rate)
                 audio_tensor, sr = audio_output
-                if hasattr(audio_tensor, 'numpy'):
+                if NUMPY_AVAILABLE and hasattr(audio_tensor, 'numpy'):
                     audio_data = audio_tensor.cpu().numpy()  # Ensure on CPU for numpy
                 else:
                     audio_data = audio_tensor
             else:
                 # If Dia returns just audio data
                 audio_data = audio_output
-                if hasattr(audio_data, 'numpy'):
+                if NUMPY_AVAILABLE and hasattr(audio_data, 'numpy'):
                     audio_data = audio_data.cpu().numpy()  # Ensure on CPU for numpy
-                elif hasattr(audio_data, 'cpu'):
+                elif NUMPY_AVAILABLE and hasattr(audio_data, 'cpu'):
                     audio_data = audio_data.cpu().numpy()
                 sr = 44100  # Default sample rate
             
             # Ensure audio_data is in the right format for soundfile
-            if len(audio_data.shape) > 1:
+            if NUMPY_AVAILABLE and hasattr(audio_data, 'shape') and len(audio_data.shape) > 1:
                 audio_data = audio_data.squeeze()
             
             sf.write(str(output_path), audio_data, sr)
