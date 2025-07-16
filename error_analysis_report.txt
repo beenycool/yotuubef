@@ -1,0 +1,39 @@
+
+🚨 Error Analysis Report
+==================================================
+
+📊 Error Statistics:
+   Total Errors: 4
+   Today's Errors: 4
+   Most Common Error: FileNotFoundError
+
+📈 Error Types:
+   • FileNotFoundError: 1 occurrences
+   • ImportError: 1 occurrences
+   • ConnectionError: 1 occurrences
+   • PermissionError: 1 occurrences
+
+🔄 Recovery Success Rate:
+   • Recovery Attempts: 4
+   • Successful Recoveries: 0
+   • Success Rate: 0.0%
+
+📋 Recent Errors:
+   • 21:29:22 - FileNotFoundError: test_file.txt...
+   • 21:29:22 - ImportError: No module named 'numpy'...
+   • 21:29:22 - ConnectionError: Connection failed...
+   • 21:29:22 - PermissionError: Permission denied...
+
+💡 Recommendations:
+   • Install missing dependencies (see individual error details)
+   • Check file permissions and paths
+   • Verify internet connection for API calls
+   • Monitor system resources (RAM, disk space)
+   • Review configuration files for correctness
+
+📁 Log Files:
+   • Main Log: logs/youtube_generator_20250716.log
+   • Error Log: logs/errors_20250716.log
+   • Debug Log: logs/debug_20250716.log
+
+==================================================
