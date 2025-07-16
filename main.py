@@ -509,6 +509,11 @@ Examples:
   # Process multiple videos in batch
   python main.py batch urls.txt
   
+  # Generate long-form video (NEW)
+  python main.py longform "Complete Python Tutorial" --niche technology --audience "beginner programmers"
+  python main.py longform "Healthy Cooking Tips" --niche cooking --audience "health-conscious adults" --duration 10
+  python main.py longform "Investment Strategies" --niche finance --audience "young professionals" --expertise intermediate
+  
   # Start proactive channel management
   python main.py manage
   
@@ -556,6 +561,26 @@ Examples:
     batch_parser.add_argument('file', help='File containing Reddit URLs (one per line)')
     batch_parser.add_argument('--max-concurrent', type=int, default=3,
                             help='Maximum concurrent video processing')
+    
+    # Long-form video generation (NEW)
+    longform_parser = subparsers.add_parser('longform', help='Generate long-form video content')
+    longform_parser.add_argument('topic', help='Main topic for the video')
+    longform_parser.add_argument('--niche', required=True, 
+                               choices=['technology', 'education', 'entertainment', 'lifestyle', 
+                                       'business', 'science', 'health', 'gaming', 'cooking', 
+                                       'travel', 'fitness', 'finance'],
+                               help='Niche category for the video')
+    longform_parser.add_argument('--audience', required=True,
+                               help='Target audience description')
+    longform_parser.add_argument('--duration', type=int, default=5,
+                               help='Target duration in minutes (default: 5)')
+    longform_parser.add_argument('--expertise', choices=['beginner', 'intermediate', 'advanced'],
+                               default='beginner', help='Content expertise level')
+    longform_parser.add_argument('--base-content', help='Base content to expand upon')
+    longform_parser.add_argument('--no-upload', action='store_true',
+                               help='Generate video but do not upload to YouTube')
+    longform_parser.add_argument('--no-enhancements', action='store_true',
+                               help='Disable enhanced processing features')
     
     # Proactive management
     manage_parser = subparsers.add_parser('manage', help='Start proactive channel management')
@@ -674,6 +699,48 @@ Examples:
                 with open(result_file, 'w') as f:
                     json.dump(result, f, indent=2)
                 print(f"Results saved to: {result_file}")
+        
+        elif args.command == 'longform':
+            # Generate long-form video
+            print(f"🎬 Generating long-form video: {args.topic}")
+            print(f"📊 Niche: {args.niche}")
+            print(f"👥 Audience: {args.audience}")
+            print(f"⏱️ Duration: {args.duration} minutes")
+            
+            enhanced_options = {
+                'enable_enhanced_processing': not args.no_enhancements,
+                'upload_to_youtube': not args.no_upload,
+                'enable_cinematic_effects': not args.no_enhancements,
+                'enable_advanced_audio': not args.no_enhancements,
+                'enable_ab_testing': not args.no_enhancements
+            }
+            
+            result = await generator.orchestrator.generate_long_form_video(
+                topic=args.topic,
+                niche_category=args.niche,
+                target_audience=args.audience,
+                duration_minutes=args.duration,
+                expertise_level=args.expertise,
+                base_content=args.base_content,
+                enhanced_options=enhanced_options
+            )
+            
+            if result.get('success'):
+                print(f"✅ Long-form video generated successfully!")
+                if result.get('video_path'):
+                    print(f"📁 Video saved to: {result['video_path']}")
+                if result.get('upload_result', {}).get('success'):
+                    print(f"🚀 Uploaded to YouTube: {result['upload_result'].get('video_url', 'N/A')}")
+                
+                # Save result
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                result_file = Path(f"data/results/longform_{timestamp}.json")
+                result_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(result_file, 'w') as f:
+                    json.dump(result, f, indent=2, default=str)
+                print(f"Results saved to: {result_file}")
+            else:
+                print(f"❌ Long-form video generation failed: {result.get('error')}")
         
         elif args.command == 'manage':
             # Start proactive management
