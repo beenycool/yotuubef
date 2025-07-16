@@ -300,3 +300,60 @@ youtube:
   thumbnail_quality: 95
   upload_retry_count: 3
   upload_timeout_minutes: 10
+
+# Long-Form Video Generation Configuration
+long_form_video:
+  enable_long_form_generation: true
+  default_duration_minutes: 5
+  max_duration_minutes: 60
+  min_duration_minutes: 1
+  
+  # Content structure settings
+  content_structure:
+    intro_duration_seconds: 30
+    conclusion_duration_seconds: 45
+    body_section_max_duration_seconds: 300
+    max_body_sections: 10
+    
+  # Niche targeting
+  niche_categories:
+    - technology
+    - education
+    - entertainment
+    - lifestyle
+    - business
+    - science
+    - health
+    - gaming
+    - cooking
+    - travel
+    - fitness
+    - finance
+    
+  # Audience targeting
+  audience_analysis:
+    enable_audience_profiling: true
+    analyze_engagement_patterns: true
+    adapt_content_complexity: true
+    
+  # Enhanced narration settings
+  detailed_narration:
+    enable_extended_narration: true
+    words_per_minute: 150
+    pause_between_sections: 2.0
+    emphasize_key_points: true
+    add_section_transitions: true
+    
+  # Visual enhancement for long-form
+  visual_elements:
+    enable_chapter_markers: true
+    add_section_titles: true
+    include_progress_indicators: false
+    enhance_visual_variety: true
+    
+  # Content quality settings
+  content_quality:
+    minimum_information_density: 0.7
+    ensure_educational_value: true
+    maintain_engagement_throughout: true
+    include_practical_examples: true

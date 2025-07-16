@@ -16,6 +16,13 @@ An advanced, AI-driven system for automatically creating engaging YouTube Shorts
 - **Audio Analysis**: Real-time frequency analysis and rhythm preservation
 - **Multi-track Mixing**: Professional-grade audio layering
 
+### 🎥 **Long-Form Video Generation (NEW)**
+- **Structured Content**: Automatic intro, body, and conclusion generation
+- **Detailed Narration**: AI-powered script writing with natural transitions
+- **Niche Targeting**: Focus on specific topics with audience customization
+- **Visual Enhancement**: Coordinated visual elements and text overlays
+- **Engagement Optimization**: Hooks and retention strategies throughout
+
 ### 🖼️ **Smart Thumbnail Generation & A/B Testing**
 - **Multiple Variants**: Generate 3-5 thumbnail variants automatically
 - **A/B Testing**: Performance-driven thumbnail optimization
@@ -115,6 +122,30 @@ python main_enhanced.py --batch --subreddit "oddlysatisfying" --count 5
 
 # With custom settings
 python main_enhanced.py --url "reddit_url" --enable-ab-testing --optimize-performance
+```
+
+### Long-Form Video Generation (NEW)
+
+```bash
+# Generate educational content
+python main.py longform "Complete Python Tutorial for Beginners" \
+  --niche technology \
+  --audience "beginner programmers" \
+  --duration 10
+
+# Create cooking content
+python main.py longform "Healthy Meal Prep Guide" \
+  --niche cooking \
+  --audience "busy professionals" \
+  --duration 15 \
+  --expertise intermediate
+
+# Generate business content
+python main.py longform "Investment Strategies for Young Adults" \
+  --niche finance \
+  --audience "young professionals" \
+  --expertise beginner \
+  --no-upload
 ```
 
 ### Advanced Features
@@ -217,6 +248,41 @@ thumbnail_optimization:
   ab_test_variants: 3
   test_duration_hours: 24
   min_impressions_for_test: 1000
+```
+
+### Long-Form Video Configuration
+
+```yaml
+long_form_video:
+  enable_long_form_generation: true
+  default_duration_minutes: 5
+  max_duration_minutes: 60
+  
+  content_structure:
+    intro_duration_seconds: 30
+    conclusion_duration_seconds: 45
+    body_section_max_duration_seconds: 300
+    max_body_sections: 10
+    
+  detailed_narration:
+    enable_extended_narration: true
+    words_per_minute: 150
+    pause_between_sections: 2.0
+    add_section_transitions: true
+    
+  niche_categories:
+    - technology
+    - education
+    - entertainment
+    - lifestyle
+    - business
+    - science
+    - health
+    - gaming
+    - cooking
+    - travel
+    - fitness
+    - finance
 ```
 
 ## 📊 Performance & Analytics

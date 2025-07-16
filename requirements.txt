@@ -1,7 +1,6 @@
 # Enhanced AI-Powered YouTube Shorts Generator Requirements
 
 # Core dependencies
--r requirements.txt
 
 # Enhanced AI and Machine Learning
 google-generativeai>=0.3.0       # Google Gemini API for advanced analysis

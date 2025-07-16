@@ -410,3 +410,115 @@ class VideoAnalysisEnhanced(VideoAnalysis):
         validate_assignment=True,
         extra="forbid"
     )
+
+
+# Long-Form Video Generation Models
+
+class VideoFormat(str, Enum):
+    """Video format types"""
+    SHORTS = "shorts"
+    LONG_FORM = "long_form"
+
+
+class ContentStructureType(str, Enum):
+    """Content structure types for long-form videos"""
+    INTRO = "intro"
+    BODY = "body"
+    CONCLUSION = "conclusion"
+
+
+class NicheCategory(str, Enum):
+    """Niche categories for targeted content"""
+    TECHNOLOGY = "technology"
+    EDUCATION = "education"
+    ENTERTAINMENT = "entertainment"
+    LIFESTYLE = "lifestyle"
+    BUSINESS = "business"
+    SCIENCE = "science"
+    HEALTH = "health"
+    GAMING = "gaming"
+    COOKING = "cooking"
+    TRAVEL = "travel"
+    FITNESS = "fitness"
+    FINANCE = "finance"
+
+
+class ContentSection(BaseModel):
+    """Structured content section for long-form videos"""
+    section_type: ContentStructureType = Field(..., description="Type of content section")
+    title: str = Field(..., min_length=1, max_length=100, description="Section title")
+    content: str = Field(..., min_length=10, max_length=2000, description="Section content")
+    duration_seconds: float = Field(..., ge=5.0, le=300.0, description="Target duration in seconds")
+    key_points: List[str] = Field(default_factory=list, description="Key points to cover")
+    visual_suggestions: List[str] = Field(default_factory=list, description="Visual content suggestions")
+    
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class NicheTopicConfig(BaseModel):
+    """Configuration for niche topic targeting"""
+    category: NicheCategory = Field(..., description="Primary niche category")
+    target_audience: str = Field(..., min_length=1, description="Target audience description")
+    expertise_level: str = Field(default="beginner", description="Content expertise level")
+    tone: str = Field(default="informative", description="Content tone")
+    keywords: List[str] = Field(default_factory=list, description="Target keywords")
+    
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class LongFormVideoStructure(BaseModel):
+    """Complete structure for long-form video content"""
+    title: str = Field(..., min_length=1, max_length=100, description="Video title")
+    description: str = Field(..., min_length=10, max_length=1000, description="Video description")
+    niche_config: NicheTopicConfig = Field(..., description="Niche targeting configuration")
+    
+    intro_section: ContentSection = Field(..., description="Introduction section")
+    body_sections: List[ContentSection] = Field(..., min_length=1, description="Body sections")
+    conclusion_section: ContentSection = Field(..., description="Conclusion section")
+    
+    total_duration_seconds: float = Field(..., ge=60.0, le=3600.0, description="Total video duration")
+    hashtags: List[str] = Field(default_factory=list, description="Relevant hashtags")
+    
+    def get_total_sections(self) -> int:
+        """Get total number of sections"""
+        return 2 + len(self.body_sections)  # intro + body_sections + conclusion
+    
+    def get_estimated_duration(self) -> float:
+        """Get estimated total duration from sections"""
+        total = self.intro_section.duration_seconds + self.conclusion_section.duration_seconds
+        total += sum(section.duration_seconds for section in self.body_sections)
+        return total
+    
+    @model_validator(mode='after')
+    def validate_structure(self):
+        """Validate the video structure"""
+        if len(self.body_sections) > 10:
+            raise ValueError("Too many body sections (maximum 10)")
+        
+        estimated_duration = self.get_estimated_duration()
+        if abs(estimated_duration - self.total_duration_seconds) > 60:
+            raise ValueError(f"Duration mismatch: estimated {estimated_duration}s vs target {self.total_duration_seconds}s")
+        
+        return self
+    
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class LongFormVideoAnalysis(BaseModel):
+    """Analysis results for long-form video generation"""
+    video_format: VideoFormat = Field(default=VideoFormat.LONG_FORM, description="Video format type")
+    video_structure: LongFormVideoStructure = Field(..., description="Complete video structure")
+    
+    # Enhanced narration
+    detailed_narration: List[NarrativeSegment] = Field(default_factory=list, description="Detailed narration segments")
+    section_transitions: List[str] = Field(default_factory=list, description="Transition phrases between sections")
+    
+    # Visual elements (reuse existing models)
+    visual_cues: List[VisualCue] = Field(default_factory=list, description="Visual enhancement cues")
+    text_overlays: List[TextOverlay] = Field(default_factory=list, description="Text overlays")
+    
+    # Audience targeting
+    target_audience_analysis: Dict[str, Any] = Field(default_factory=dict, description="Audience analysis data")
+    engagement_hooks: List[str] = Field(default_factory=list, description="Engagement hooks throughout video")
+    
+    model_config = ConfigDict(use_enum_values=True)

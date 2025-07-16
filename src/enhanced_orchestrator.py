@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-import asyncprawcore.exceptions
+try:
+    import asyncprawcore.exceptions
+except ImportError:
+    asyncprawcore = None
 
 from src.config.settings import get_config
 from src.models import VideoAnalysisEnhanced, PerformanceMetrics
@@ -25,6 +28,7 @@ from src.management.channel_manager import ChannelManager
 from src.monitoring.engagement_metrics import EngagementMonitor
 from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.video_processor import VideoProcessor
+from src.processing.long_form_video_generator import LongFormVideoGenerator
 
 class EnhancedVideoOrchestrator:
     """
@@ -49,6 +53,9 @@ class EnhancedVideoOrchestrator:
         self.enhancement_optimizer = EnhancementOptimizer()
         self.channel_manager = ChannelManager()
         self.engagement_monitor = EngagementMonitor()
+        
+        # Initialize long-form video generator
+        self.long_form_generator = LongFormVideoGenerator()
         
         # Enhanced GPU memory management
         self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)
@@ -768,3 +775,142 @@ class EnhancedVideoOrchestrator:
                 'error': str(e),
                 'partial_results': results if 'results' in locals() else []
             }
+    
+    async def generate_long_form_video(self,
+                                     topic: str,
+                                     niche_category: str,
+                                     target_audience: str,
+                                     duration_minutes: int = 5,
+                                     expertise_level: str = "beginner",
+                                     base_content: Optional[str] = None,
+                                     enhanced_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Generate a high-quality long-form video with structured content.
+        
+        Args:
+            topic: Main topic for the video
+            niche_category: Niche category (e.g., 'technology', 'education')
+            target_audience: Target audience description
+            duration_minutes: Target duration in minutes
+            expertise_level: Content expertise level
+            base_content: Optional base content to expand upon
+            enhanced_options: Optional enhanced processing options
+            
+        Returns:
+            Generation results including video path and analysis
+        """
+        try:
+            self.logger.info(f"Starting long-form video generation: {topic}")
+            
+            # Log initial GPU memory state
+            self.gpu_manager.log_memory_status("Long-Form Generation Start")
+            
+            # Step 1: Generate long-form video structure and content
+            generation_result = await self.long_form_generator.generate_long_form_video(
+                topic=topic,
+                niche_category=niche_category,
+                target_audience=target_audience,
+                duration_minutes=duration_minutes,
+                expertise_level=expertise_level,
+                base_content=base_content
+            )
+            
+            if not generation_result.get('success'):
+                return generation_result
+            
+            # Step 2: Apply enhanced processing if enabled
+            if enhanced_options and enhanced_options.get('enable_enhanced_processing', True):
+                generation_result = await self._apply_long_form_enhancements(
+                    generation_result, enhanced_options
+                )
+            
+            # Step 3: Upload to YouTube if enabled
+            if enhanced_options and enhanced_options.get('upload_to_youtube', True):
+                upload_result = await self._upload_long_form_video(generation_result)
+                generation_result['upload_result'] = upload_result
+            
+            # Step 4: Initiate proactive management
+            if generation_result.get('video_id') and self.enable_proactive_management:
+                await self._initiate_proactive_management(generation_result['video_id'])
+            
+            # Log final GPU memory state
+            self.gpu_manager.log_memory_status("Long-Form Generation Complete")
+            
+            return generation_result
+            
+        except Exception as e:
+            self.logger.error(f"Long-form video generation failed: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'video_format': 'long_form'
+            }
+    
+    async def _apply_long_form_enhancements(self,
+                                          generation_result: Dict[str, Any],
+                                          enhanced_options: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply enhanced processing to long-form video"""
+        try:
+            video_path = generation_result.get('video_path')
+            if not video_path:
+                return generation_result
+            
+            # Apply cinematic editing if enabled
+            if enhanced_options.get('enable_cinematic_effects', True):
+                cinematic_result = await self.cinematic_editor.apply_cinematic_effects(
+                    video_path, generation_result.get('analysis', {})
+                )
+                generation_result['cinematic_enhancements'] = cinematic_result
+            
+            # Apply advanced audio processing if enabled
+            if enhanced_options.get('enable_advanced_audio', True):
+                audio_result = await self.advanced_audio_processor.process_long_form_audio(
+                    video_path, generation_result.get('analysis', {})
+                )
+                generation_result['audio_enhancements'] = audio_result
+            
+            # Generate enhanced thumbnails if enabled
+            if enhanced_options.get('enable_ab_testing', True):
+                thumbnail_result = await self.enhanced_thumbnail_generator.generate_long_form_thumbnails(
+                    video_path, generation_result.get('analysis', {})
+                )
+                generation_result['thumbnail_optimization'] = thumbnail_result
+            
+            return generation_result
+            
+        except Exception as e:
+            self.logger.error(f"Long-form enhancement failed: {e}")
+            generation_result['enhancement_error'] = str(e)
+            return generation_result
+    
+    async def _upload_long_form_video(self, generation_result: Dict[str, Any]) -> Dict[str, Any]:
+        """Upload long-form video to YouTube"""
+        try:
+            video_path = generation_result.get('video_path')
+            analysis = generation_result.get('analysis', {})
+            
+            if not video_path:
+                return {'success': False, 'error': 'No video path provided'}
+            
+            # Prepare upload metadata
+            video_structure = analysis.get('video_structure', {})
+            
+            upload_metadata = {
+                'title': video_structure.get('title', 'Long-Form Video'),
+                'description': video_structure.get('description', ''),
+                'tags': video_structure.get('hashtags', []),
+                'category': '27',  # Education category for long-form
+                'privacy': 'public',
+                'thumbnail_path': generation_result.get('thumbnail_optimization', {}).get('best_thumbnail_path')
+            }
+            
+            # Upload to YouTube
+            upload_result = await self.youtube_client.upload_video(
+                video_path, upload_metadata
+            )
+            
+            return upload_result
+            
+        except Exception as e:
+            self.logger.error(f"Long-form video upload failed: {e}")
+            return {'success': False, 'error': str(e)}
