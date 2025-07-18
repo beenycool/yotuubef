@@ -224,6 +224,74 @@ class PathConfig:
     google_client_secrets_file: Optional[Path] = None
     youtube_token_file: Optional[Path] = None
 
+
+@dataclass
+class AIFeaturesConfig:
+    """AI features configuration"""
+    enable_cinematic_editing: bool = True
+    enable_advanced_audio: bool = True
+    enable_ab_testing: bool = True
+    enable_auto_optimization: bool = True
+    enable_proactive_management: bool = True
+    use_fallback_analysis: bool = True
+    fallback_confidence_threshold: float = 0.6
+
+
+@dataclass
+class LongFormVideoConfig:
+    """Long-form video generation configuration"""
+    enable_long_form_generation: bool = True
+    default_duration_minutes: int = 5
+    max_duration_minutes: int = 60
+    min_duration_minutes: int = 1
+    
+    # Content structure
+    intro_duration_seconds: int = 30
+    conclusion_duration_seconds: int = 45
+    body_section_max_duration_seconds: int = 300
+    max_body_sections: int = 10
+    
+    # Niche categories
+    niche_categories: List[str] = field(default_factory=lambda: [
+        "technology", "education", "entertainment", "lifestyle", "business",
+        "science", "health", "gaming", "cooking", "travel", "fitness", "finance"
+    ])
+    
+    # Narration settings
+    enable_extended_narration: bool = True
+    words_per_minute: int = 150
+    pause_between_sections: float = 2.0
+    add_section_transitions: bool = True
+    
+    # Visual elements
+    enable_chapter_markers: bool = True
+    add_section_titles: bool = True
+    include_progress_indicators: bool = False
+    enhance_visual_variety: bool = True
+
+
+@dataclass
+class VideoProcessingConfig:
+    """Video processing configuration"""
+    enable_auto_color_grading: bool = True
+    enable_dynamic_zoom: bool = True
+    enable_motion_blur_compensation: bool = True
+    enable_speed_optimization: bool = True
+    enable_speed_ramping: bool = True
+    max_file_size_mb: int = 500
+    max_video_duration: int = 600
+    min_video_duration: int = 5
+    target_fps: int = 30
+    video_bitrate: str = "5M"
+    video_codec: str = "libx264"
+    video_quality_profile: str = "speed"
+    default_output_resolution: List[int] = field(default_factory=lambda: [1080, 1920])
+    audio_bitrate: str = "128k"
+    audio_codec: str = "aac"
+    pixel_format: str = "yuv420p"
+    speed_optimization_level: str = "aggressive"
+
+
 class ConfigManager:
     """Central configuration manager that loads and validates all settings"""
     
@@ -239,6 +307,9 @@ class ConfigManager:
         self.api = APIConfig()
         self.content = ContentConfig()
         self.paths = PathConfig()
+        self.ai_features = AIFeaturesConfig()
+        self.long_form_video = LongFormVideoConfig()
+        self.video_processing = VideoProcessingConfig()
         
         # Load configurations in order of precedence
         self._load_yaml_config()
@@ -276,11 +347,15 @@ class ConfigManager:
             self._update_from_dict(self.video, yaml_config.get('video', {}))
             # Also check for video_processing section 
             self._update_from_dict(self.video, yaml_config.get('video_processing', {}))
+            self._update_from_dict(self.video_processing, yaml_config.get('video_processing', {}))
             self._update_from_dict(self.text_overlay, yaml_config.get('text_overlay', {}))
             self._update_from_dict(self.effects, yaml_config.get('effects', {}))
             self._update_from_dict(self.audio, yaml_config.get('audio', {}))
+            self._update_from_dict(self.api, yaml_config.get('api', {}))
             self._update_from_dict(self.api, yaml_config.get('apis', {}))
             self._update_from_dict(self.content, yaml_config.get('content', {}))
+            self._update_from_dict(self.ai_features, yaml_config.get('ai_features', {}))
+            self._update_from_dict(self.long_form_video, yaml_config.get('long_form_video', {}))
             
             # Handle subtitles config specifically
             subtitles_config = yaml_config.get('subtitles', {})

@@ -12,16 +12,40 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import subprocess
-import psutil
 import os
 import time
 
-import cv2
-import numpy as np
-from moviepy import (
-    VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip,
-    TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips
-)
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
+
+try:
+    import cv2
+    OPENCV_AVAILABLE = True
+except ImportError:
+    OPENCV_AVAILABLE = False
+    cv2 = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
+
+try:
+    from moviepy import (
+        VideoFileClip, AudioFileClip, CompositeVideoClip, CompositeAudioClip,
+        TextClip, ImageClip, ColorClip, concatenate_videoclips, concatenate_audioclips
+    )
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    MOVIEPY_AVAILABLE = False
+    VideoFileClip = AudioFileClip = CompositeVideoClip = CompositeAudioClip = None
+    TextClip = ImageClip = ColorClip = concatenate_videoclips = concatenate_audioclips = None
 
 # Import video effects with compatibility handling
 try:
@@ -33,7 +57,13 @@ except ImportError:
     except ImportError:
         vfx = None
         afx = None
-import yt_dlp
+
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+except ImportError:
+    YTDLP_AVAILABLE = False
+    yt_dlp = None
 
 from src.config.settings import get_config
 from src.models import VideoAnalysis, TextOverlay, NarrativeSegment, VisualCue, CallToAction
@@ -1818,14 +1848,38 @@ class VideoProcessor:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
-        self.downloader = VideoDownloader()
-        self.effects = VideoEffects()
-        self.text_processor = TextOverlayProcessor()
-        self.audio_processor = AudioProcessor()
-        self.advanced_enhancer = AdvancedVideoEnhancer()
-        self.cta_processor = CTAProcessor()
-        self.thumbnail_generator = ThumbnailGenerator()
-        self.speed_optimizer = create_speed_optimizer()
+        
+        # Check for required dependencies
+        if not PSUTIL_AVAILABLE:
+            self.logger.warning("psutil not available - system monitoring will be limited")
+        if not OPENCV_AVAILABLE:
+            self.logger.warning("OpenCV not available - video processing will be limited")
+        if not NUMPY_AVAILABLE:
+            self.logger.warning("NumPy not available - video processing will be limited")
+        if not MOVIEPY_AVAILABLE:
+            self.logger.warning("MoviePy not available - video processing will be limited")
+        
+        # Initialize components with error handling
+        try:
+            self.downloader = VideoDownloader()
+            self.effects = VideoEffects()
+            self.text_processor = TextOverlayProcessor()
+            self.audio_processor = AudioProcessor()
+            self.advanced_enhancer = AdvancedVideoEnhancer()
+            self.cta_processor = CTAProcessor()
+            self.thumbnail_generator = ThumbnailGenerator()
+            self.speed_optimizer = create_speed_optimizer()
+        except Exception as e:
+            self.logger.warning(f"Some video processing components could not be initialized: {e}")
+            # Set fallback values
+            self.downloader = None
+            self.effects = None
+            self.text_processor = None
+            self.audio_processor = None
+            self.advanced_enhancer = None
+            self.cta_processor = None
+            self.thumbnail_generator = None
+            self.speed_optimizer = None
     
     def process_video(self,
                       video_path: Path,

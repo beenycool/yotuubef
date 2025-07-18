@@ -6,19 +6,27 @@ Handles GPU memory optimization, monitoring, and efficient model loading
 import logging
 import gc
 from typing import Optional, Dict, Any, Tuple
-import psutil
+
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    psutil = None
 
 try:
     import torch
     TORCH_AVAILABLE = True
 except ImportError:
     TORCH_AVAILABLE = False
+    torch = None
 
 try:
     import pynvml
     PYNVML_AVAILABLE = True
 except ImportError:
     PYNVML_AVAILABLE = False
+    pynvml = None
 
 
 class GPUMemoryManager:
@@ -37,6 +45,16 @@ class GPUMemoryManager:
         self.max_vram_usage = max_vram_usage
         self.device = None
         self.vram_limit_mb = None
+        
+        # Check for required dependencies
+        if not PSUTIL_AVAILABLE:
+            self.logger.warning("psutil not available - system memory monitoring will be limited")
+        
+        if not TORCH_AVAILABLE:
+            self.logger.warning("PyTorch not available - GPU memory management will be limited")
+            
+        if not PYNVML_AVAILABLE:
+            self.logger.warning("pynvml not available - GPU monitoring will be limited")
         
         if PYNVML_AVAILABLE:
             try:
@@ -216,13 +234,16 @@ class GPUMemoryManager:
         
         # System RAM info
         try:
-            ram = psutil.virtual_memory()
-            summary['system_ram'] = {
-                'total_gb': ram.total / 1024**3,
-                'used_gb': ram.used / 1024**3,
-                'available_gb': ram.available / 1024**3,
-                'percent_used': ram.percent
-            }
+            if PSUTIL_AVAILABLE:
+                ram = psutil.virtual_memory()
+                summary['system_ram'] = {
+                    'total_gb': ram.total / 1024**3,
+                    'used_gb': ram.used / 1024**3,
+                    'available_gb': ram.available / 1024**3,
+                    'percent_used': ram.percent
+                }
+            else:
+                summary['system_ram'] = {'error': 'psutil not available'}
         except Exception as e:
             summary['system_ram'] = {'error': str(e)}
         

@@ -83,6 +83,10 @@ class GeminiAIClient:
         else:
             self.gemini_available = False
             self.logger.warning("Gemini not available - some AI features will be limited")
+    
+    def is_api_available(self) -> bool:
+        """Check if Gemini API is available and properly configured"""
+        return self.gemini_available and GEMINI_AVAILABLE
         
         # AI analysis prompts
         self.video_analysis_prompt = """

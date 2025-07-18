@@ -19,6 +19,7 @@ from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.integrations.reddit_client import RedditClient
 from src.config.settings import get_config, setup_logging
 from src.utils.cleanup import clear_temp_files, clear_results, clear_logs
+from src.autonomous_mode import AutonomousVideoGenerator
 
 
 class EnhancedYouTubeGenerator:
@@ -493,41 +494,56 @@ async def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Find and process videos automatically (DEFAULT)
+  # Run fully autonomous mode (DEFAULT - NO HUMAN INPUT REQUIRED)
   python main.py
+  python main.py autonomous
+  python main.py autonomous --max-videos-per-day 10 --min-videos-per-day 5
+  
+  # Find and process videos automatically (LEGACY)
   python main.py find --max-videos 3 --sort top --time-filter week
   
-  # Find videos from specific subreddits
+  # Find videos from specific subreddits (LEGACY)
   python main.py find --subreddits funny videos gifs --max-videos 5
   
-  # Dry run to see what videos would be found
+  # Dry run to see what videos would be found (LEGACY)
   python main.py find --dry-run --max-videos 10
   
-  # Process single video with all enhancements
+  # Process single video with all enhancements (LEGACY)
   python main.py single "https://reddit.com/r/videos/comments/abc123"
   
-  # Process multiple videos in batch
+  # Process multiple videos in batch (LEGACY)
   python main.py batch urls.txt
   
-  # Generate long-form video (NEW)
+  # Generate long-form video (LEGACY)
   python main.py longform "Complete Python Tutorial" --niche technology --audience "beginner programmers"
   python main.py longform "Healthy Cooking Tips" --niche cooking --audience "health-conscious adults" --duration 10
   python main.py longform "Investment Strategies" --niche finance --audience "young professionals" --expertise intermediate
   
-  # Start proactive channel management
+  # Start proactive channel management (LEGACY)
   python main.py manage
   
-  # Run system optimization
+  # Run system optimization (LEGACY)
   python main.py optimize --force
   
-  # Check system status
+  # Check system status (LEGACY)
   python main.py status
         """
     )
     
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
     
-    # Find and process videos automatically (NEW DEFAULT COMMAND)
+    # Autonomous mode (NEW DEFAULT)
+    autonomous_parser = subparsers.add_parser('autonomous', help='Run fully autonomous video generation (NO HUMAN INPUT)')
+    autonomous_parser.add_argument('--stats-interval', type=int, default=3600,
+                                  help='Statistics reporting interval in seconds (default: 3600)')
+    autonomous_parser.add_argument('--max-videos-per-day', type=int, default=8,
+                                  help='Maximum videos to generate per day (default: 8)')
+    autonomous_parser.add_argument('--min-videos-per-day', type=int, default=3,
+                                  help='Minimum videos to generate per day (default: 3)')
+    autonomous_parser.add_argument('--video-check-interval', type=int, default=3600,
+                                  help='Interval between video generation checks in seconds (default: 3600)')
+    
+    # Find and process videos automatically (LEGACY)
     find_parser = subparsers.add_parser('find', help='Find and process videos automatically from Reddit')
     find_parser.add_argument('--max-videos', type=int, default=5,
                             help='Maximum number of videos to find and process')
@@ -601,22 +617,20 @@ Examples:
     args = parser.parse_args()
     
     if not args.command:
-        # Default to 'find' command when no command is specified
-        print("🔍 No command specified, defaulting to 'find' mode...")
-        print("Use 'python main.py find --help' for more options\n")
+        # Default to 'autonomous' command when no command is specified
+        print("🚀 No command specified, starting AUTONOMOUS MODE...")
+        print("🤖 System will run continuously with NO HUMAN INPUT required")
+        print("📊 Intelligent scheduling and automatic video generation enabled")
+        print("⏹️ Press Ctrl+C to stop autonomous mode\n")
         
-        # Create a mock args object with default find parameters
+        # Create a mock args object with default autonomous parameters
         class MockArgs:
             def __init__(self):
-                self.command = 'find'
-                self.max_videos = 5
-                self.subreddits = None
-                self.sort = 'hot'
-                self.time_filter = 'day'
-                self.dry_run = False
-                self.no_cinematic = False
-                self.no_audio_ducking = False
-                self.no_ab_testing = False
+                self.command = 'autonomous'
+                self.stats_interval = 3600
+                self.max_videos_per_day = 8
+                self.min_videos_per_day = 3
+                self.video_check_interval = 3600
         
         args = MockArgs()
     
@@ -624,7 +638,25 @@ Examples:
     generator = EnhancedYouTubeGenerator()
     
     try:
-        if args.command == 'find':
+        if args.command == 'autonomous':
+            # Run fully autonomous mode
+            print("🚀 Starting Autonomous Video Generation System")
+            print("🤖 No human input required - system will run continuously")
+            print("📊 Intelligent scheduling and optimization enabled")
+            print("⏹️ Press Ctrl+C to stop\n")
+            
+            # Initialize autonomous generator
+            autonomous_generator = AutonomousVideoGenerator()
+            
+            # Override default settings with command line arguments
+            autonomous_generator.max_videos_per_day = args.max_videos_per_day
+            autonomous_generator.min_videos_per_day = args.min_videos_per_day
+            autonomous_generator.video_generation_interval = args.video_check_interval
+            
+            # Start autonomous mode
+            await autonomous_generator.start_autonomous_mode()
+            
+        elif args.command == 'find':
             # Find and process videos automatically
             options = {
                 'enable_cinematic_effects': not args.no_cinematic,

@@ -37,7 +37,7 @@ google-auth-oauthlib>=1.0.0      # OAuth for Google APIs
 googleapis-common-protos>=1.59.0 # Google API protocols
 
 # Database and Analytics
-sqlite3                          # Built-in SQLite (part of Python)
+# sqlite3                          # Built-in SQLite (part of Python)
 pandas>=2.0.0                    # Data analysis and manipulation
 numpy>=1.24.0                    # Numerical computing
 matplotlib>=3.7.0                # Plotting and visualization
@@ -49,7 +49,7 @@ requests>=2.31.0                 # HTTP library
 urllib3>=2.0.0                   # HTTP client
 
 # Async Programming
-asyncio                          # Built-in async library (part of Python)
+# asyncio                          # Built-in async library (part of Python)
 aiofiles>=23.0.0                 # Async file operations
 aiodns>=3.0.0                    # Async DNS resolution
 
@@ -60,7 +60,7 @@ typing-extensions>=4.5.0         # Extended typing support
 # Configuration and Environment
 python-dotenv>=1.0.0             # Environment variable management
 pyyaml>=6.0                      # YAML configuration files
-configparser                     # Built-in config parser (part of Python)
+# configparser                     # Built-in config parser (part of Python)
 
 # Logging and Monitoring
 loguru>=0.7.0                    # Advanced logging
@@ -87,7 +87,7 @@ opencv-contrib-python>=4.8.0     # Additional OpenCV modules
 
 # Audio Codecs and Processing
 pyaudio>=0.2.11                  # Audio I/O (optional, for real-time processing)
-wave                             # Built-in wave file support (part of Python)
+#wave                             # Built-in wave file support (part of Python)
 
 # Statistical Analysis
 statsmodels>=0.14.0              # Statistical modeling
@@ -117,15 +117,22 @@ nltk>=3.8.0                      # Natural language processing
 spacy>=3.5.0                     # Industrial-strength NLP
 textblob>=0.17.1                 # Simple text processing
 
+# Advanced Content Analysis
+pytrends>=4.9.0                  # Google Trends API
+sqlite3                          # Built-in SQLite (part of Python)
+
+# Asset Sourcing APIs
+requests>=2.31.0                 # HTTP requests for API calls
+
 # Date and Time
 python-dateutil>=2.8.0           # Date utilities
 pytz>=2023.3                     # Timezone support
 
 # File and Path Handling
-pathlib                          # Built-in path handling (part of Python)
-glob                             # Built-in file globbing (part of Python)
-shutil                           # Built-in file operations (part of Python)
-tempfile                         # Built-in temporary files (part of Python)
+#pathlib                          # Built-in path handling (part of Python)
+#glob                             # Built-in file globbing (part of Python)
+#shutil                           # Built-in file operations (part of Python)
+#tempfile                         # Built-in temporary files (part of Python)
 
 # JSON and Data Serialization
 orjson>=3.8.0                    # Fast JSON library
@@ -133,13 +140,13 @@ ujson>=5.7.0                     # Ultra-fast JSON encoder/decoder
 
 # Security and Hashing
 cryptography>=41.0.0             # Cryptographic libraries
-hashlib                          # Built-in hashing (part of Python)
-secrets                          # Built-in secure random generation (part of Python)
+#hashlib                          # Built-in hashing (part of Python)
+#secrets                          # Built-in secure random generation (part of Python)
 
 # System Integration
 psutil>=5.9.0                    # System and process utilities
-platform                        # Built-in platform information (part of Python)
-subprocess                       # Built-in subprocess management (part of Python)
+#platform                        # Built-in platform information (part of Python)
+#subprocess                       # Built-in subprocess management (part of Python)
 
 # Optional GPU Deep Learning Frameworks
 # tensorflow>=2.12.0             # TensorFlow (alternative to PyTorch)

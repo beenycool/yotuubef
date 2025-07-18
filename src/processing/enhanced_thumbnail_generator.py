@@ -9,11 +9,41 @@ import json
 import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-import cv2
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageOps
-from moviepy import VideoFileClip
 from datetime import datetime, timedelta
+
+# Optional imports with fallbacks
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    cv2 = None
+
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
+
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageOps
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+    Image = None
+    ImageDraw = None
+    ImageFont = None
+    ImageEnhance = None
+    ImageFilter = None
+    ImageOps = None
+
+try:
+    from moviepy import VideoFileClip
+    MOVIEPY_AVAILABLE = True
+except ImportError:
+    MOVIEPY_AVAILABLE = False
+    VideoFileClip = None
 
 from src.config.settings import get_config
 from src.models import VideoAnalysisEnhanced, ThumbnailVariant, PerformanceMetrics
@@ -30,6 +60,23 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
     def __init__(self):
         super().__init__()
         self.engagement_db = EngagementMetricsDB()
+        
+        # Check for required dependencies
+        self.dependencies_available = CV2_AVAILABLE and NUMPY_AVAILABLE and PIL_AVAILABLE and MOVIEPY_AVAILABLE
+        
+        if not self.dependencies_available:
+            missing_deps = []
+            if not CV2_AVAILABLE:
+                missing_deps.append("opencv-python")
+            if not NUMPY_AVAILABLE:
+                missing_deps.append("numpy")
+            if not PIL_AVAILABLE:
+                missing_deps.append("Pillow")
+            if not MOVIEPY_AVAILABLE:
+                missing_deps.append("moviepy")
+            
+            self.logger.warning(f"⚠️ EnhancedThumbnailGenerator running in fallback mode - missing dependencies: {', '.join(missing_deps)}")
+            self.logger.info("🔄 Enhanced thumbnail features will be simulated")
         
         # A/B testing parameters
         self.max_variants = 5
@@ -323,7 +370,7 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
             return False
     
     def _extract_optimal_frame_with_config(self, video_path: Path, 
-                                         config: Dict[str, Any]) -> Optional[np.ndarray]:
+                                         config: Dict[str, Any]) -> Optional[Any]:
         """Extract frame with configuration-specific optimization"""
         try:
             timestamp = config['timestamp_seconds']
@@ -371,7 +418,7 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
             self.logger.debug(f"High contrast frame search failed: {e}")
             return target_time
     
-    def _apply_emotional_tone(self, image: Image.Image, tone: str) -> Image.Image:
+    def _apply_emotional_tone(self, image: Any, tone: str) -> Any:
         """Apply emotional tone adjustments to image"""
         try:
             tone_config = self.emotional_tones.get(tone, self.emotional_tones['exciting'])
@@ -394,7 +441,7 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
             self.logger.warning(f"Emotional tone application failed: {e}")
             return image
     
-    def _add_optimized_text(self, image: Image.Image, config: Dict[str, Any]) -> Image.Image:
+    def _add_optimized_text(self, image: Any, config: Dict[str, Any]) -> Any:
         """Add optimized text overlay based on configuration"""
         try:
             text = config['headline_text']
@@ -448,7 +495,7 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
             self.logger.warning(f"Optimized text overlay failed: {e}")
             return image
     
-    def _apply_variant_enhancements(self, image: Image.Image, config: Dict[str, Any]) -> Image.Image:
+    def _apply_variant_enhancements(self, image: Any, config: Dict[str, Any]) -> Any:
         """Apply variant-specific final enhancements"""
         try:
             strategy = config.get('optimization_strategy', 'default')
@@ -481,7 +528,7 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
             self.logger.warning(f"Variant enhancement failed: {e}")
             return image
     
-    def _add_subtle_vignette(self, image: Image.Image) -> Image.Image:
+    def _add_subtle_vignette(self, image: Any) -> Any:
         """Add subtle vignette effect"""
         try:
             img_array = np.array(image)

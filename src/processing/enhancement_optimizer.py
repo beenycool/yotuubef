@@ -5,12 +5,19 @@ Analyzes video performance data and automatically fine-tunes enhancement paramet
 
 import logging
 import json
-import numpy as np
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 from dataclasses import dataclass, asdict
 import statistics
+
+# Optional imports with fallbacks
+try:
+    import numpy as np
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None
 
 from src.config.settings import get_config
 from src.models import EnhancementOptimization, PerformanceMetrics
@@ -39,6 +46,10 @@ class EnhancementOptimizer:
         self.logger = logging.getLogger(__name__)
         self.db = EngagementMetricsDB()
         self.analyzer = EngagementAnalyzer(self.db)
+        
+        # Check for optional dependencies
+        if not NUMPY_AVAILABLE:
+            self.logger.warning("⚠️ EnhancementOptimizer running without numpy - using fallback math operations")
         
         # Optimization parameters
         self.min_sample_size = 10  # Minimum videos for statistical significance
