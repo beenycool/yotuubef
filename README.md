@@ -49,6 +49,67 @@ An advanced, AI-driven system for automatically creating engaging YouTube Shorts
 
 ## 🚀 Quick Start
 
+### 🤖 Autonomous Mode (Fully Automated)
+
+For completely hands-off operation:
+
+```bash
+# Start fully autonomous mode
+python autonomous.py
+
+# Or with the main script
+python main.py autonomous
+```
+
+**Features:**
+- ✅ **No Human Input Required**: Works without any command-line parameters
+- ✅ **Intelligent Defaults**: All settings automatically optimized
+- ✅ **Self-Healing**: Automatically recovers from errors
+- ✅ **Continuous Operation**: Runs 24/7 without intervention
+- ✅ **Smart Scheduling**: Optimizes posting times for maximum engagement
+
+### 🎬 Interactive Mode
+
+For manual control and customization:
+
+```bash
+# Basic video generation
+python main.py
+
+# Autonomous mode
+python autonomous.py
+
+# Long-form video generation
+python main.py --longform --topic "Your Topic" --duration 10
+
+# Comprehensive demo
+python demo.py
+
+# Custom configuration
+python main.py --config custom_config.yaml
+```
+
+## 🧪 Testing & Validation
+
+### Comprehensive Test Suite
+
+Run the complete test suite to validate all components:
+
+```bash
+# Run all tests
+python tests.py
+
+# Import validation only
+python tests.py --imports-only
+```
+
+**Test Coverage:**
+- ✅ Core functionality (configuration, models, orchestrator)
+- ✅ Advanced systems (content analysis, templates, optimization)
+- ✅ Long-form video generation
+- ✅ Import validation for all components
+- ✅ Error handling and recovery
+
 ### Prerequisites
 
 - **Python 3.8+**
