@@ -117,6 +117,13 @@ nltk>=3.8.0                      # Natural language processing
 spacy>=3.5.0                     # Industrial-strength NLP
 textblob>=0.17.1                 # Simple text processing
 
+# Advanced Content Analysis
+pytrends>=4.9.0                  # Google Trends API
+sqlite3                          # Built-in SQLite (part of Python)
+
+# Asset Sourcing APIs
+requests>=2.31.0                 # HTTP requests for API calls
+
 # Date and Time
 python-dateutil>=2.8.0           # Date utilities
 pytz>=2023.3                     # Timezone support
