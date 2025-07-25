@@ -1,6 +1,22 @@
 """
 Enhanced Autonomous Video Generator with Advanced Features
 Integrates all the new advanced systems for professional-grade automation
+
+⚠️  DEPRECATION NOTICE:
+This module contains a large monolithic class that has been refactored.
+Use the new Application class from src.application instead:
+
+    from src.application import Application
+    app = Application()
+    await app.run_autonomous_mode()
+
+The new architecture provides:
+- Better separation of concerns
+- Easier testing and maintenance
+- Clearer dependency management
+- Configuration validation at startup
+
+This file is kept for backward compatibility but may be removed in future versions.
 """
 
 import asyncio
