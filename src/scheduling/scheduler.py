@@ -13,16 +13,23 @@ class Scheduler:
     Single responsibility: Determine WHEN to run tasks based on configuration.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config):
         self.logger = logging.getLogger(__name__)
         self.config = config
-        self.autonomous_config = self.config.get('autonomous', {})
         
-        # Scheduling settings
-        self.optimal_posting_times = self.autonomous_config.get('optimal_posting_times', [9, 12, 16, 19, 21])
-        self.video_generation_interval = self.autonomous_config.get('video_generation_interval', 3600)
-        self.min_videos_per_day = self.autonomous_config.get('min_videos_per_day', 3)
-        self.max_videos_per_day = self.autonomous_config.get('max_videos_per_day', 8)
+        # Extract autonomous configuration
+        # Try to get autonomous config from config object or fallback to defaults
+        if hasattr(config, 'autonomous') and hasattr(config.autonomous, '__dict__'):
+            autonomous_config = config.autonomous.__dict__
+        else:
+            # Use defaults if no autonomous config is available
+            autonomous_config = {}
+        
+        # Scheduling settings with defaults
+        self.optimal_posting_times = autonomous_config.get('optimal_posting_times', [9, 12, 16, 19, 21])
+        self.video_generation_interval = autonomous_config.get('video_generation_interval', 3600)
+        self.min_videos_per_day = autonomous_config.get('min_videos_per_day', 3)
+        self.max_videos_per_day = autonomous_config.get('max_videos_per_day', 8)
         
         # State
         self.daily_video_count = 0

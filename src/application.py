@@ -4,19 +4,21 @@ Central Application class that coordinates all system components
 
 import logging
 import asyncio
+import sys
+from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
 
-from ..config.settings import get_config
-from ..scheduling import Scheduler
-from ..content import ContentSource
-from ..pipeline import PipelineManager
+# Add parent directory to path for imports
+sys.path.append(str(Path(__file__).parent.parent))
+
+from src.config.settings import get_config
+from src.scheduling import Scheduler
+from src.content import ContentSource
+from src.pipeline import PipelineManager
 
 # Import config validator
 try:
-    import sys
-    from pathlib import Path
-    sys.path.append(str(Path(__file__).parent.parent))
     from config_validator import ConfigValidator
     CONFIG_VALIDATION_AVAILABLE = True
 except ImportError:
@@ -24,10 +26,10 @@ except ImportError:
 
 # Import existing components with fallbacks
 try:
-    from ..analysis.advanced_content_analyzer import AdvancedContentAnalyzer
-    from ..enhanced_orchestrator import EnhancedVideoOrchestrator
-    from ..management.channel_manager import ChannelManager
-    from ..integrations.reddit_client import create_reddit_client
+    from src.analysis.advanced_content_analyzer import AdvancedContentAnalyzer
+    from src.enhanced_orchestrator import EnhancedVideoOrchestrator
+    from src.management.channel_manager import ChannelManager
+    from src.integrations.reddit_client import create_reddit_client
     CORE_COMPONENTS_AVAILABLE = True
 except ImportError:
     CORE_COMPONENTS_AVAILABLE = False
@@ -264,7 +266,21 @@ class Application:
             
         try:
             validator = ConfigValidator()
-            issues = validator.validate_config(self.config)
+            
+            # Convert ConfigManager to dict for validation
+            if hasattr(self.config, '__dict__'):
+                config_dict = {}
+                for attr_name in ['video', 'audio', 'api', 'ai_features', 'content', 'paths']:
+                    if hasattr(self.config, attr_name):
+                        attr_obj = getattr(self.config, attr_name)
+                        if hasattr(attr_obj, '__dict__'):
+                            config_dict[attr_name] = attr_obj.__dict__
+                        else:
+                            config_dict[attr_name] = attr_obj
+            else:
+                config_dict = self.config
+                
+            issues = validator.validate_config(config_dict)
             
             # Check for critical issues
             critical_issues = [issue for issue in issues if issue.severity == "critical"]
