@@ -4,8 +4,7 @@ PipelineManager class responsible for coordinating parallel processing stages
 
 import logging
 import asyncio
-from typing import Dict, List, Optional, Any, Callable
-
+from typing import Dict, List, Any
 
 class PipelineManager:
     """
