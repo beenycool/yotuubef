@@ -7,9 +7,8 @@ import os
 import sys
 import asyncio
 import unittest
-from unittest.mock import Mock, patch
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
