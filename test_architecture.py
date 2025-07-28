@@ -87,15 +87,21 @@ def test_pipeline_manager():
         }
         
         result = await pipeline.process_content_through_pipeline(test_content)
+        
+        # Add assertions
+        assert isinstance(result, dict), "Result should be a dictionary"
+        assert 'success' in result, "Result should have success key"
+        
         print(f"   ✅ Pipeline processing success: {result['success']}")
         
         if result['success']:
+            assert 'processing_time' in result, "Successful result should have processing_time"
+            assert 'stage_results' in result, "Successful result should have stage_results"
             print(f"   ✅ Processing time: {result['processing_time']:.2f}s")
             print(f"   ✅ Stages completed: {len(result['stage_results'])}")
     
     asyncio.run(test_async())
     print("   ✅ PipelineManager class working correctly")
-
 def test_application():
     """Test the Application class"""
     print("\n🧪 Testing Application class...")
