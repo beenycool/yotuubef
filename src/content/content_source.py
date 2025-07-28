@@ -155,16 +155,13 @@ class ContentSource:
             
         # Check content length
         title = post.get('title', '')
-        selftext = post.get('selftext', '')
         
         if len(title) < 10:  # Too short title
             return False
             
         # Check for suitable content type
-        if post.get('is_video', False) or post.get('url', '').endswith(('.jpg', '.png', '.gif')):
-            return False  # Skip media posts for text-based videos
-            
-        return True
+        # Skip media posts for text-based videos
+        return not (post.get('is_video', False) or post.get('url', '').endswith(('.jpg', '.png', '.gif')))
         
     def _generate_sample_posts(self, subreddit_name: str, count: int) -> List[Dict[str, Any]]:
         """
