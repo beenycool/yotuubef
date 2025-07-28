@@ -56,12 +56,14 @@ def test_content_source():
         
         if content:
             first_item = content[0]
-            print(f"   ✅ First item title: {first_item['content']['title'][:50]}...")
+            title = first_item.get('content', {}).get('title', 'No title')
+            # Safely truncate title
+            truncated_title = (title[:50] + '...') if len(title) > 50 else title
+            print(f"   ✅ First item title: {truncated_title}")
             print(f"   ✅ Analysis score: {first_item.get('analysis', {}).get('overall_score', 'N/A')}")
     
     asyncio.run(test_async())
     print("   ✅ ContentSource class working correctly")
-
 def test_pipeline_manager():
     """Test the PipelineManager class"""
     print("\n🧪 Testing PipelineManager class...")
