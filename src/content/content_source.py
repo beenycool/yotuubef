@@ -5,7 +5,7 @@ ContentSource class responsible for finding and pre-analyzing content from Reddi
 import logging
 import asyncio
 import random
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Any
 from datetime import datetime
 
 
