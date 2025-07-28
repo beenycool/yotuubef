@@ -30,11 +30,16 @@ def test_scheduler():
     should_generate = scheduler.should_generate_video()
     next_time = scheduler.get_next_scheduled_time()
     
+    # Add assertions to verify expected behavior
+    assert isinstance(stats, dict), "Stats should be a dictionary"
+    assert 'daily_video_count' in stats, "Stats should contain daily_video_count"
+    assert isinstance(should_generate, bool), "should_generate should return boolean"
+    assert next_time is None or hasattr(next_time, 'strftime'), "next_time should be datetime or None"
+    
     print(f"   ✅ Daily video count: {stats['daily_video_count']}")
     print(f"   ✅ Should generate video: {should_generate}")
-    print(f"   ✅ Next scheduled time: {next_time.strftime('%H:%M')}")
+    print(f"   ✅ Next scheduled time: {next_time.strftime('%H:%M') if next_time else 'Not scheduled'}")
     print("   ✅ Scheduler class working correctly")
-
 def test_content_source():
     """Test the ContentSource class"""
     print("\n🧪 Testing ContentSource class...")
