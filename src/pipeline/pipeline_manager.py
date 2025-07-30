@@ -6,6 +6,19 @@ import logging
 import asyncio
 from typing import Dict, List, Any
 
+# Import TaskPriority for proper task queue integration
+try:
+    from src.robustness.robust_system import TaskPriority
+    ROBUST_SYSTEM_AVAILABLE = True
+except ImportError:
+    # Fallback enum if robust system is not available
+    from enum import Enum
+    class TaskPriority(Enum):
+        LOW = 1
+        NORMAL = 2  
+        HIGH = 3
+    ROBUST_SYSTEM_AVAILABLE = False
+
 class PipelineManager:
     """
     Manages the video generation pipeline through parallel processing stages.
@@ -271,8 +284,9 @@ class PipelineManager:
                 if self.task_queue and hasattr(self.task_queue, 'add_task'):
                     task_id = await self.task_queue.add_task(
                         task_type='pipeline_processing',
-                        data=content_item,
-                        priority='normal'
+                        task_name=f"Process content: {content_item.get('content', {}).get('title', 'Unknown')[:50]}",
+                        task_data=content_item,
+                        priority=TaskPriority.NORMAL
                     )
                     task_ids.append(task_id)
                 else:

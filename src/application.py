@@ -41,12 +41,26 @@ class Application:
     Single responsibility: Wire together and orchestrate all components.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, autonomous_args: Optional[Dict[str, Any]] = None):
         self.logger = logging.getLogger(__name__)
         self.config = config or get_config()
         
+        # Store autonomous mode arguments
+        self.autonomous_args = autonomous_args or {}
+        
         # Initialize core components with dependency injection
-        self.scheduler = Scheduler(self.config)
+        # Pass autonomous args to scheduler for configuration
+        scheduler_config = dict(self.config.__dict__ if hasattr(self.config, '__dict__') else self.config)
+        if self.autonomous_args:
+            # Override configuration with command line arguments
+            if 'max_videos_per_day' in self.autonomous_args:
+                scheduler_config['max_videos_per_day'] = self.autonomous_args['max_videos_per_day']
+            if 'min_videos_per_day' in self.autonomous_args:
+                scheduler_config['min_videos_per_day'] = self.autonomous_args['min_videos_per_day']
+            if 'video_check_interval' in self.autonomous_args:
+                scheduler_config['video_check_interval'] = self.autonomous_args['video_check_interval']
+                
+        self.scheduler = Scheduler(scheduler_config)
         self.content_source = None
         self.pipeline_manager = None
         
@@ -64,6 +78,12 @@ class Application:
         self._validate_configuration()
         
         self.logger.info("Application initialized with configuration")
+        
+        # Log autonomous mode configuration
+        if self.autonomous_args:
+            self.logger.info(f"Autonomous mode configuration:")
+            for key, value in self.autonomous_args.items():
+                self.logger.info(f"  {key}: {value}")
         
     async def initialize_async_components(self):
         """
@@ -123,8 +143,9 @@ class Application:
             while self.running:
                 await self._autonomous_cycle()
                 
-                # Wait before next cycle
-                await asyncio.sleep(60)  # Check every minute
+                # Wait before next cycle  
+                check_interval = self.autonomous_args.get('video_check_interval', 60)
+                await asyncio.sleep(check_interval)
                 
         except KeyboardInterrupt:
             self.logger.info("Received shutdown signal")

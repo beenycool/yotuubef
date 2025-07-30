@@ -634,6 +634,14 @@ Examples:
                 self.video_check_interval = 3600
         
         args = MockArgs()
+        
+        # Log the default autonomous configuration
+        print(f"📊 Using default autonomous configuration:")
+        print(f"   Max videos per day: {args.max_videos_per_day}")
+        print(f"   Min videos per day: {args.min_videos_per_day}")  
+        print(f"   Video check interval: {args.video_check_interval}s")
+        print(f"   Stats interval: {args.stats_interval}s")
+        print("   Use 'python main.py autonomous --help' to see available options\n")
     
     # Initialize enhanced generator
     generator = EnhancedYouTubeGenerator()
@@ -646,8 +654,15 @@ Examples:
             print("📊 Intelligent scheduling and optimization enabled")
             print("⏹️ Press Ctrl+C to stop\n")
             
-            # Initialize new Application class
-            app = Application()
+            # Initialize new Application class with autonomous arguments
+            autonomous_args = {
+                'max_videos_per_day': args.max_videos_per_day,
+                'min_videos_per_day': args.min_videos_per_day,
+                'video_check_interval': args.video_check_interval,
+                'stats_interval': args.stats_interval
+            }
+            
+            app = Application(autonomous_args=autonomous_args)
             
             # Start autonomous mode
             await app.run_autonomous_mode()
