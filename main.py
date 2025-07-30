@@ -20,6 +20,7 @@ from src.integrations.reddit_client import RedditClient
 from src.config.settings import get_config, setup_logging
 from src.utils.cleanup import clear_temp_files, clear_results, clear_logs
 from src.autonomous_mode import AutonomousVideoGenerator
+from src.application import Application
 
 
 class EnhancedYouTubeGenerator:
@@ -633,28 +634,38 @@ Examples:
                 self.video_check_interval = 3600
         
         args = MockArgs()
+        
+        # Log the default autonomous configuration
+        print(f"📊 Using default autonomous configuration:")
+        print(f"   Max videos per day: {args.max_videos_per_day}")
+        print(f"   Min videos per day: {args.min_videos_per_day}")  
+        print(f"   Video check interval: {args.video_check_interval}s")
+        print(f"   Stats interval: {args.stats_interval}s")
+        print("   Use 'python main.py autonomous --help' to see available options\n")
     
     # Initialize enhanced generator
     generator = EnhancedYouTubeGenerator()
     
     try:
         if args.command == 'autonomous':
-            # Run fully autonomous mode
-            print("🚀 Starting Autonomous Video Generation System")
+            # Run fully autonomous mode using new Application class
+            print("🚀 Starting Enhanced Autonomous Video Generation System")
             print("🤖 No human input required - system will run continuously")
             print("📊 Intelligent scheduling and optimization enabled")
             print("⏹️ Press Ctrl+C to stop\n")
             
-            # Initialize autonomous generator
-            autonomous_generator = AutonomousVideoGenerator()
+            # Initialize new Application class with autonomous arguments
+            autonomous_args = {
+                'max_videos_per_day': args.max_videos_per_day,
+                'min_videos_per_day': args.min_videos_per_day,
+                'video_check_interval': args.video_check_interval,
+                'stats_interval': args.stats_interval
+            }
             
-            # Override default settings with command line arguments
-            autonomous_generator.max_videos_per_day = args.max_videos_per_day
-            autonomous_generator.min_videos_per_day = args.min_videos_per_day
-            autonomous_generator.video_generation_interval = args.video_check_interval
+            app = Application(autonomous_args=autonomous_args)
             
             # Start autonomous mode
-            await autonomous_generator.start_autonomous_mode()
+            await app.run_autonomous_mode()
             
         elif args.command == 'find':
             # Find and process videos automatically
