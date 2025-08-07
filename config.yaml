@@ -14,6 +14,18 @@ api:
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
   youtube_api_key: your_youtube_api_key
   youtube_client_secrets_file: youtube_credentials.json
+spotify:
+  client_id: your_spotify_client_id
+  client_secret: your_spotify_client_secret
+  enable_music_downloads: true
+  download_quality: high
+  max_tracks_per_search: 50
+  preferred_genres:
+    - electronic
+    - pop
+    - rock
+    - indie
+    - instrumental
 audio:
   audio_enhancement:
     enable_limiter: true

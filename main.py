@@ -13,8 +13,38 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from src.config.settings import get_config, setup_logging
-from src.utils.cleanup import clear_temp_files, clear_results, clear_logs
 from src.application import Application
+
+
+# Direct cleanup functions to avoid import dependencies
+def clear_temp_files():
+    """Clear temporary files"""
+    import shutil
+    from pathlib import Path
+    temp_dir = Path("temp")
+    if temp_dir.exists():
+        shutil.rmtree(temp_dir)
+        temp_dir.mkdir(exist_ok=True)
+
+def clear_results():
+    """Clear results files"""
+    import shutil
+    from pathlib import Path
+    results_dir = Path("data/results")
+    if results_dir.exists():
+        for file in results_dir.glob("*"):
+            if file.is_file():
+                file.unlink()
+
+def clear_logs():
+    """Clear log files"""
+    from pathlib import Path
+    logs_dir = Path("logs")
+    if logs_dir.exists():
+        for file in logs_dir.glob("*.log"):
+            file.unlink()
+        for file in logs_dir.glob("*.jsonl"):
+            file.unlink()
 
 
 def setup_application():
