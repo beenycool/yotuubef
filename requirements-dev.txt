@@ -1,0 +1,28 @@
+# Development and Testing Dependencies
+# Install with: pip install -r requirements-dev.txt
+
+# Testing Framework
+pytest>=7.3.0                    # Testing framework
+pytest-asyncio>=0.21.0           # Async testing support
+pytest-cov>=4.1.0                # Coverage testing
+
+# Code Quality and Formatting
+black>=23.0.0                    # Code formatting
+flake8>=6.0.0                    # Code linting
+mypy>=1.3.0                      # Type checking
+pre-commit>=3.3.0                # Pre-commit hooks
+
+# Performance and Profiling
+memory-profiler>=0.60.0          # Memory usage profiling
+line-profiler>=4.0.0             # Line-by-line profiling
+py-spy>=0.3.14                   # Sampling profiler
+
+# Development Tools
+ipython>=8.0.0                   # Enhanced Python shell
+jupyter>=1.0.0                   # Jupyter notebooks
+notebook>=6.5.0                  # Classic Jupyter notebook
+
+# Documentation
+sphinx>=6.0.0                    # Documentation generator
+sphinx-rtd-theme>=1.2.0         # Read the Docs theme
+myst-parser>=0.18.0              # Markdown parser for Sphinx
