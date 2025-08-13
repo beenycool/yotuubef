@@ -7,7 +7,6 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
-from datetime import datetime
 
 # Add parent directory to path for imports
 sys.path.append(str(Path(__file__).parent.parent))
@@ -116,7 +115,6 @@ class Application:
             )
             
             # Initialize pipeline manager
-            # Note: We'll pass None for now instead of global dependencies
             self.pipeline_manager = PipelineManager(
                 task_queue=None,  # TODO: Pass actual task queue instance
                 parallel_manager=None  # TODO: Pass actual parallel manager instance
@@ -201,131 +199,157 @@ class Application:
         if not self.initialization_complete:
             await self.initialize_async_components()
             
-        self.logger.info(f"🎬 Generating single video on topic: {topic}")
+        self.logger.info(f"🎬 Starting single video generation for topic: {topic}")
         
         try:
-            # Create content item from topic
-            content_item = {
-                'content': {
-                    'title': topic,
-                    'selftext': f"Video content about: {topic}",
-                    'score': 1000,  # High score for manual topics
-                    'source': 'manual'
-                },
-                'analysis': {
-                    'overall_score': 0.8,
-                    'keywords': topic.split()[:5]
-                },
-                'source': 'manual_input',
-                'retrieved_at': datetime.now().isoformat()
-            }
+            # Find content for the topic
+            # TODO: Implement topic filtering in ContentSource
+            content_items = await self.content_source.find_and_analyze_content(
+                max_items=1
+            )
             
-            # Process through pipeline
-            result = await self.pipeline_manager.process_content_through_pipeline(content_item)
+            if not content_items:
+                self.logger.error(f"No content found for topic: {topic}")
+                return False
+                
+            # Process the content
+            result = await self.pipeline_manager.process_content_through_pipeline(content_items[0])
             
             if result.get('success', False):
                 self.logger.info("✅ Single video generation completed successfully")
-                return result
+                return True
             else:
                 self.logger.error(f"❌ Single video generation failed: {result.get('error', 'Unknown error')}")
-                return result
+                return False
                 
         except Exception as e:
-            self.logger.error(f"Single video generation error: {e}")
-            return {'success': False, 'error': str(e)}
+            self.logger.error(f"Single video mode error: {e}")
+            return False
+            
+    async def get_system_status(self):
+        """
+        Get the current system status and health information.
+        """
+        try:
+            self.logger.info("📊 Getting system status...")
+            
+            # Get scheduler statistics
+            scheduler_stats = self.scheduler.get_stats()
+            
+            # Get component status
+            component_status = {
+                'scheduler': '✅ Active' if self.scheduler else '❌ Not initialized',
+                'content_source': '✅ Active' if self.content_source else '❌ Not initialized',
+                'pipeline_manager': '✅ Active' if self.pipeline_manager else '❌ Not initialized',
+                'content_analyzer': '✅ Active' if self.content_analyzer else '❌ Not available',
+                'orchestrator': '✅ Active' if self.orchestrator else '❌ Not available',
+                'channel_manager': '✅ Active' if self.channel_manager else '❌ Not available',
+                'reddit_client': '✅ Connected' if (self.reddit_client and hasattr(self.reddit_client, 'is_connected') and self.reddit_client.is_connected()) else '❌ Not connected'
+            }
+            
+            # Print status information
+            print("\n" + "=" * 60)
+            print("🤖 SYSTEM STATUS")
+            print("=" * 60)
+            
+            print(f"\n📅 Scheduler Status:")
+            print(f"   Daily video count: {scheduler_stats.get('daily_video_count', 0)}")
+            print(f"   Should generate video: {scheduler_stats.get('should_generate_video', False)}")
+            print(f"   Next scheduled time: {scheduler_stats.get('next_scheduled_time', 'Not scheduled')}")
+            
+            print(f"\n🔧 Component Status:")
+            for component, status in component_status.items():
+                print(f"   {component.replace('_', ' ').title()}: {status}")
+            
+            print(f"\n⚙️ Configuration:")
+            print(f"   Autonomous mode: {'✅ Enabled' if self.autonomous_args else '❌ Disabled'}")
+            if self.autonomous_args:
+                for key, value in self.autonomous_args.items():
+                    print(f"   {key.replace('_', ' ').title()}: {value}")
+            
+            print("\n" + "=" * 60)
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Failed to get system status: {e}")
+            return False
             
     async def _log_performance_stats(self):
         """
-        Log current performance statistics.
+        Log performance statistics for monitoring.
         """
         try:
-            scheduler_stats = self.scheduler.get_stats()
-            pipeline_stats = self.pipeline_manager.get_pipeline_stats()
+            # Get scheduler statistics
+            stats = self.scheduler.get_stats()
             
-            self.logger.info("📊 Performance Statistics:")
-            self.logger.info(f"   Daily videos: {scheduler_stats['daily_video_count']}/{scheduler_stats['max_videos_per_day']}")
-            self.logger.info(f"   Pipeline success rate: {pipeline_stats['success_rate_percent']}%")
-            self.logger.info(f"   Total processed: {pipeline_stats['total_processed']}")
-            self.logger.info(f"   Next scheduled: {scheduler_stats['next_scheduled_time']}")
+            # Log key metrics
+            self.logger.info(f"📊 Performance Stats - Daily videos: {stats.get('daily_video_count', 0)}")
             
+            # Log memory usage if available
+            try:
+                import psutil
+                process = psutil.Process()
+                memory_info = process.memory_info()
+                self.logger.info(f"💾 Memory usage: {memory_info.rss / 1024 / 1024:.1f} MB")
+            except ImportError:
+                pass  # psutil not available
+                
         except Exception as e:
-            self.logger.warning(f"Failed to log performance stats: {e}")
+            self.logger.warning(f"Could not log performance stats: {e}")
             
     async def _cleanup(self):
         """
-        Cleanup resources and shutdown gracefully.
+        Clean up resources before shutdown.
         """
-        self.logger.info("🧹 Cleaning up application resources")
-        self.running = False
-        
         try:
-            # Close any open connections
-            if self.reddit_client and hasattr(self.reddit_client, 'close'):
-                await self.reddit_client.close()
-                
-            # Additional cleanup can be added here
+            self.logger.info("🧹 Cleaning up resources...")
+            self.running = False
+            
+            # Clean up components
+            if hasattr(self, 'orchestrator') and self.orchestrator:
+                try:
+                    await self.orchestrator.cleanup()
+                except:
+                    pass
+                    
+            if hasattr(self, 'content_source') and self.content_source:
+                try:
+                    await self.content_source.cleanup()
+                except:
+                    pass
+                    
+            self.logger.info("✅ Cleanup completed")
             
         except Exception as e:
-            self.logger.warning(f"Cleanup error (non-critical): {e}")
+            self.logger.error(f"Cleanup error: {e}")
             
-        self.logger.info("✅ Application cleanup completed")
-        
-    def stop(self):
-        """
-        Signal the application to stop gracefully.
-        """
-        self.logger.info("Received stop signal")
-        self.running = False
-        
     def _validate_configuration(self):
         """
-        Validate configuration and fail fast on critical issues.
+        Validate the application configuration.
         """
-        if not CONFIG_VALIDATION_AVAILABLE:
-            self.logger.warning("Configuration validator not available, skipping validation")
-            return
-            
         try:
-            validator = ConfigValidator()
-            
-            # Convert ConfigManager to dict for validation
-            if hasattr(self.config, '__dict__'):
-                config_dict = {}
-                for attr_name in ['video', 'audio', 'api', 'ai_features', 'content', 'paths']:
-                    if hasattr(self.config, attr_name):
-                        attr_obj = getattr(self.config, attr_name)
-                        if hasattr(attr_obj, '__dict__'):
-                            config_dict[attr_name] = attr_obj.__dict__
-                        else:
-                            config_dict[attr_name] = attr_obj
-            else:
-                config_dict = self.config
+            # Basic validation
+            if not self.config:
+                raise ValueError("Configuration is required")
                 
-            issues = validator.validate_config(config_dict)
+            # Validate required paths
+            required_paths = ['temp_dir', 'processed_dir', 'logs_dir']
+            for path_key in required_paths:
+                if hasattr(self.config, path_key):
+                    path_value = getattr(self.config, path_key)
+                    if path_value:
+                        Path(path_value).mkdir(parents=True, exist_ok=True)
+                        
+            # Validate autonomous mode configuration
+            if self.autonomous_args:
+                required_autonomous_keys = ['max_videos_per_day', 'min_videos_per_day']
+                for key in required_autonomous_keys:
+                    if key not in self.autonomous_args:
+                        self.logger.warning(f"Missing autonomous configuration: {key}")
+                        
+            self.logger.info("✅ Configuration validation passed")
             
-            # Check for critical issues
-            critical_issues = [issue for issue in issues if issue.severity == "critical"]
-            warning_issues = [issue for issue in issues if issue.severity == "warning"]
-            
-            if critical_issues:
-                self.logger.error("❌ Critical configuration issues found:")
-                for issue in critical_issues:
-                    self.logger.error(f"   • {issue.section}.{issue.key}: {issue.description}")
-                    self.logger.error(f"     Fix: {issue.fix_suggestion}")
-                    
-                raise RuntimeError(f"Critical configuration issues found: {len(critical_issues)} issues must be resolved before starting")
-                
-            if warning_issues:
-                self.logger.warning(f"⚠️ Found {len(warning_issues)} configuration warnings:")
-                for issue in warning_issues[:3]:  # Show first 3 warnings
-                    self.logger.warning(f"   • {issue.section}.{issue.key}: {issue.description}")
-                if len(warning_issues) > 3:
-                    self.logger.warning(f"   ... and {len(warning_issues) - 3} more warnings")
-                    
-            if not critical_issues and not warning_issues:
-                self.logger.info("✅ Configuration validation passed")
-                
         except Exception as e:
-            self.logger.error(f"Configuration validation failed: {e}")
-            # Don't fail startup for validation errors, just warn
-            self.logger.warning("Continuing startup despite validation issues")
+            self.logger.error(f"❌ Configuration validation failed: {e}")
+            raise

@@ -4,6 +4,7 @@ ai_features:
   enable_cinematic_editing: true
   fallback_confidence_threshold: 0.6
   use_fallback_analysis: true
+
 api:
   gemini_api_key: your_gemini_api_key
   gemini_model: gemini-2.0-flash
@@ -14,6 +15,7 @@ api:
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
   youtube_api_key: your_youtube_api_key
   youtube_client_secrets_file: youtube_credentials.json
+
 spotify:
   client_id: your_spotify_client_id
   client_secret: your_spotify_client_secret
@@ -26,6 +28,7 @@ spotify:
     - rock
     - indie
     - instrumental
+
 audio:
   audio_enhancement:
     enable_limiter: true
@@ -43,6 +46,7 @@ audio:
     enable: true
     normalize_levels: true
     volume: 0.7
+
 audio_processing:
   clarity_boost: 0.2
   compression_ratio: 0.4
@@ -56,9 +60,8 @@ audio_processing:
   preserve_music_dynamics: true
   sample_rate: 44100
   smart_detection: true
-  voice_frequency_range:
-  - 80
-  - 8000
+  voice_frequency_range: [80, 8000]
+
 cinematic_editing:
   composition_analysis: true
   contrast_weight: 0.3
@@ -68,20 +71,18 @@ cinematic_editing:
   max_zoom_factor: 1.8
   min_scene_duration: 2.0
   motion_threshold: 0.3
-  movement_intensity_range:
-  - 0.3
-  - 1.5
+  movement_intensity_range: [0.3, 1.5]
   rule_of_thirds_weight: 0.3
   symmetry_weight: 0.2
-  transition_duration_range:
-  - 0.5
-  - 1.5
+  transition_duration_range: [0.5, 1.5]
   visual_complexity_weight: 0.4
+
 database:
   ab_test_retention_days: 30
   cleanup_interval_hours: 24
   metrics_retention_days: 90
   sqlite_db_path: data/youtube_shorts.db
+
 development:
   debug_mode: false
   enable_profiling: false
@@ -90,6 +91,7 @@ development:
   skip_upload_in_test_mode: true
   test_video_duration_limit: 60
   use_sample_data: false
+
 feature_flags:
   enable_advanced_analytics: true
   enable_auto_captions: true
@@ -98,6 +100,7 @@ feature_flags:
   enable_real_time_monitoring: true
   enable_style_transfer: false
   enable_voice_cloning: false
+
 logging:
   backup_count: 5
   component_levels:
@@ -113,6 +116,7 @@ logging:
   level: INFO
   log_rotation: true
   max_log_size_mb: 10
+
 paths:
   ab_test_results_dir: ab_test_results
   ai_models_cache_dir: ai_models_cache
@@ -125,6 +129,7 @@ paths:
   sound_effects_dir: sound_effects
   temp_dir: temp
   thumbnails_dir: thumbnails
+
 performance:
   aggressive_memory_cleanup: true
   chunk_size_mb: 100
@@ -134,6 +139,7 @@ performance:
   max_concurrent_videos: 3
   max_vram_usage: 0.7
   memory_monitoring_interval: 30
+
 tts:
   azure:
     pitch: medium
@@ -150,12 +156,11 @@ tts:
     voice_similarity_boost: 0.75
     voice_stability: 0.75
   primary_service: elevenlabs
+
 video_processing:
   audio_bitrate: 128k
   audio_codec: aac
-  default_output_resolution:
-  - 1080
-  - 1920
+  default_output_resolution: [1080, 1920]
   enable_auto_color_grading: true
   enable_dynamic_zoom: true
   enable_motion_blur_compensation: true
@@ -170,6 +175,7 @@ video_processing:
   video_bitrate: 5M
   video_codec: libx264
   video_quality_profile: speed
+
 youtube:
   add_performance_hashtags: true
   auto_generate_description: true
