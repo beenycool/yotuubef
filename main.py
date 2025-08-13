@@ -6,11 +6,8 @@ Main entry point for creating YouTube Shorts from Reddit content with Spotify mu
 import asyncio
 import logging
 import argparse
-import json
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Any
-from datetime import datetime
 
 from src.config.settings import get_config, setup_logging
 from src.application import Application
@@ -64,16 +61,12 @@ Examples:
         print("📊 Intelligent scheduling and automatic video generation enabled")
         print("⏹️ Press Ctrl+C to stop autonomous mode\n")
         
-        # Create a mock args object with default autonomous parameters
-        class MockArgs:
-            def __init__(self):
-                self.command = 'autonomous'
-                self.stats_interval = 3600
-                self.max_videos_per_day = 8
-                self.min_videos_per_day = 3
-                self.video_check_interval = 3600
-        
-        args = MockArgs()
+        # Create default autonomous parameters
+        args.command = 'autonomous'
+        args.stats_interval = 3600
+        args.max_videos_per_day = 8
+        args.min_videos_per_day = 3
+        args.video_check_interval = 3600
         
         # Log the default autonomous configuration
         print(f"📊 Using default autonomous configuration:")
@@ -81,7 +74,7 @@ Examples:
         print(f"   Min videos per day: {args.min_videos_per_day}")  
         print(f"   Video check interval: {args.video_check_interval}s")
         print(f"   Stats interval: {args.stats_interval}s")
-        print("   Use 'python main.py autonomous --help' to see available options\n")
+        print(f"   Use 'python main.py autonomous --help' to see available options\n")
     
     # Initialize application
     setup_application()
@@ -118,9 +111,6 @@ Examples:
             clear_results()
             if args.logs or args.all:
                 clear_logs()
-            if args.all:
-                # Add any other all-encompassing cleanup here
-                pass
             print("✅ Cleanup process finished.")
     
     except KeyboardInterrupt:
