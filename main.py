@@ -47,6 +47,28 @@ Examples:
     # System status
     status_parser = subparsers.add_parser('status', help='Check system status')
     
+    # Social media commands
+    social_parser = subparsers.add_parser('social', help='Social media operations')
+    social_subparsers = social_parser.add_subparsers(dest='social_command', help='Social media commands')
+    
+    # Social media upload
+    social_upload_parser = social_subparsers.add_parser('upload', help='Upload video to social media platforms')
+    social_upload_parser.add_argument('video_path', help='Path to video file')
+    social_upload_parser.add_argument('title', help='Video title')
+    social_upload_parser.add_argument('--description', help='Video description')
+    social_upload_parser.add_argument('--platforms', nargs='+', choices=['youtube', 'tiktok', 'instagram'],
+                                    help='Target platforms (default: youtube)')
+    social_upload_parser.add_argument('--tags', nargs='+', help='Hashtags for the video')
+    social_upload_parser.add_argument('--scheduled', help='Scheduled upload time (ISO format)')
+    
+    # Social media status
+    social_status_parser = social_subparsers.add_parser('status', help='Check social media upload status')
+    
+    # Social media platform info
+    social_platform_parser = social_subparsers.add_parser('platform', help='Get platform information')
+    social_platform_parser.add_argument('platform', choices=['youtube', 'tiktok', 'instagram'],
+                                      help='Platform to get info for')
+    
     # Cleanup command
     cleanup_parser = subparsers.add_parser('cleanup', help='Clean up temporary files, results, and logs')
     cleanup_parser.add_argument('--logs', action='store_true', help='Also clear log files')
@@ -105,6 +127,51 @@ Examples:
             app = Application()
             await app.get_system_status()
         
+        elif args.command == 'social':
+            # Handle social media commands
+            if not args.social_command:
+                print("❌ No social media command specified")
+                print("Available commands: upload, status, platform")
+                return
+            
+            # Initialize social media manager
+            try:
+                from src.integrations.social_media_manager import create_social_media_manager
+                social_manager = create_social_media_manager(config)
+            except Exception as e:
+                print(f"❌ Failed to initialize social media manager: {e}")
+                return
+            
+            if args.social_command == 'upload':
+                # Upload video to social media platforms
+                print(f"🚀 Starting social media upload: {args.video_path}")
+                print(f"📝 Title: {args.title}")
+                if args.description:
+                    print(f"📄 Description: {args.description}")
+                if args.platforms:
+                    print(f"📱 Platforms: {', '.join(args.platforms)}")
+                if args.tags:
+                    print(f"🏷️ Tags: {', '.join(args.tags)}")
+                if args.scheduled:
+                    print(f"⏰ Scheduled for: {args.scheduled}")
+                print()
+                
+                # This would integrate with the social media manager
+                print("⚠️ Social media upload integration coming soon!")
+                print("Use 'python src/social_media_cli.py' for full functionality")
+                
+            elif args.social_command == 'status':
+                # Check social media status
+                print("📊 Social Media Status:")
+                print("⚠️ Full status integration coming soon!")
+                print("Use 'python src/social_media_cli.py status' for full functionality")
+                
+            elif args.social_command == 'platform':
+                # Get platform information
+                print(f"📱 {args.platform.upper()} Platform Information:")
+                print("⚠️ Full platform info integration coming soon!")
+                print(f"Use 'python src/social_media_cli.py platform {args.platform}' for full functionality")
+                
         elif args.command == 'cleanup':
             print("🧹 Starting cleanup process...")
             clear_temp_files()

@@ -69,6 +69,9 @@ class Application:
         self.channel_manager = None
         self.reddit_client = None
         
+        # Social media integration
+        self.social_media_manager = None
+        
         # Application state
         self.running = False
         self.initialization_complete = False
@@ -107,6 +110,15 @@ class Application:
                         
                 except Exception as e:
                     self.logger.warning(f"Some core components failed to initialize: {e}")
+            
+            # Initialize social media manager
+            try:
+                from src.integrations.social_media_manager import create_social_media_manager
+                self.social_media_manager = create_social_media_manager(self.config)
+                self.logger.info("✅ Social media manager initialized successfully")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Social media manager not available: {e}")
+                self.social_media_manager = None
                     
             # Initialize content source with dependencies
             self.content_source = ContentSource(
