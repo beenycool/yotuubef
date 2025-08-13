@@ -112,5 +112,6 @@ class Scheduler:
             'min_videos_per_day': self.min_videos_per_day,
             'last_reset_date': self.last_reset_date.isoformat(),
             'next_scheduled_time': self.get_next_scheduled_time().isoformat(),
-            'optimal_posting_times': self.optimal_posting_times
+            'optimal_posting_times': self.optimal_posting_times,
+            'should_generate_video': self.should_generate_video()
         }

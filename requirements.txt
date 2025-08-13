@@ -3,6 +3,12 @@
 # AI and Machine Learning (Essential)
 google-generativeai>=0.3.0       # Google Gemini API for content analysis
 transformers>=4.30.0             # Hugging Face transformers for local AI models
+torch>=2.0.0                     # Required for GPU management & TTS inference
+
+# Optional analysis dependencies
+nltk>=3.8.0                      # Sentiment tokenization & VADER
+textblob>=0.17.1                 # Sentiment analysis fallback
+pytrends>=4.8.0                  # Google Trends data
 
 # Audio Processing (Essential)
 librosa>=0.10.0                  # Audio analysis and processing

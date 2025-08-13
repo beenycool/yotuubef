@@ -203,9 +203,9 @@ class Application:
         
         try:
             # Find content for the topic
+            # TODO: Implement topic filtering in ContentSource
             content_items = await self.content_source.find_and_analyze_content(
-                max_items=1, 
-                topic_filter=topic
+                max_items=1
             )
             
             if not content_items:

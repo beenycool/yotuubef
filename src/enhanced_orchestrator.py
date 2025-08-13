@@ -9,6 +9,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import contextlib
+import inspect
 
 try:
     import numpy as np
@@ -25,7 +27,7 @@ except ImportError:
     ASYNCPRAWCORE_AVAILABLE = False
 
 from src.config.settings import get_config
-from src.models import VideoAnalysisEnhanced, PerformanceMetrics
+from src.models import VideoAnalysisEnhanced, SystemPerformanceMetrics
 from src.integrations.reddit_client import RedditClient
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
@@ -65,6 +67,7 @@ class EnhancedVideoOrchestrator:
             self.ai_client = AIClient()
             self.youtube_client = YouTubeClient()
             self.video_processor = VideoProcessor()
+            self.reddit_client = RedditClient()
             
             # Initialize enhanced components
             self.cinematic_editor = CinematicEditor()
@@ -88,6 +91,7 @@ class EnhancedVideoOrchestrator:
             self.ai_client = None
             self.youtube_client = None
             self.video_processor = None
+            self.reddit_client = None
             self.cinematic_editor = None
             self.advanced_audio_processor = None
             self.enhanced_thumbnail_generator = None
@@ -206,7 +210,7 @@ class EnhancedVideoOrchestrator:
             
         except Exception as e:
             self.failed_videos += 1
-            self.logger.error(f"❌ Enhanced video processing failed: {e}")
+            self.logger.exception("❌ Enhanced video processing failed")
             return {
                 'success': False,
                 'error': str(e),
@@ -353,7 +357,7 @@ class EnhancedVideoOrchestrator:
             
         except Exception as e:
             self.failed_videos += 1
-            self.logger.error(f"Long-form video generation failed: {e}")
+            self.logger.exception("Long-form video generation failed")
             return {
                 'success': False,
                 'error': str(e),
@@ -415,12 +419,14 @@ class EnhancedVideoOrchestrator:
                 'tags': video_structure.get('hashtags', []),
                 'category': '27',  # Education category for long-form
                 'privacy': 'public',
-                'thumbnail_path': generation_result.get('thumbnail_optimization', {}).get('best_thumbnail_path')
             }
+            
+            # Get thumbnail path if available
+            thumbnail_path = generation_result.get('thumbnail_optimization', {}).get('best_thumbnail_path')
             
             # Upload to YouTube
             upload_result = await self.youtube_client.upload_video(
-                video_path, upload_metadata
+                video_path, upload_metadata, thumbnail_path=thumbnail_path
             )
             
             return upload_result
@@ -472,7 +478,7 @@ class EnhancedVideoOrchestrator:
             self.logger.error(f"Optimization analysis failed: {e}")
     
     async def _predict_video_performance(self, 
-                                       analysis: VideoAnalysisEnhanced) -> Dict[str, float]:
+                                       analysis: Dict[str, Any]) -> Dict[str, float]:
         """Predict video performance using AI"""
         try:
             # This would use ML models to predict performance
@@ -484,7 +490,6 @@ class EnhancedVideoOrchestrator:
             audio_features = len(analysis.get('sound_effects', [])) * 2
             narrative_features = len(analysis.get('narrative_script_segments', [])) * 4
             
-            base_score = 50  # Baseline
             feature_bonus = engagement_features + visual_features + audio_features + narrative_features
             
             # Predict metrics
@@ -542,11 +547,10 @@ class EnhancedVideoOrchestrator:
             # Enhanced content analysis
             enhanced_analysis = await self.ai_client.analyze_video_content(
                 video_path, 
-                base_analysis,
-                include_cinematic_insights=True
+                base_analysis
             )
             
-            return enhanced_analysis
+            return enhanced_analysis or base_analysis
             
         except Exception as e:
             self.logger.warning(f"Enhanced analysis failed, using base analysis: {e}")
@@ -628,21 +632,20 @@ class EnhancedVideoOrchestrator:
             if not self.youtube_client:
                 return {'success': False, 'error': 'YouTube client not available'}
             
-            # Upload video
+            # Prepare metadata and optional thumbnail
+            metadata = {
+                'title': analysis.get('suggested_title', 'Enhanced Video'),
+                'description': analysis.get('suggested_description', ''),
+                'tags': analysis.get('suggested_tags', []),
+            }
+            primary_thumbnail = thumbnails[0]['path'] if thumbnails else None
+
+            # Upload video (thumbnail handled by client if provided)
             upload_result = await self.youtube_client.upload_video(
-                video_path, 
-                title=analysis.get('suggested_title', 'Enhanced Video'),
-                description=analysis.get('suggested_description', ''),
-                tags=analysis.get('suggested_tags', [])
+                video_path,
+                metadata,
+                thumbnail_path=primary_thumbnail
             )
-            
-            # Upload thumbnails if available
-            if thumbnails and upload_result['success']:
-                for thumbnail in thumbnails:
-                    await self.youtube_client.upload_thumbnail(
-                        upload_result['video_id'], 
-                        thumbnail['path']
-                    )
             
             return upload_result
             
@@ -759,9 +762,17 @@ class EnhancedVideoOrchestrator:
             for component in [self.cinematic_editor, self.advanced_audio_processor, 
                             self.enhanced_thumbnail_generator, self.enhancement_optimizer]:
                 if component and hasattr(component, 'cleanup'):
+                    cleanup_fn = component.cleanup
                     try:
-                        await component.cleanup()
-                    except:
+                        result = cleanup_fn()
+                        if inspect.isawaitable(result):
+                            with contextlib.suppress(Exception):
+                                await result
+                        else:
+                            # best-effort swallow sync cleanup errors
+                            pass
+                    except Exception:
+                        # swallow exceptions during cleanup
                         pass
             
             self.logger.info("Enhanced orchestrator cleanup completed")
@@ -769,7 +780,7 @@ class EnhancedVideoOrchestrator:
         except Exception as e:
             self.logger.error(f"Cleanup error: {e}")
     
-    def get_performance_metrics(self) -> PerformanceMetrics:
+    def get_performance_metrics(self) -> SystemPerformanceMetrics:
         """Get current performance metrics"""
         try:
             # Calculate actual metrics from tracking data
@@ -789,7 +800,7 @@ class EnhancedVideoOrchestrator:
                 'performance_optimization': 0
             }
             
-            metrics = PerformanceMetrics(
+            metrics = SystemPerformanceMetrics(
                 total_videos_processed=self.total_videos_processed,
                 average_processing_time=avg_processing_time,
                 success_rate=success_rate,
@@ -801,7 +812,7 @@ class EnhancedVideoOrchestrator:
             
         except Exception as e:
             self.logger.error(f"Failed to get performance metrics: {e}")
-            return PerformanceMetrics(
+            return SystemPerformanceMetrics(
                 total_videos_processed=self.total_videos_processed,
                 average_processing_time=0.0,
                 success_rate=0.0,

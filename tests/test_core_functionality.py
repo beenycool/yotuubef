@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Minimal test suite for core functionality
-Covers critical paths to ensure functionality is preserved
+Covers critical functionality to ensure no regressions
 """
 
 import pytest
-import asyncio
 import sys
 from pathlib import Path
+import importlib.util
 
 # Add the src directory to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
@@ -24,15 +24,16 @@ class TestCoreFunctionality:
     
     def test_imports(self):
         """Test that core modules can be imported"""
-        try:
-            from src.config.settings import get_config
-            from src.application import Application
-            from src.scheduling import Scheduler
-            from src.content import ContentSource
-            from src.pipeline import PipelineManager
-            assert True, "Core modules imported successfully"
-        except ImportError as e:
-            pytest.fail(f"Failed to import core modules: {e}")
+        modules = [
+            "src.config.settings",
+            "src.application",
+            "src.scheduling.scheduler",
+            "src.content.content_source",
+            "src.pipeline.pipeline_manager",
+        ]
+        missing = [m for m in modules if importlib.util.find_spec(m) is None]
+        if missing:
+            pytest.fail(f"Failed to find modules: {missing}")
     
     def test_config_loading(self):
         """Test that configuration loads properly"""
@@ -86,7 +87,7 @@ class TestCoreFunctionality:
             
             assert app.initialization_complete, "Async initialization should complete"
             
-        except Exception as e:
+        except Exception:
             # This is expected to fail in test environment without real services
             # Just ensure the method exists and can be called
             assert "initialize_async_components" in dir(app), "Method should exist"

@@ -379,6 +379,17 @@ class PerformanceMetrics(BaseModel):
     enhancement_performance: Dict[str, float] = Field(default_factory=dict, description="Per-enhancement performance scores")
 
 
+class SystemPerformanceMetrics(BaseModel):
+    """System-wide performance metrics for orchestrator statistics"""
+    total_videos_processed: int = Field(default=0, ge=0, description="Total videos processed by the system")
+    average_processing_time: float = Field(default=0.0, ge=0.0, description="Average processing time in seconds")
+    success_rate: float = Field(default=0.0, ge=0.0, le=100.0, description="Success rate percentage")
+    enhancement_usage: Dict[str, int] = Field(default_factory=dict, description="Count of each enhancement used")
+    timestamp: datetime = Field(default_factory=datetime.now, description="Metrics timestamp")
+    
+    model_config = ConfigDict(use_enum_values=True)
+
+
 # Enhanced VideoAnalysis with new AI-powered features
 class VideoAnalysisEnhanced(VideoAnalysis):
     """Enhanced video analysis with AI-powered cinematic and engagement features"""
