@@ -635,11 +635,10 @@ class EnhancedVideoOrchestrator:
             # Prepare metadata and optional thumbnail
             metadata = {
                 'title': analysis.get('suggested_title', 'Enhanced Video'),
-                'description': analysis.get('suggested_description', ''),
-                'tags': analysis.get('suggested_tags', []),
+                'description': analysis.get('summary_for_description', ''),
+                'tags': analysis.get('hashtags', []),
             }
             primary_thumbnail = thumbnails[0]['path'] if thumbnails else None
-
             # Upload video (thumbnail handled by client if provided)
             upload_result = await self.youtube_client.upload_video(
                 video_path,
