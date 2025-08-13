@@ -375,8 +375,10 @@ class EnhancedVideoOrchestrator:
             
             # Apply cinematic editing if enabled
             if enhanced_options.get('enable_cinematic_effects', True) and self.cinematic_editor:
+                # Check if Gen Z mode is enabled
+                gen_z_mode = self.config.ai_features.get('gen_z_mode', False)
                 cinematic_result = await self.cinematic_editor.apply_cinematic_effects(
-                    video_path, generation_result.get('analysis', {})
+                    video_path, generation_result.get('analysis', {}), gen_z_mode=gen_z_mode
                 )
                 generation_result['cinematic_enhancements'] = cinematic_result
             

@@ -304,13 +304,23 @@ class SpotifyClient:
     async def search_tracks(self, 
                           query: str, 
                           track_type: str = "track",
-                          limit: int = 20) -> List[SpotifyTrack]:
-        """Search for tracks by query"""
+                          limit: int = 20,
+                          gen_z_mode: bool = False) -> List[SpotifyTrack]:
+        """Search for tracks by query with Gen Z trending support"""
         try:
+            # Apply Gen Z mode if enabled
+            if gen_z_mode:
+                # Add trending and viral keywords to boost Gen Z appeal
+                trending_keywords = ["trending", "viral", "tiktok", "gen z", "popular"]
+                query_with_trends = f"{query} {' '.join(trending_keywords)}"
+                self.logger.info(f"🎵 Gen Z mode enabled - searching with trending keywords: {query_with_trends}")
+            else:
+                query_with_trends = query
+            
             search_data = await self._make_request(
                 "search",
                 {
-                    "q": query,
+                    "q": query_with_trends,
                     "type": track_type,
                     "market": "US",
                     "limit": limit
@@ -325,6 +335,11 @@ class SpotifyClient:
                 track = await self._parse_track_data(track_data)
                 if track:
                     tracks.append(track)
+            
+            # Filter for high popularity in Gen Z mode
+            if gen_z_mode:
+                tracks = [track for track in tracks if track.popularity > 70]
+                self.logger.info(f"🎯 Gen Z mode: Filtered to {len(tracks)} high-popularity tracks")
             
             return tracks
             

@@ -75,6 +75,113 @@ class CTAProcessor:
             self.logger.error(f"Error adding visual CTAs: {e}")
             return video_clip
     
+    def generate_gen_z_cta(self, analysis: Dict[str, Any], audience: str = "gen_z") -> str:
+        """
+        Generate Gen Z specific call-to-action text with emojis and interactive elements
+        
+        Args:
+            analysis: Video analysis data
+            audience: Target audience ("gen_z" or "general")
+            
+        Returns:
+            Generated CTA text
+        """
+        try:
+            if audience == "gen_z":
+                # Gen Z specific CTAs with emojis and trending language
+                gen_z_ctas = [
+                    "Bet you can't do better 😂 Comment below! 👇",
+                    "What's your take? Spill the tea ☕ #GenZ",
+                    "Duet this if you're brave enough 💪🔥",
+                    "Comment your zodiac sign ✨ Let's see who's here!",
+                    "Like if you relate, comment if you're different 💯",
+                    "Share with your bestie if this made you laugh 😭",
+                    "Drop a 🔥 in the comments if this slaps",
+                    "Tag someone who needs to see this 👀",
+                    "What do you think? Am I right or am I right? 🤔",
+                    "Comment your reaction emoji below 😱💀😂",
+                    "Like and follow for more chaos 🚀✨",
+                    "This is your sign to comment something funny 😂",
+                    "Share if you agree, comment if you don't 💁‍♀️",
+                    "Drop a 💯 if this is facts",
+                    "Comment your thoughts below 👇 I'm listening! 👂"
+                ]
+                
+                # Select random CTA
+                import random
+                selected_cta = random.choice(gen_z_ctas)
+                
+                # Add hashtags for Gen Z
+                hashtags = ["#GenZ", "#Viral", "#Trending", "#FYP", "#Shorts"]
+                selected_hashtags = random.sample(hashtags, 2)
+                
+                final_cta = f"{selected_cta} {' '.join(selected_hashtags)}"
+                
+            else:
+                # General audience CTAs
+                general_ctas = [
+                    "Like and subscribe for more content!",
+                    "Comment your thoughts below",
+                    "Share with friends who might enjoy this",
+                    "Follow for daily updates",
+                    "Leave a comment with your opinion"
+                ]
+                
+                import random
+                final_cta = random.choice(general_ctas)
+            
+            self.logger.info(f"✅ Generated {audience} CTA: {final_cta}")
+            return final_cta
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate Gen Z CTA: {e}")
+            return "Like and subscribe for more! 🔥"
+    
+    def add_gen_z_interactive_elements(self, video_clip, analysis: Dict[str, Any]) -> VideoFileClip:
+        """
+        Add Gen Z interactive elements like polls, questions, and challenges
+        
+        Args:
+            video_clip: Video clip to enhance
+            analysis: Video analysis data
+            
+        Returns:
+            Video with interactive elements
+        """
+        try:
+            # Check if Gen Z mode is enabled
+            config = get_config()
+            if not config.ai_features.get('gen_z_mode', False):
+                return video_clip
+            
+            interactive_overlays = []
+            
+            # Add poll question overlay
+            poll_overlay = self._create_poll_overlay(video_clip, analysis)
+            if poll_overlay:
+                interactive_overlays.append(poll_overlay)
+            
+            # Add challenge overlay
+            challenge_overlay = self._create_challenge_overlay(video_clip, analysis)
+            if challenge_overlay:
+                interactive_overlays.append(challenge_overlay)
+            
+            # Add question overlay
+            question_overlay = self._create_question_overlay(video_clip, analysis)
+            if question_overlay:
+                interactive_overlays.append(question_overlay)
+            
+            # Create final composite
+            if interactive_overlays:
+                final_clip = CompositeVideoClip([video_clip] + interactive_overlays)
+                return final_clip
+            else:
+                return video_clip
+                
+        except Exception as e:
+            self.logger.error(f"Error adding Gen Z interactive elements: {e}")
+            return video_clip
+    
     def _create_subscribe_reminder(self, 
                                  video_clip: VideoFileClip, 
                                  analysis: VideoAnalysis) -> Optional[VideoFileClip]:
@@ -446,4 +553,124 @@ class CTAProcessor:
             
         except Exception as e:
             self.logger.warning(f"Error creating subscribe button image: {e}")
+            return None
+    
+    def _create_poll_overlay(self, video_clip, analysis: Dict[str, Any]):
+        """Create interactive poll overlay"""
+        try:
+            # Position poll at 50% through video
+            start_time = video_clip.duration * 0.5
+            duration = 4.0
+            
+            # Generate poll question based on content
+            poll_questions = [
+                "What do you think? 🤔",
+                "Vote in the comments! 👇",
+                "Which one are you? 💭",
+                "Pick your side! ⚖️"
+            ]
+            
+            import random
+            poll_text = random.choice(poll_questions)
+            
+            # Create text clip for poll
+            poll_clip = TextClip(
+                poll_text,
+                fontsize=40,
+                color='white',
+                stroke_color='black',
+                stroke_width=2
+            )
+            
+            # Position and time the poll
+            poll_clip = MoviePyCompat.with_position(poll_clip, ('center', 'center'))
+            poll_clip = MoviePyCompat.with_start(
+                MoviePyCompat.with_duration(poll_clip, duration), 
+                start_time
+            )
+            
+            return poll_clip
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create poll overlay: {e}")
+            return None
+    
+    def _create_challenge_overlay(self, video_clip, analysis: Dict[str, Any]):
+        """Create challenge overlay for Gen Z engagement"""
+        try:
+            # Position challenge near the end
+            start_time = video_clip.duration * 0.8
+            duration = 5.0
+            
+            # Generate challenge text
+            challenges = [
+                "Challenge: Duet this! 💪",
+                "Challenge: Comment your story 👇",
+                "Challenge: Share with 3 friends 🚀",
+                "Challenge: Tag someone who needs this 👀"
+            ]
+            
+            import random
+            challenge_text = random.choice(challenges)
+            
+            # Create text clip for challenge
+            challenge_clip = TextClip(
+                challenge_text,
+                fontsize=45,
+                color='#FF6B6B',  # Modern red color
+                stroke_color='white',
+                stroke_width=3
+            )
+            
+            # Position and time the challenge
+            challenge_clip = MoviePyCompat.with_position(challenge_clip, ('center', 'bottom'))
+            challenge_clip = MoviePyCompat.with_start(
+                MoviePyCompat.with_duration(challenge_clip, duration), 
+                start_time
+            )
+            
+            return challenge_clip
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create challenge overlay: {e}")
+            return None
+    
+    def _create_question_overlay(self, video_clip, analysis: Dict[str, Any]):
+        """Create question overlay to encourage comments"""
+        try:
+            # Position question at 70% through video
+            start_time = video_clip.duration * 0.7
+            duration = 4.0
+            
+            # Generate question based on content
+            questions = [
+                "What would you do? 🤷‍♀️",
+                "Have you experienced this? 💭",
+                "What's your opinion? 👂",
+                "Can you relate? 🤔"
+            ]
+            
+            import random
+            question_text = random.choice(questions)
+            
+            # Create text clip for question
+            question_clip = TextClip(
+                question_text,
+                fontsize=40,
+                color='#4ECDC4',  # Modern teal color
+                stroke_color='white',
+                stroke_width=2
+            )
+            
+            # Position and time the question
+            question_clip = MoviePyCompat.with_position(question_clip, ('center', 'top'))
+            question_clip = MoviePyCompat.with_start(
+                MoviePyCompat.with_duration(question_clip, duration), 
+                start_time
+            )
+            
+            return question_clip
+            
+        except Exception as e:
+            self.logger.error(f"Failed to create question overlay: {e}")
             return None

@@ -4,6 +4,7 @@ ai_features:
   enable_cinematic_editing: true
   fallback_confidence_threshold: 0.6
   use_fallback_analysis: true
+  gen_z_mode: true  # Enable Gen Z optimizations
 
 api:
   gemini_api_key: your_gemini_api_key
@@ -22,12 +23,15 @@ spotify:
   enable_music_downloads: true
   download_quality: high
   max_tracks_per_search: 50
+  gen_z_trends: true  # Prioritize trending/viral tracks
   preferred_genres:
     - electronic
     - pop
     - rock
     - indie
     - instrumental
+    - viral
+    - tiktok
 
 audio:
   audio_enhancement:
@@ -76,6 +80,7 @@ cinematic_editing:
   symmetry_weight: 0.2
   transition_duration_range: [0.5, 1.5]
   visual_complexity_weight: 0.4
+  gen_z_pacing: true  # Enable faster pacing for Gen Z
 
 database:
   ab_test_retention_days: 30
@@ -187,3 +192,15 @@ youtube:
   thumbnail_quality: 95
   upload_retry_count: 3
   upload_timeout_minutes: 10
+  audience: gen_z  # Target Gen Z audience
+
+# New Gen Z specific configurations
+gen_z_features:
+  enable_meme_overlays: true
+  enable_trending_audio: true
+  enable_interactive_ctas: true
+  enable_vibrant_thumbnails: true
+  meme_overlay_probability: 0.3
+  trending_audio_boost: 1.5
+  cta_emoji_style: true
+  thumbnail_ab_test_variants: 5

@@ -736,3 +736,196 @@ class CinematicEditor:
         except Exception as e:
             self.logger.error(f"Fallback cinematic analysis failed: {e}")
             return analysis
+
+    async def apply_cinematic_effects(self, video_clip, analysis, gen_z_mode=False):
+        """
+        Apply cinematic effects to video with Gen Z mode support for faster pacing
+        
+        Args:
+            video_clip: Video clip to enhance
+            analysis: Video analysis data
+            gen_z_mode: Enable Gen Z optimizations (faster pacing, shorter scenes)
+            
+        Returns:
+            Enhanced video clip with cinematic effects
+        """
+        try:
+            config = get_config()
+            cinematic_config = config.cinematic_editing
+            
+            # Apply Gen Z mode settings if enabled
+            if gen_z_mode or config.ai_features.get('gen_z_mode', False):
+                self.logger.info("🎬 Applying Gen Z cinematic mode - faster pacing, shorter scenes")
+                
+                # Override config for Gen Z mode
+                min_scene_duration = 1.0  # Shorter scenes for fast pacing
+                movement_intensity_range = [0.5, 2.0]  # More intense movements
+                transition_duration_range = [0.3, 0.8]  # Quicker transitions
+                
+                # Apply more aggressive speed ramping
+                if hasattr(analysis, 'energy_level') and analysis.energy_level > 0.7:
+                    video_clip = self._apply_speed_ramping(video_clip, factor=1.5)
+                    self.logger.info("⚡ Applied aggressive speed ramping for high energy content")
+                
+                # Detect and trim "boring" segments for Gen Z
+                if hasattr(analysis, 'boring_segments'):
+                    video_clip = self._trim_boring_segments(video_clip, analysis.boring_segments)
+                
+                # Apply quick cuts for dynamic moments
+                if hasattr(analysis, 'key_moments') and len(analysis.key_moments) > 0:
+                    video_clip = self._apply_quick_cuts(video_clip, analysis.key_moments)
+                
+            else:
+                # Use standard cinematic settings
+                min_scene_duration = cinematic_config.min_scene_duration
+                movement_intensity_range = cinematic_config.movement_intensity_range
+                transition_duration_range = cinematic_config.transition_duration_range
+            
+            # Apply standard cinematic effects
+            video_clip = self._apply_dynamic_movements(video_clip, analysis, movement_intensity_range)
+            video_clip = self._apply_cinematic_transitions(video_clip, transition_duration_range)
+            
+            self.logger.info("✅ Cinematic effects applied successfully")
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Failed to apply cinematic effects: {e}")
+            return video_clip
+
+    def _apply_speed_ramping(self, video_clip, factor=1.2):
+        """Apply speed ramping effect to video clip"""
+        try:
+            if MOVIEPY_AVAILABLE:
+                # Apply speed effect using moviepy
+                return video_clip.speedx(factor)
+            else:
+                self.logger.warning("MoviePy not available, skipping speed ramping")
+                return video_clip
+        except Exception as e:
+            self.logger.error(f"Speed ramping failed: {e}")
+            return video_clip
+
+    def _trim_boring_segments(self, video_clip, boring_segments):
+        """Trim boring segments to maintain engagement for Gen Z"""
+        try:
+            if not boring_segments or not MOVIEPY_AVAILABLE:
+                return video_clip
+            
+            # Create subclips excluding boring segments
+            subclips = []
+            current_time = 0
+            
+            for segment in boring_segments:
+                start_time = segment.get('start_time', 0)
+                end_time = segment.get('end_time', 0)
+                
+                if start_time > current_time:
+                    # Add the good segment before the boring one
+                    subclips.append(video_clip.subclip(current_time, start_time))
+                
+                current_time = end_time
+            
+            # Add the final good segment
+            if current_time < video_clip.duration:
+                subclips.append(video_clip.subclip(current_time, video_clip.duration))
+            
+            # Concatenate all good segments
+            if subclips:
+                return vfx.concatenate_videoclips(subclips)
+            
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Boring segment trimming failed: {e}")
+            return video_clip
+
+    def _apply_quick_cuts(self, video_clip, key_moments):
+        """Apply quick cuts at key moments for dynamic pacing"""
+        try:
+            if not key_moments or not MOVIEPY_AVAILABLE:
+                return video_clip
+            
+            # Create quick cuts around key moments
+            subclips = []
+            current_time = 0
+            
+            for moment in key_moments:
+                timestamp = moment.get('timestamp', 0)
+                duration = moment.get('duration', 1.0)
+                
+                # Add segment before key moment
+                if timestamp > current_time:
+                    subclips.append(video_clip.subclip(current_time, timestamp))
+                
+                # Add key moment with potential speed boost
+                key_clip = video_clip.subclip(timestamp, min(timestamp + duration, video_clip.duration))
+                if moment.get('intensity', 0) > 0.7:
+                    key_clip = self._apply_speed_ramping(key_clip, factor=1.3)
+                
+                subclips.append(key_clip)
+                current_time = timestamp + duration
+            
+            # Add final segment
+            if current_time < video_clip.duration:
+                subclips.append(video_clip.subclip(current_time, video_clip.duration))
+            
+            # Concatenate with quick transitions
+            if subclips:
+                return vfx.concatenate_videoclips(subclips)
+            
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Quick cuts application failed: {e}")
+            return video_clip
+
+    def _apply_dynamic_movements(self, video_clip, analysis, intensity_range):
+        """Apply dynamic camera movements to video"""
+        try:
+            if not hasattr(analysis, 'camera_movements') or not MOVIEPY_AVAILABLE:
+                return video_clip
+            
+            # Apply camera movements based on analysis
+            for movement in analysis.camera_movements:
+                start_time = movement.start_time
+                end_time = movement.end_time
+                movement_type = movement.movement_type
+                intensity = movement.intensity
+                
+                # Scale intensity to the configured range
+                scaled_intensity = intensity_range[0] + (intensity_range[1] - intensity_range[0]) * intensity
+                
+                # Apply movement effect
+                if movement_type == "zoom_in":
+                    zoom_factor = 1.0 + (scaled_intensity * 0.5)
+                    subclip = video_clip.subclip(start_time, end_time)
+                    zoomed = subclip.resize(zoom_factor)
+                    video_clip = video_clip.set_subclip(start_time, end_time, zoomed)
+                
+                elif movement_type == "pan_right":
+                    # Simulate pan effect by cropping and moving
+                    pass  # Implementation would depend on specific requirements
+                
+                elif movement_type == "tilt_up":
+                    # Simulate tilt effect
+                    pass  # Implementation would depend on specific requirements
+            
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Dynamic movements application failed: {e}")
+            return video_clip
+
+    def _apply_cinematic_transitions(self, video_clip, duration_range):
+        """Apply cinematic transitions between scenes"""
+        try:
+            if not hasattr(video_clip, 'duration') or not MOVIEPY_AVAILABLE:
+                return video_clip
+            
+            # For now, return the original clip
+            # Full transition implementation would require scene detection
+            return video_clip
+            
+        except Exception as e:
+            self.logger.error(f"Cinematic transitions application failed: {e}")
+            return video_clip

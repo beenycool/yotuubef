@@ -99,12 +99,38 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
             'explosive_caps': {'font_weight': 'bold', 'size_factor': 1.3, 'spacing': 1.2}
         }
         
-        self.emotional_tones = {
-            'exciting': {'saturation': 1.3, 'contrast': 1.2, 'brightness': 1.1},
-            'dramatic': {'saturation': 0.9, 'contrast': 1.4, 'brightness': 0.9},
-            'mysterious': {'saturation': 0.7, 'contrast': 1.3, 'brightness': 0.8},
-            'energetic': {'saturation': 1.4, 'contrast': 1.1, 'brightness': 1.2},
-            'professional': {'saturation': 1.0, 'contrast': 1.1, 'brightness': 1.0}
+        # Gen Z specific thumbnail styles
+        self.gen_z_styles = {
+            'vibrant_pop': {
+                'colors': ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7'],
+                'text_effects': ['glow', 'shadow', 'outline'],
+                'emoji_style': 'trending',
+                'brightness_boost': 1.3,
+                'saturation_boost': 1.4
+            },
+            'meme_worthy': {
+                'colors': ['#FF0000', '#00FF00', '#0000FF', '#FFFF00', '#FF00FF'],
+                'text_effects': ['impact', 'bold', 'outline'],
+                'emoji_style': 'classic',
+                'brightness_boost': 1.2,
+                'saturation_boost': 1.5
+            },
+            'trending_viral': {
+                'colors': ['#FF1493', '#00CED1', '#FFD700', '#FF4500', '#8A2BE2'],
+                'text_effects': ['neon', 'glow', 'shadow'],
+                'emoji_style': 'modern',
+                'brightness_boost': 1.4,
+                'saturation_boost': 1.6
+            }
+        }
+        
+        # Gen Z emoji combinations for different moods
+        self.gen_z_emojis = {
+            'excited': ['🔥', '💥', '🚀', '✨', '💯', '😱'],
+            'funny': ['😂', '💀', '😭', '🤣', '😅', '🤪'],
+            'surprised': ['😱', '😨', '😰', '😵', '🤯', '👀'],
+            'cool': ['😎', '🤙', '💪', '👊', '🔥', '✨'],
+            'suspicious': ['👀', '🤔', '🧐', '🤨', '😏', '💭']
         }
     
     def generate_ab_test_thumbnails(self, 
@@ -169,6 +195,82 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
         except Exception as e:
             self.logger.error(f"A/B test thumbnail generation failed: {e}")
             return []
+    
+    def generate_gen_z_thumbnails(self, 
+                                 video_path: Path,
+                                 analysis: VideoAnalysisEnhanced,
+                                 num_variants: int = 5) -> List[ThumbnailVariant]:
+        """
+        Generate Gen Z optimized thumbnails with vibrant colors, emojis, and trending aesthetics
+        
+        Args:
+            video_path: Path to video file
+            analysis: Video analysis data
+            num_variants: Number of thumbnail variants to generate
+            
+        Returns:
+            List of Gen Z optimized thumbnail variants
+        """
+        try:
+            # Check if Gen Z mode is enabled
+            config = get_config()
+            if not config.ai_features.get('gen_z_mode', False):
+                self.logger.info("Gen Z mode not enabled, using standard thumbnail generation")
+                return self._generate_thumbnail_variants(video_path, analysis, num_variants)
+            
+            self.logger.info(f"🎨 Generating {num_variants} Gen Z optimized thumbnails")
+            
+            # Extract key frames for thumbnails
+            key_frames = self._extract_key_frames(video_path, analysis, num_variants)
+            
+            if not key_frames:
+                self.logger.warning("No key frames extracted, using fallback")
+                return self._generate_thumbnail_variants(video_path, analysis, num_variants)
+            
+            # Generate Gen Z variants
+            gen_z_variants = []
+            
+            for i, frame in enumerate(key_frames):
+                try:
+                    # Select Gen Z style
+                    style_name = list(self.gen_z_styles.keys())[i % len(self.gen_z_styles)]
+                    style = self.gen_z_styles[style_name]
+                    
+                    # Apply Gen Z enhancements
+                    enhanced_frame = self._apply_gen_z_enhancements(frame, style, analysis)
+                    
+                    # Add emoji overlay
+                    enhanced_frame = self._add_gen_z_emoji_overlay(enhanced_frame, analysis)
+                    
+                    # Add trending text overlay
+                    enhanced_frame = self._add_trending_text_overlay(enhanced_frame, analysis, style)
+                    
+                    # Save thumbnail
+                    thumbnail_path = self._save_gen_z_thumbnail(enhanced_frame, i, style_name)
+                    
+                    # Create thumbnail variant
+                    variant = ThumbnailVariant(
+                        path=str(thumbnail_path),
+                        style=style_name,
+                        target_audience="gen_z",
+                        generation_timestamp=datetime.now(),
+                        performance_metrics=PerformanceMetrics(),
+                        ab_test_group=f"gen_z_{style_name}_{i}"
+                    )
+                    
+                    gen_z_variants.append(variant)
+                    self.logger.info(f"✅ Generated Gen Z thumbnail {i+1}/{num_variants}: {style_name}")
+                    
+                except Exception as e:
+                    self.logger.error(f"Failed to generate Gen Z thumbnail {i+1}: {e}")
+                    continue
+            
+            self.logger.info(f"🎯 Successfully generated {len(gen_z_variants)} Gen Z thumbnails")
+            return gen_z_variants
+            
+        except Exception as e:
+            self.logger.error(f"Gen Z thumbnail generation failed: {e}")
+            return self._generate_thumbnail_variants(video_path, analysis, num_variants)
     
     def _get_historical_performance(self) -> Dict[str, Any]:
         """Get historical thumbnail performance data for optimization"""
@@ -646,3 +748,211 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
         except Exception as e:
             self.logger.error(f"Failed to identify best variant: {e}")
             return variants[0] if variants else None
+    
+    def _apply_gen_z_enhancements(self, frame: np.ndarray, style: Dict[str, Any], analysis: VideoAnalysisEnhanced) -> np.ndarray:
+        """Apply Gen Z specific enhancements to thumbnail frame"""
+        try:
+            if not PIL_AVAILABLE:
+                return frame
+            
+            # Convert to PIL Image
+            img = Image.fromarray(frame)
+            
+            # Apply brightness and saturation boosts
+            if 'brightness_boost' in style:
+                enhancer = ImageEnhance.Brightness(img)
+                img = enhancer.enhance(style['brightness_boost'])
+            
+            if 'saturation_boost' in style:
+                enhancer = ImageEnhance.Color(img)
+                img = enhancer.enhance(style['saturation_boost'])
+            
+            # Apply vibrant filter
+            img = self._apply_vibrant_filter(img, style)
+            
+            # Convert back to numpy array
+            return np.array(img)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to apply Gen Z enhancements: {e}")
+            return frame
+    
+    def _apply_vibrant_filter(self, img: Image.Image, style: Dict[str, Any]) -> Image.Image:
+        """Apply vibrant filter for Gen Z aesthetics"""
+        try:
+            # Increase contrast
+            enhancer = ImageEnhance.Contrast(img)
+            img = enhancer.enhance(1.3)
+            
+            # Apply sharpening
+            img = img.filter(ImageFilter.SHARPEN)
+            
+            # Add slight glow effect
+            if 'glow' in style.get('text_effects', []):
+                # Create a slightly blurred version for glow
+                glow = img.filter(ImageFilter.GaussianBlur(radius=2))
+                # Composite with original for subtle glow
+                img = Image.blend(img, glow, 0.3)
+            
+            return img
+            
+        except Exception as e:
+            self.logger.error(f"Failed to apply vibrant filter: {e}")
+            return img
+    
+    def _add_gen_z_emoji_overlay(self, frame: np.ndarray, analysis: VideoAnalysisEnhanced) -> np.ndarray:
+        """Add Gen Z emoji overlay to thumbnail"""
+        try:
+            if not PIL_AVAILABLE:
+                return frame
+            
+            # Determine mood based on analysis
+            mood = self._determine_content_mood(analysis)
+            emojis = self.gen_z_emojis.get(mood, self.gen_z_emojis['excited'])
+            
+            # Select random emojis
+            import random
+            num_emojis = random.randint(2, 4)
+            selected_emojis = random.sample(emojis, min(num_emojis, len(emojis)))
+            
+            # Convert to PIL Image
+            img = Image.fromarray(frame)
+            draw = ImageDraw.Draw(img)
+            
+            # Add emojis at strategic positions
+            positions = self._get_emoji_positions(img.size, len(selected_emojis))
+            
+            for i, emoji in enumerate(selected_emojis):
+                if i < len(positions):
+                    pos = positions[i]
+                    # For now, use text representation of emojis
+                    # In full implementation, you'd load actual emoji images
+                    emoji_font = ImageFont.load_default()
+                    draw.text(pos, emoji, fill="white", font=emoji_font)
+            
+            return np.array(img)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to add Gen Z emoji overlay: {e}")
+            return frame
+    
+    def _add_trending_text_overlay(self, frame: np.ndarray, analysis: VideoAnalysisEnhanced, style: Dict[str, Any]) -> np.ndarray:
+        """Add trending text overlay for Gen Z appeal"""
+        try:
+            if not PIL_AVAILABLE:
+                return frame
+            
+            # Generate trending text based on content
+            trending_texts = [
+                "TRENDING 🔥", "VIRAL 💥", "MUST WATCH 👀", "INSANE 😱",
+                "NO CAP 💯", "ABSOLUTELY WILD 🚀", "POV ✨", "LITERALLY SHAKING 😭"
+            ]
+            
+            import random
+            trending_text = random.choice(trending_texts)
+            
+            # Convert to PIL Image
+            img = Image.fromarray(frame)
+            draw = ImageDraw.Draw(img)
+            
+            # Select color from style
+            text_color = random.choice(style['colors'])
+            
+            # Add text overlay
+            font_size = min(img.size) // 15
+            try:
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except:
+                font = ImageFont.load_default()
+            
+            # Position text at top
+            text_pos = (img.size[0] // 2, 20)
+            
+            # Add text with effects
+            if 'outline' in style.get('text_effects', []):
+                # Draw outline
+                for dx in range(-2, 3):
+                    for dy in range(-2, 3):
+                        if dx != 0 or dy != 0:
+                            draw.text((text_pos[0] + dx, text_pos[1] + dy), 
+                                    trending_text, fill="black", font=font)
+            
+            # Draw main text
+            draw.text(text_pos, trending_text, fill=text_color, font=font)
+            
+            return np.array(img)
+            
+        except Exception as e:
+            self.logger.error(f"Failed to add trending text overlay: {e}")
+            return frame
+    
+    def _determine_content_mood(self, analysis: VideoAnalysisEnhanced) -> str:
+        """Determine content mood for emoji selection"""
+        try:
+            # Analyze content characteristics
+            if analysis.mood == 'exciting':
+                return 'excited'
+            elif analysis.mood == 'funny':
+                return 'funny'
+            elif analysis.mood == 'dramatic':
+                return 'surprised'
+            elif analysis.mood == 'cool':
+                return 'cool'
+            else:
+                return 'excited'  # Default to excited for Gen Z
+                
+        except Exception as e:
+            self.logger.error(f"Failed to determine content mood: {e}")
+            return 'excited'
+    
+    def _get_emoji_positions(self, img_size: Tuple[int, int], num_emojis: int) -> List[Tuple[int, int]]:
+        """Get strategic emoji positions for thumbnail"""
+        width, height = img_size
+        positions = []
+        
+        # Distribute emojis across the image
+        for i in range(num_emojis):
+            if i == 0:
+                # Top left
+                pos = (30, 80)
+            elif i == 1:
+                # Top right
+                pos = (width - 80, 80)
+            elif i == 2:
+                # Bottom left
+                pos = (30, height - 80)
+            else:
+                # Bottom right
+                pos = (width - 80, height - 80)
+            
+            positions.append(pos)
+        
+        return positions
+    
+    def _save_gen_z_thumbnail(self, frame: np.ndarray, index: int, style_name: str) -> Path:
+        """Save Gen Z thumbnail to file"""
+        try:
+            # Create output directory
+            output_dir = Path(self.config.paths.thumbnails_dir) / "gen_z"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Generate filename
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"gen_z_thumbnail_{style_name}_{index}_{timestamp}.jpg"
+            output_path = output_dir / filename
+            
+            # Save image
+            if PIL_AVAILABLE:
+                img = Image.fromarray(frame)
+                img.save(output_path, "JPEG", quality=95)
+            else:
+                # Fallback to OpenCV
+                cv2.imwrite(str(output_path), frame)
+            
+            self.logger.info(f"💾 Saved Gen Z thumbnail: {output_path}")
+            return output_path
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save Gen Z thumbnail: {e}")
+            # Return fallback path
+            return Path(self.config.paths.thumbnails_dir) / f"fallback_gen_z_{index}.jpg"

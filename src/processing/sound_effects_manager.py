@@ -89,6 +89,40 @@ class SoundEffectsManager:
         
         # Initialize by scanning directory
         self.refresh_sound_effects_cache()
+        
+        # Gen Z specific sound effects library
+        self.gen_z_effects = {
+            "vine_boom": {
+                "keywords": ["vine boom", "boom", "impact", "dramatic"],
+                "fallbacks": ["boom", "impact", "dramatic"],
+                "description": "Classic Vine boom sound effect"
+            },
+            "ohio_sound": {
+                "keywords": ["ohio", "weird", "unusual", "funny"],
+                "fallbacks": ["funny", "weird", "mechanical"],
+                "description": "Ohio meme sound effect"
+            },
+            "sad_violin": {
+                "keywords": ["sad violin", "emotional", "dramatic", "sad"],
+                "fallbacks": ["dramatic", "emotional"],
+                "description": "Sad violin for emotional moments"
+            },
+            "epic_sax": {
+                "keywords": ["epic sax", "saxophone", "epic", "dramatic"],
+                "fallbacks": ["dramatic", "epic"],
+                "description": "Epic saxophone for dramatic moments"
+            },
+            "cricket_chirp": {
+                "keywords": ["cricket", "awkward", "silence", "funny"],
+                "fallbacks": ["funny", "awkward"],
+                "description": "Cricket chirping for awkward moments"
+            },
+            "record_scratch": {
+                "keywords": ["record scratch", "vinyl", "stop", "interrupt"],
+                "fallbacks": ["mechanical", "transition"],
+                "description": "Record scratch for interruptions"
+            }
+        }
     
     def refresh_sound_effects_cache(self) -> None:
         """Scan sound effects directory and build cache"""
@@ -372,3 +406,119 @@ class SoundEffectsManager:
             'sound_effects_dir': str(self.sound_effects_dir),
             'cache_populated': total_effects > 0
         }
+    
+    def apply_gen_z_sound_effects(self, analysis: Dict[str, Any], gen_z_mode: bool = False) -> List[Dict[str, Any]]:
+        """
+        Apply Gen Z sound effects based on content analysis
+        
+        Args:
+            analysis: Video analysis data
+            gen_z_mode: Whether Gen Z mode is enabled
+            
+        Returns:
+            List of sound effect configurations to apply
+        """
+        if not gen_z_mode:
+            return []
+        
+        try:
+            sound_effects = []
+            
+            # Check if Gen Z mode is enabled in config
+            config = get_config()
+            if not config.ai_features.get('gen_z_mode', False):
+                return []
+            
+            # Add Gen Z effects based on content analysis
+            if analysis.get('humor_level', 0) > 0.6:
+                # High humor content - add funny effects
+                if analysis.get('key_moments'):
+                    key_moment = analysis['key_moments'][0]
+                    sound_effects.append({
+                        'effect_name': 'vine_boom',
+                        'timestamp_seconds': key_moment.get('timestamp', 0),
+                        'volume': 0.8,
+                        'category': 'gen_z',
+                        'description': 'Vine boom for high humor moment'
+                    })
+            
+            # Add effects for dramatic moments
+            if analysis.get('dramatic_moments'):
+                for moment in analysis['dramatic_moments'][:2]:  # Max 2 dramatic effects
+                    if moment.get('intensity', 0) > 0.7:
+                        sound_effects.append({
+                            'effect_name': 'epic_sax',
+                            'timestamp_seconds': moment.get('timestamp', 0),
+                            'volume': 0.7,
+                            'category': 'gen_z',
+                            'description': 'Epic sax for dramatic moment'
+                        })
+            
+            # Add effects for awkward/silent moments
+            if analysis.get('awkward_moments'):
+                for moment in analysis['awkward_moments'][:1]:  # Max 1 awkward effect
+                    sound_effects.append({
+                        'effect_name': 'cricket_chirp',
+                        'timestamp_seconds': moment.get('timestamp', 0),
+                        'volume': 0.6,
+                        'category': 'gen_z',
+                        'description': 'Cricket chirp for awkward moment'
+                    })
+            
+            # Add effects for emotional moments
+            if analysis.get('emotional_moments'):
+                for moment in analysis['emotional_moments'][:1]:  # Max 1 emotional effect
+                    if moment.get('emotion') == 'sad':
+                        sound_effects.append({
+                            'effect_name': 'sad_violin',
+                            'timestamp_seconds': moment.get('timestamp', 0),
+                            'volume': 0.5,
+                            'category': 'gen_z',
+                            'description': 'Sad violin for emotional moment'
+                        })
+            
+            self.logger.info(f"🎵 Generated {len(sound_effects)} Gen Z sound effects")
+            return sound_effects
+            
+        except Exception as e:
+            self.logger.error(f"Failed to generate Gen Z sound effects: {e}")
+            return []
+    
+    def find_gen_z_sound_effect(self, effect_name: str) -> Optional[Path]:
+        """
+        Find Gen Z specific sound effect
+        
+        Args:
+            effect_name: Name of the Gen Z effect
+            
+        Returns:
+            Path to sound effect file or None if not found
+        """
+        try:
+            if effect_name not in self.gen_z_effects:
+                return None
+            
+            effect_info = self.gen_z_effects[effect_name]
+            
+            # First try to find exact match
+            exact_match = self.find_sound_effect(effect_name)
+            if exact_match:
+                return exact_match
+            
+            # Try fallback categories
+            for fallback in effect_info['fallbacks']:
+                fallback_match = self.find_sound_effect(effect_name, preferred_category=fallback)
+                if fallback_match:
+                    return fallback_match
+            
+            # Try keyword search
+            for keyword in effect_info['keywords']:
+                keyword_match = self.find_sound_effect(keyword)
+                if keyword_match:
+                    return keyword_match
+            
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"Failed to find Gen Z sound effect '{effect_name}': {e}")
+            return None

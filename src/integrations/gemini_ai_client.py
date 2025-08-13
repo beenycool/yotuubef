@@ -690,3 +690,105 @@ class GeminiAIClient:
         except Exception as e:
             self.logger.error(f"Minimal analysis creation failed: {e}")
             raise
+
+    async def generate_gen_z_narrative_script(self, content: str, audience: str = "general") -> str:
+        """
+        Generate engaging narrative script with Gen Z language and style
+        
+        Args:
+            content: Reddit content to convert to narrative
+            audience: Target audience ("gen_z" or "general")
+            
+        Returns:
+            Generated narrative script with Gen Z elements
+        """
+        try:
+            if not self.gemini_available:
+                self.logger.warning("Gemini not available, returning fallback Gen Z script")
+                return self._generate_fallback_gen_z_script(content)
+            
+            await self.rate_limiter.wait_if_needed()
+            
+            # Create Gen Z specific prompt
+            if audience == "gen_z":
+                prompt = f"""
+                Generate a SUPER engaging narrative script from this Reddit content for Gen Z viewers:
+                
+                CONTENT: {content}
+                
+                REQUIREMENTS:
+                - Use Gen Z slang like 'lit', 'sus', 'no cap', 'fr fr', 'bussin', 'slaps'
+                - Add relevant emojis throughout (🔥😂💀👀✨)
+                - Make it meme-worthy and viral
+                - Keep it short and punchy (under 60 seconds when spoken)
+                - Use dramatic pauses and emphasis
+                - Include callbacks and relatable moments
+                - Make it feel like a TikTok/YouTube Shorts script
+                
+                FORMAT: Return only the narrative script, no explanations
+                """
+            else:
+                prompt = f"""
+                Generate an engaging narrative script from this Reddit content:
+                
+                CONTENT: {content}
+                
+                REQUIREMENTS:
+                - Engaging and informative
+                - Natural storytelling flow
+                - Appropriate for general audience
+                - Under 60 seconds when spoken
+                
+                FORMAT: Return only the narrative script, no explanations
+                """
+            
+            # Generate content using Gemini
+            response = await self._generate_content_async(prompt)
+            
+            if response and response.text:
+                script = response.text.strip()
+                self.logger.info(f"✅ Generated {audience} narrative script ({len(script)} chars)")
+                return script
+            else:
+                self.logger.warning("Empty response from Gemini, using fallback")
+                return self._generate_fallback_gen_z_script(content)
+                
+        except Exception as e:
+            self.logger.error(f"Gen Z narrative generation failed: {e}")
+            return self._generate_fallback_gen_z_script(content)
+
+    def _generate_fallback_gen_z_script(self, content: str) -> str:
+        """Generate fallback Gen Z script when AI is unavailable"""
+        try:
+            # Extract key elements from content
+            title = content[:100] if len(content) > 100 else content
+            
+            # Gen Z fallback templates
+            templates = [
+                f"Yo, this is absolutely WILD 😱 {title}... No cap, you're not gonna believe what happened next 👀",
+                f"Okay besties, buckle up because this story is about to BLOW YOUR MIND 💥 {title}... I'm literally shaking rn 😭",
+                f"POV: You're about to witness the most SUS thing ever 💀 {title}... This is peak content fr fr 🔥",
+                f"Plot twist: {title}... I can't even make this up 😂 This is the definition of 'bussin' ✨",
+                f"Listen, {title}... This is the kind of content that makes you question everything 👁️ No cap, it's that good 🚀"
+            ]
+            
+            import random
+            return random.choice(templates)
+            
+        except Exception as e:
+            self.logger.error(f"Fallback Gen Z script generation failed: {e}")
+            return f"This content is absolutely insane! {content[:50]}... You won't believe what happens next! 🔥"
+
+    async def _generate_content_async(self, prompt: str):
+        """Generate content asynchronously using Gemini"""
+        try:
+            # Run in thread to avoid blocking
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None, 
+                lambda: self.model.generate_content(prompt)
+            )
+            return response
+        except Exception as e:
+            self.logger.error(f"Async content generation failed: {e}")
+            return None

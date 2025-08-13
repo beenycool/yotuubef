@@ -99,13 +99,22 @@ class PipelineManager:
             self.stats['successful_completions'] += 1
             self.stats['total_processed'] += 1
             
-            self.logger.info(f"Pipeline processing completed successfully in {processing_time:.2f}s")
+            # Update stage performance statistics
+            for stage, result in processing_context['stage_results'].items():
+                stage_time = result.get('processing_time', 0)
+                self._update_stage_performance(stage, stage_time)
+            
+            self.logger.info(f"Pipeline completed successfully in {processing_time:.2f}s")
+            
+            # Check if Gen Z mode is enabled and apply optimizations
+            if self._is_gen_z_mode_enabled():
+                await self._apply_gen_z_optimizations(processing_context)
             
             return {
                 'success': True,
                 'processing_time': processing_time,
-                'stage_results': processing_context['stage_results'],
-                'final_result': processing_context['stage_results'].get('video_upload', {})
+                'processing_context': processing_context,
+                'gen_z_mode': self._is_gen_z_mode_enabled()
             }
             
         except Exception as e:
@@ -114,8 +123,124 @@ class PipelineManager:
             return {
                 'success': False,
                 'error': str(e),
-                'failed_at_stage': 'initialization'
+                'processing_context': processing_context
             }
+    
+    def _is_gen_z_mode_enabled(self) -> bool:
+        """Check if Gen Z mode is enabled in configuration"""
+        try:
+            from src.config.settings import get_config
+            config = get_config()
+            return config.ai_features.get('gen_z_mode', False)
+        except Exception as e:
+            self.logger.error(f"Failed to check Gen Z mode: {e}")
+            return False
+    
+    async def _apply_gen_z_optimizations(self, processing_context: Dict[str, Any]) -> None:
+        """Apply Gen Z specific optimizations throughout the pipeline"""
+        try:
+            if not self._is_gen_z_mode_enabled():
+                return
+            
+            self.logger.info("🎯 Applying Gen Z optimizations to pipeline")
+            
+            # Apply Gen Z optimizations to each stage
+            for stage, result in processing_context['stage_results'].items():
+                if stage == 'content_analysis':
+                    await self._optimize_content_analysis_for_gen_z(result)
+                elif stage == 'video_generation':
+                    await self._optimize_video_generation_for_gen_z(result)
+                elif stage == 'video_processing':
+                    await self._optimize_video_processing_for_gen_z(result)
+                elif stage == 'video_upload':
+                    await self._optimize_video_upload_for_gen_z(result)
+            
+            self.logger.info("✅ Gen Z optimizations applied successfully")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to apply Gen Z optimizations: {e}")
+    
+    async def _optimize_content_analysis_for_gen_z(self, stage_result: Dict[str, Any]) -> None:
+        """Optimize content analysis for Gen Z audience"""
+        try:
+            # Add Gen Z specific analysis parameters
+            if 'analysis' in stage_result:
+                analysis = stage_result['analysis']
+                
+                # Add Gen Z audience targeting
+                analysis['target_audience'] = 'gen_z'
+                analysis['gen_z_optimizations'] = {
+                    'faster_pacing': True,
+                    'trending_music': True,
+                    'meme_overlays': True,
+                                    'interactive_ctas': True,
+                'vibrant_thumbnails': True
+                }
+                
+                self.logger.info("🎯 Content analysis optimized for Gen Z audience")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to optimize content analysis for Gen Z: {e}")
+    
+    async def _optimize_video_generation_for_gen_z(self, stage_result: Dict[str, Any]) -> None:
+        """Optimize video generation for Gen Z audience"""
+        try:
+            # Add Gen Z specific generation parameters
+            if 'generation_config' in stage_result:
+                config = stage_result['generation_config']
+                
+                # Enable Gen Z features
+                config['gen_z_mode'] = True
+                config['faster_pacing'] = True
+                config['trending_audio'] = True
+                config['meme_overlays'] = True
+                
+                self.logger.info("🎬 Video generation optimized for Gen Z audience")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to optimize video generation for Gen Z: {e}")
+    
+    async def _optimize_video_processing_for_gen_z(self, stage_result: Dict[str, Any]) -> None:
+        """Optimize video processing for Gen Z audience"""
+        try:
+            # Add Gen Z specific processing parameters
+            if 'processing_config' in stage_result:
+                config = stage_result['processing_config']
+                
+                # Enable Gen Z processing features
+                config['gen_z_mode'] = True
+                config['cinematic_editing'] = {
+                    'min_scene_duration': 1.0,
+                    'movement_intensity_range': [0.5, 2.0],
+                    'transition_duration_range': [0.3, 0.8]
+                }
+                config['sound_effects'] = {
+                    'gen_z_effects': True,
+                    'trending_audio': True
+                }
+                
+                self.logger.info("⚡ Video processing optimized for Gen Z audience")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to optimize video processing for Gen Z: {e}")
+    
+    async def _optimize_video_upload_for_gen_z(self, stage_result: Dict[str, Any]) -> None:
+        """Optimize video upload for Gen Z audience"""
+        try:
+            # Add Gen Z specific upload parameters
+            if 'upload_config' in stage_result:
+                config = stage_result['upload_config']
+                
+                # Enable Gen Z upload features
+                config['gen_z_mode'] = True
+                config['audience'] = 'gen_z'
+                config['hashtags'] = ['#GenZ', '#Viral', '#Trending', '#FYP', '#Shorts']
+                config['interactive_elements'] = True
+                
+                self.logger.info("📤 Video upload optimized for Gen Z audience")
+                
+        except Exception as e:
+            self.logger.error(f"Failed to optimize video upload for Gen Z: {e}")
             
     async def _process_pipeline_stage(self, stage: str, processing_context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -179,8 +304,14 @@ class PipelineManager:
         if stage == 'video_generation' and 'content_analysis' in processing_context['stage_results']:
             base_input['analysis'] = processing_context['stage_results']['content_analysis'].get('analysis')
             
+        elif stage == 'video_generation' and 'video_generation' in processing_context['stage_results']:
+            base_input['video_data'] = processing_context['stage_results']['video_generation'].get('video_data')
+            
         elif stage == 'video_processing' and 'video_generation' in processing_context['stage_results']:
             base_input['video_data'] = processing_context['stage_results']['video_generation'].get('video_data')
+            
+        elif stage == 'video_processing' and 'video_processing' in processing_context['stage_results']:
+            base_input['processed_video'] = processing_context['stage_results']['video_processing'].get('processed_video')
             
         elif stage == 'video_upload' and 'video_processing' in processing_context['stage_results']:
             base_input['processed_video'] = processing_context['stage_results']['video_processing'].get('processed_video')
