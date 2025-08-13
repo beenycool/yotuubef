@@ -223,11 +223,12 @@ class InstagramClient:
         """Upload using a specific API client."""
         try:
             if client_name == 'instagrapi':
-                # Instagrapi library
+                # Instagrapi library (synchronous) -> run in thread
                 if metadata.media_type == 'reel':
-                    result = await client.clip_upload(
-                        path=str(video_path),
-                        caption=metadata.title,
+                    result = await asyncio.to_thread(
+                        client.clip_upload,
+                        str(video_path),
+                        metadata.title,
                         extra_data={
                             'custom_accessibility_caption': metadata.description or "",
                             'like_and_view_counts_disabled': not metadata.allow_likes,
@@ -235,9 +236,10 @@ class InstagramClient:
                         }
                     )
                 else:
-                    result = await client.video_upload(
-                        path=str(video_path),
-                        caption=metadata.title,
+                    result = await asyncio.to_thread(
+                        client.video_upload,
+                        str(video_path),
+                        metadata.title,
                         extra_data={
                             'custom_accessibility_caption': metadata.description or "",
                             'like_and_view_counts_disabled': not metadata.allow_likes,
@@ -255,11 +257,12 @@ class InstagramClient:
                 )
                 
             elif client_name == 'instagram_private_api':
-                # Instagram Private API library
+                # Instagram Private API library (synchronous) -> run in thread
                 if metadata.media_type == 'reel':
-                    result = await client.clip_upload(
-                        video_path=str(video_path),
-                        caption=metadata.title,
+                    result = await asyncio.to_thread(
+                        client.clip_upload,
+                        str(video_path),
+                        metadata.title,
                         extra_data={
                             'custom_accessibility_caption': metadata.description or "",
                             'like_and_view_counts_disabled': not metadata.allow_likes,
@@ -267,9 +270,10 @@ class InstagramClient:
                         }
                     )
                 else:
-                    result = await client.post_video(
-                        video_path=str(video_path),
-                        caption=metadata.title,
+                    result = await asyncio.to_thread(
+                        client.post_video,
+                        str(video_path),
+                        metadata.title,
                         extra_data={
                             'custom_accessibility_caption': metadata.description or "",
                             'like_and_view_counts_disabled': not metadata.allow_likes,

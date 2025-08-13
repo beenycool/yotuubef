@@ -16,24 +16,13 @@ api:
   youtube_api_key: your_youtube_api_key
   youtube_client_secrets_file: youtube_credentials.json
   
-  # TikTok API Configuration
-  tiktok_api_key: your_tiktok_api_key
-  tiktok_api_secret: your_tiktok_api_secret
-  tiktok_access_token: your_tiktok_access_token
-  tiktok_refresh_token: your_tiktok_refresh_token
-  tiktok_client_key: your_tiktok_client_key
+  # Social media API rate limits (non-secret)
   tiktok_rate_limit_requests: 100
   tiktok_rate_limit_window: 3600
-  
-  # Instagram API Configuration
-  instagram_username: your_instagram_username
-  instagram_password: your_instagram_password
-  instagram_session_id: your_instagram_session_id
-  instagram_access_token: your_instagram_access_token
-  instagram_client_id: your_instagram_client_id
-  instagram_client_secret: your_instagram_client_secret
   instagram_rate_limit_requests: 50
   instagram_rate_limit_window: 3600
+
+  # Secrets are NOT stored here. Load from environment variables (.env) at runtime.
 
 spotify:
   client_id: your_spotify_client_id
@@ -161,8 +150,6 @@ social_media:
       best_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
       best_hours: [11, 13, 15, 19]
       timezone: "UTC"
-  enable_style_transfer: false
-  enable_voice_cloning: false
 
 logging:
   backup_count: 5

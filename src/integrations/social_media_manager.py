@@ -242,42 +242,48 @@ class SocialMediaManager:
     
     def _calculate_optimal_times(self, platforms: List[PlatformType], 
                                 scheduled_time: Optional[datetime]) -> Dict[PlatformType, datetime]:
-        """Calculate optimal upload times for each platform."""
+        """Calculate optimal upload times for each platform.
+        Respects both best hours and best days. If current time is past all best hours
+        for today or today is not a best day, schedules to the next best day at the
+        earliest best hour.
+        """
         if scheduled_time:
-            # Use provided scheduled time
             return {platform: scheduled_time for platform in platforms}
         
-        # Calculate optimal times based on platform-specific best practices
         optimal_times = {}
-        base_time = datetime.now()
+        now = datetime.now()
+        
+        # Helper to get next datetime for platform respecting best days and hours
+        def next_best_datetime(best_days: List[str], best_hours: List[int]) -> datetime:
+            weekday_to_name = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+            name_to_weekday = {name: idx for idx, name in enumerate(weekday_to_name)}
+            best_weekdays = [name_to_weekday[d] for d in best_days if d in name_to_weekday]
+            
+            # Try today first if today is acceptable
+            for day_offset in range(0, 8):  # within the next week
+                candidate_date = now + timedelta(days=day_offset)
+                if best_weekdays and candidate_date.weekday() not in best_weekdays:
+                    continue
+                
+                # For today, pick the next hour in the future; otherwise earliest hour
+                if day_offset == 0:
+                    future_hours = [h for h in best_hours if h > candidate_date.hour]
+                    if future_hours:
+                        hour = min(future_hours)
+                        return candidate_date.replace(hour=hour, minute=0, second=0, microsecond=0)
+                
+                # Not today or no future hour today: pick earliest best hour on that day
+                hour = min(best_hours) if best_hours else 12
+                return candidate_date.replace(hour=hour, minute=0, second=0, microsecond=0)
+            
+            # Fallback: next day at noon
+            return (now + timedelta(days=1)).replace(hour=12, minute=0, second=0, microsecond=0)
         
         for platform in platforms:
             platform_timing = self.optimal_timing.get(platform, {})
+            best_days = platform_timing.get('best_days', ['Monday','Tuesday','Wednesday','Thursday','Friday'])
             best_hours = platform_timing.get('best_hours', [12])
-            
-            # Find the next best hour
-            current_hour = base_time.hour
-            next_best_hour = None
-            
-            for hour in best_hours:
-                if hour > current_hour:
-                    next_best_hour = hour
-                    break
-            
-            if next_best_hour is None:
-                # Use first best hour tomorrow
-                next_best_hour = best_hours[0]
-                base_time += timedelta(days=1)
-            
-            # Set to next best hour
-            optimal_time = base_time.replace(
-                hour=next_best_hour,
-                minute=0,
-                second=0,
-                microsecond=0
-            )
-            
-            optimal_times[platform] = optimal_time
+            optimal_times[platform] = next_best_datetime(best_days, best_hours)
         
         return optimal_times
     
