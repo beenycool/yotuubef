@@ -137,7 +137,7 @@ Examples:
             # Initialize social media manager
             try:
                 from src.integrations.social_media_manager import create_social_media_manager
-                social_manager = create_social_media_manager(config)
+                social_manager = create_social_media_manager(get_config())
             except Exception as e:
                 print(f"❌ Failed to initialize social media manager: {e}")
                 return
