@@ -236,7 +236,8 @@ class TikTokClient:
                 
             elif client_name == 'python_tiktok_api':
                 # Python TikTok API library
-                result = await client.upload_video(
+                result = await asyncio.to_thread(
+                    client.upload_video,
                     video_path=str(video_path),
                     caption=metadata.title,
                     description=metadata.description or "",
