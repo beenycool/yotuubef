@@ -209,8 +209,7 @@ class SocialMediaManager:
             try:
                 # Calculate delay for cross-posting
                 if i > 0 and metadata.cross_post_delay > 0:
-                    delay = metadata.cross_post_delay * i
-                    await asyncio.sleep(delay)
+                    await asyncio.sleep(metadata.cross_post_delay)
                 
                 # Get platform-specific metadata
                 platform_metadata = self._get_platform_metadata(platform, metadata)
