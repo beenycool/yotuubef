@@ -23,6 +23,13 @@ An advanced, AI-driven system for automatically creating engaging YouTube Shorts
 - **Visual Enhancement**: Coordinated visual elements and text overlays
 - **Engagement Optimization**: Hooks and retention strategies throughout
 
+### 📱 **Multi-Platform Social Media Integration (NEW)**
+- **Cross-Platform Upload**: Simultaneous uploads to YouTube, TikTok, and Instagram
+- **Intelligent Scheduling**: Platform-specific optimal posting times
+- **Smart Cross-Posting**: Intelligent delays and platform optimization
+- **Unified Management**: Single interface for all social media operations
+- **Performance Analytics**: Cross-platform upload statistics and monitoring
+
 ### 🖼️ **Smart Thumbnail Generation & A/B Testing**
 - **Multiple Variants**: Generate 3-5 thumbnail variants automatically
 - **A/B Testing**: Performance-driven thumbnail optimization
@@ -87,6 +94,29 @@ python demo.py
 
 # Custom configuration
 python main.py --config custom_config.yaml
+```
+
+### 📱 Social Media Operations
+
+For cross-platform video distribution:
+
+```bash
+# Upload to multiple platforms
+python main.py social upload video.mp4 "My Video" \
+  --platforms youtube tiktok instagram \
+  --tags funny viral trending
+
+# Check social media status
+python main.py social status
+
+# Get platform information
+python main.py social platform tiktok
+
+# Dedicated social media CLI
+python src/social_media_cli.py upload video.mp4 "My Video" \
+  --platforms youtube tiktok instagram \
+  --description "Check this out!" \
+  --tags funny viral
 ```
 
 ## 🧪 Testing & Validation

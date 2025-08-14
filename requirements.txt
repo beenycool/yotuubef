@@ -37,6 +37,12 @@ google-auth-oauthlib>=1.0.0      # OAuth for Google APIs
 aiohttp>=3.8.0                   # Async HTTP client/server
 requests>=2.31.0                 # HTTP library
 
+# Social Media APIs (Essential)
+tiktok-api>=1.0.0                # TikTok API integration
+instagram-private-api>=1.6.0     # Instagram API integration
+python-tiktok-api>=0.1.0        # Alternative TikTok API
+instagrapi>=2.0.0                # Modern Instagram API client
+
 # Async Programming (Essential)
 aiofiles>=23.0.0                 # Async file operations
 

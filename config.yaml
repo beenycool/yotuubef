@@ -15,6 +15,14 @@ api:
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
   youtube_api_key: your_youtube_api_key
   youtube_client_secrets_file: youtube_credentials.json
+  
+  # Social media API rate limits (non-secret)
+  tiktok_rate_limit_requests: 100
+  tiktok_rate_limit_window: 3600
+  instagram_rate_limit_requests: 50
+  instagram_rate_limit_window: 3600
+
+  # Secrets are NOT stored here. Load from environment variables (.env) at runtime.
 
 spotify:
   client_id: your_spotify_client_id
@@ -98,8 +106,50 @@ feature_flags:
   enable_auto_publishing: false
   enable_experimental_ai: false
   enable_real_time_monitoring: true
-  enable_style_transfer: false
-  enable_voice_cloning: false
+  enable_cross_platform_upload: true
+  enable_social_media_analytics: true
+
+# Social Media Configuration
+social_media:
+  # Cross-platform upload settings
+  enable_cross_posting: true
+  cross_post_delay: 300  # 5 minutes between platform posts
+  
+  # Platform-specific settings
+  youtube:
+    enable_auto_upload: true
+    default_visibility: "public"
+    enable_auto_captions: true
+    enable_auto_thumbnails: true
+  
+  tiktok:
+    enable_auto_upload: true
+    default_visibility: "public"
+    enable_auto_hashtags: true
+    enable_trending_topics: true
+  
+  instagram:
+    enable_auto_upload: true
+    default_media_type: "reel"  # reel, post, story
+    enable_auto_captions: true
+    enable_location_tags: false
+  
+  # Optimal posting times (24-hour format)
+  optimal_timing:
+    youtube:
+      best_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+      best_hours: [12, 15, 19, 21]
+      timezone: "UTC"
+    
+    tiktok:
+      best_days: ["Tuesday", "Thursday", "Friday", "Saturday"]
+      best_hours: [9, 12, 19, 21]
+      timezone: "UTC"
+    
+    instagram:
+      best_days: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+      best_hours: [11, 13, 15, 19]
+      timezone: "UTC"
 
 logging:
   backup_count: 5
