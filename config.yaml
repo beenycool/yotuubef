@@ -2,7 +2,7 @@ ai_features:
   enable_ab_testing: true
   enable_advanced_audio: true
   enable_auto_optimization: true
-  enable_cinematic_editing: true
+  enable_cinematic_editing: false
   enable_proactive_management: true
   fallback_confidence_threshold: 0.6
   use_fallback_analysis: true
@@ -16,6 +16,11 @@ api:
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
   youtube_api_key: ""
   youtube_client_secrets_file: youtube_credentials.json
+content:
+  curated_subreddits:
+  - lostmedia
+  - Defunctland
+  - stunfisk
 audio:
   audio_enhancement:
     enable_limiter: true
