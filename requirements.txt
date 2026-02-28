@@ -4,7 +4,6 @@
 -r requirements.txt
 
 # Enhanced AI and Machine Learning
-google-generativeai>=0.3.0       # Google Gemini API for advanced analysis
 transformers>=4.30.0             # Hugging Face transformers for local AI models
 torch>=2.0.0                     # PyTorch for GPU-accelerated processing
 torchvision>=0.15.0              # Computer vision models

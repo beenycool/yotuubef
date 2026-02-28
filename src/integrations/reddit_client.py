@@ -3,12 +3,11 @@ Reddit API integration for content fetching and filtering.
 Handles Reddit authentication, post fetching, and content validation.
 """
 
-import re
 import logging
-import asyncio
-from typing import List, Optional, Dict, Any
+import re
+from typing import List, Optional, Dict, Any, Pattern
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import asyncpraw
 import asyncprawcore
@@ -128,30 +127,48 @@ class ContentFilter:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
+        self._pattern_cache: Dict[str, Pattern[str]] = {}
+
+    def _build_pattern(self, term: str) -> Pattern[str]:
+        pattern = self._pattern_cache.get(term)
+        if pattern is None:
+            pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+            self._pattern_cache[term] = pattern
+        return pattern
+
+    def _find_matching_terms(self, text: Optional[str], terms: List[str]) -> List[str]:
+        if not text or not terms:
+            return []
+
+        matches = [term for term in terms if self._build_pattern(term).search(text)]
+        return sorted(set(matches))
+
+    def _tier_terms(self) -> Dict[str, List[str]]:
+        content_config = self.config.content
+        hard_terms = set(content_config.hard_disallowed)
+        hard_terms.update(content_config.forbidden_words)
+
+        demonetization_terms = set(content_config.demonetization_risk)
+        caution_terms = set(content_config.caution)
+
+        # Backward compatibility for existing configs that only define the old list.
+        demonetization_terms.update(content_config.unsuitable_content_types)
+
+        return {
+            "hard_disallowed": sorted(hard_terms),
+            "demonetization_risk": sorted(demonetization_terms),
+            "caution": sorted(caution_terms),
+        }
 
     def contains_forbidden_words(self, text: Optional[str]) -> bool:
         """Check if text contains forbidden words"""
-        if not text:
-            return False
-
-        text_lower = text.lower()
-        pattern = (
-            r"\b("
-            + "|".join(re.escape(word) for word in self.config.content.forbidden_words)
-            + r")\b"
-        )
-        return re.search(pattern, text_lower) is not None
+        terms = self._tier_terms()["hard_disallowed"]
+        return bool(self._find_matching_terms(text, terms))
 
     def contains_unsuitable_content(self, text: Optional[str]) -> bool:
         """Check if text contains unsuitable content types"""
-        if not text:
-            return False
-
-        text_lower = text.lower()
-        return any(
-            content_type in text_lower
-            for content_type in self.config.content.unsuitable_content_types
-        )
+        terms = self._tier_terms()["demonetization_risk"]
+        return bool(self._find_matching_terms(text, terms))
 
     def is_suitable_for_monetization(self, post: RedditPost) -> Dict[str, Any]:
         """
@@ -160,40 +177,64 @@ class ContentFilter:
         Returns:
             Dict with 'is_suitable', 'reason', and 'confidence' keys
         """
-        reasons = []
+        blocking_reasons: List[str] = []
+        flagged_reasons: List[str] = []
+        caution_reasons: List[str] = []
+        quality_reasons: List[str] = []
+
+        tier_terms = self._tier_terms()
+
+        text_fields = {
+            "title": post.title,
+            "subreddit": post.subreddit,
+            "selftext": post.selftext,
+        }
+
+        for field_name, value in text_fields.items():
+            hard_matches = self._find_matching_terms(
+                value, tier_terms["hard_disallowed"]
+            )
+            if hard_matches:
+                blocking_reasons.append(
+                    f"hard_disallowed match in {field_name}: {', '.join(hard_matches)}"
+                )
+
+            demonetization_matches = self._find_matching_terms(
+                value, tier_terms["demonetization_risk"]
+            )
+            if demonetization_matches:
+                flagged_reasons.append(
+                    "demonetization_risk match in "
+                    f"{field_name}: {', '.join(demonetization_matches)}"
+                )
+
+            caution_matches = self._find_matching_terms(value, tier_terms["caution"])
+            if caution_matches:
+                caution_reasons.append(
+                    f"caution match in {field_name}: {', '.join(caution_matches)}"
+                )
 
         # Check NSFW/spoiler flags
         if post.nsfw:
-            reasons.append("NSFW content")
+            blocking_reasons.append("NSFW content")
 
         if post.spoiler:
-            reasons.append("Spoiler content")
-
-        # Check title for forbidden content
-        if self.contains_forbidden_words(post.title):
-            reasons.append("Forbidden words in title")
-
-        if self.contains_unsuitable_content(post.title):
-            reasons.append("Unsuitable content type in title")
-
-        # Check subreddit name
-        if self.contains_forbidden_words(post.subreddit):
-            reasons.append("Unsuitable subreddit name")
+            blocking_reasons.append("Spoiler content")
 
         # Quality checks
         if post.score < 10:
-            reasons.append("Low score (potential low quality)")
+            quality_reasons.append("Low score (potential low quality)")
 
         if post.upvote_ratio < 0.7:
-            reasons.append("Low upvote ratio (controversial content)")
+            quality_reasons.append("Low upvote ratio (controversial content)")
 
         # Video-specific checks
         if post.is_video:
             if post.duration:
                 if post.duration < 5:
-                    reasons.append("Video too short")
+                    quality_reasons.append("Video too short")
                 elif post.duration > 300:  # 5 minutes
-                    reasons.append("Video too long")
+                    quality_reasons.append("Video too long")
 
             # Source Quality Checks
             if post.width > 0 and post.height > 0:
@@ -201,20 +242,42 @@ class ContentFilter:
                 if (
                     min_resolution < 720
                 ):  # Minimum acceptable resolution for Shorts (720p vertical)
-                    reasons.append(
+                    quality_reasons.append(
                         f"Low source resolution ({post.width}x{post.height})"
                     )
 
             if post.fps > 0 and post.fps < 25:  # Minimum acceptable FPS
-                reasons.append(f"Low source FPS ({post.fps})")
+                quality_reasons.append(f"Low source FPS ({post.fps})")
 
-        is_suitable = len(reasons) == 0
-        confidence = 95 if is_suitable else max(60, 100 - len(reasons) * 15)
+        is_suitable = len(blocking_reasons) == 0 and len(quality_reasons) == 0
+        total_issues = (
+            len(blocking_reasons)
+            + len(quality_reasons)
+            + len(flagged_reasons)
+            + len(caution_reasons)
+        )
+        confidence = 95 if is_suitable else max(60, 100 - total_issues * 10)
+
+        reason_parts = []
+        if blocking_reasons:
+            reason_parts.append("blocked: " + "; ".join(blocking_reasons))
+        if quality_reasons:
+            reason_parts.append("quality: " + "; ".join(quality_reasons))
+        if flagged_reasons:
+            reason_parts.append("flagged: " + "; ".join(flagged_reasons))
+        if caution_reasons:
+            reason_parts.append("caution: " + "; ".join(caution_reasons))
 
         return {
             "is_suitable": is_suitable,
-            "reason": "; ".join(reasons) if reasons else "Content appears suitable",
+            "reason": "; ".join(reason_parts)
+            if reason_parts
+            else "Content appears suitable",
             "confidence": confidence,
+            "blocking_reasons": blocking_reasons,
+            "quality_reasons": quality_reasons,
+            "demonetization_risk": flagged_reasons,
+            "caution_flags": caution_reasons,
         }
 
     def filter_posts(self, posts: List[RedditPost]) -> List[RedditPost]:
@@ -226,10 +289,19 @@ class ContentFilter:
 
             if suitability["is_suitable"]:
                 suitable_posts.append(post)
-                self.logger.debug(f"Post accepted: {post.title[:50]}...")
+                if suitability["demonetization_risk"] or suitability["caution_flags"]:
+                    self.logger.info(
+                        "Post accepted with flags: %s... | %s",
+                        post.title[:50],
+                        suitability["reason"],
+                    )
+                else:
+                    self.logger.debug(f"Post accepted: {post.title[:50]}...")
             else:
-                self.logger.debug(
-                    f"Post rejected: {post.title[:50]}... - {suitability['reason']}"
+                self.logger.warning(
+                    "Post rejected: %s... | %s",
+                    post.title[:50],
+                    suitability["reason"],
                 )
 
         return suitable_posts

@@ -2,15 +2,17 @@ ai_features:
   enable_ab_testing: true
   enable_advanced_audio: true
   enable_auto_optimization: true
-  enable_cinematic_editing: false
+  enable_cinematic_editing: true
   enable_proactive_management: true
   fallback_confidence_threshold: 0.6
   use_fallback_analysis: true
 api:
-  gemini_api_key: ""
-  gemini_model: gemini-2.0-flash
-  gemini_rate_limit_daily: 500
-  gemini_rate_limit_rpm: 10
+  nvidia_nim_api_key: ""
+  nvidia_nim_model: "qwen/qwen3.5-397b-a17b"
+  nvidia_nim_alt_model: "moonshotai/kimi-k2.5"
+  nvidia_nim_base_url: "https://integrate.api.nvidia.com/v1"
+  nvidia_nim_rate_limit_rpm: 60
+  ai_provider: "nvidia_nim"
   reddit_client_id: ""
   reddit_client_secret: ""
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
@@ -21,6 +23,30 @@ content:
   - lostmedia
   - Defunctland
   - stunfisk
+  hard_disallowed:
+  - porn
+  - pornographic
+  - nsfw
+  - xxx
+  - sexual
+  - nude
+  - naked
+  - self-harm
+  demonetization_risk:
+  - violence
+  - gore
+  - blood
+  - weapon
+  - drugs
+  - gambling
+  - adult content
+  - 18 plus
+  caution:
+  - political
+  - religion
+  - conspiracy
+  - misinformation
+  - accident
 audio:
   audio_enhancement:
     enable_limiter: true

@@ -1,94 +1,121 @@
 """
-Google Gemini AI Client Integration for Enhanced Video Analysis and Processing
-Handles AI-powered content analysis, comment processing, and optimization suggestions using Gemini API.
+NVIDIA NIM AI Client Integration for Enhanced Video Analysis and Processing
+Handles AI-powered content analysis, comment processing, and optimization suggestions using NVIDIA NIM API.
 """
 
 import logging
 import json
 import asyncio
+import random
 import time
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
 try:
-    import google.generativeai as genai
+    from openai import AsyncOpenAI
 
-    GEMINI_AVAILABLE = True
+    OPENAI_AVAILABLE = True
 except ImportError:
-    GEMINI_AVAILABLE = False
+    OPENAI_AVAILABLE = False
 
 from src.config.settings import get_config
-from src.models import VideoAnalysisEnhanced
+from src.models import (
+    AudioDuckingConfig,
+    AudioHook,
+    CallToAction,
+    HookMoment,
+    NarrativeSegment,
+    TextOverlay,
+    ThumbnailInfo,
+    VideoAnalysisEnhanced,
+    VideoSegment,
+)
 
 
 class RateLimiter:
     """Rate limiter for API requests"""
 
-    def __init__(
-        self, max_requests_per_minute: int = 10, max_requests_per_day: int = 500
-    ):
+    def __init__(self, max_requests_per_minute: int = 60):
         self.max_rpm = max_requests_per_minute
-        self.max_daily = max_requests_per_day
         self.requests_this_minute = []
-        self.requests_today = 0
-        self.daily_reset_time = time.time() + 86400  # 24 hours
+        self.last_reset = time.time()
+        self._lock = asyncio.Lock()
 
     async def wait_if_needed(self):
         """Wait if rate limit would be exceeded"""
-        current_time = time.time()
+        while True:
+            async with self._lock:
+                current_time = time.time()
 
-        # Reset daily counter if needed
-        if current_time > self.daily_reset_time:
-            self.requests_today = 0
-            self.daily_reset_time = current_time + 86400
+                # Reset every minute
+                if current_time - self.last_reset >= 60:
+                    self.requests_this_minute = []
+                    self.last_reset = current_time
 
-        # Check daily limit
-        if self.requests_today >= self.max_daily:
-            raise Exception(f"Daily rate limit of {self.max_daily} requests exceeded")
+                # Clean old requests
+                minute_ago = current_time - 60
+                self.requests_this_minute = [
+                    t for t in self.requests_this_minute if t > minute_ago
+                ]
 
-        # Clean old requests (older than 1 minute)
-        minute_ago = current_time - 60
-        self.requests_this_minute = [
-            t for t in self.requests_this_minute if t > minute_ago
-        ]
+                if len(self.requests_this_minute) < self.max_rpm:
+                    self.requests_this_minute.append(current_time)
+                    return
 
-        # Check if we need to wait
-        if len(self.requests_this_minute) >= self.max_rpm:
-            wait_time = 60 - (current_time - self.requests_this_minute[0])
+                wait_time = 60 - (current_time - self.requests_this_minute[0])
+
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
-
-        # Record this request
-        self.requests_this_minute.append(current_time)
-        self.requests_today += 1
+            else:
+                await asyncio.sleep(0)
 
 
-class GeminiAIClient:
+class NvidiaNimAIClient:
     """
-    Google Gemini AI client for enhanced video analysis and processing tasks
+    NVIDIA NIM AI client for enhanced video analysis and processing tasks
+    Uses OpenAI SDK with NVIDIA NIM backend
     """
 
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
 
-        # Initialize Gemini if available
-        if GEMINI_AVAILABLE and hasattr(self.config.api, "gemini_api_key"):
-            genai.configure(api_key=self.config.api.gemini_api_key)
-            self.model = genai.GenerativeModel(
-                model_name=getattr(self.config.api, "gemini_model", "gemini-2.0-flash")
+        # Initialize NVIDIA NIM client if available
+        if OPENAI_AVAILABLE and hasattr(self.config.api, "nvidia_nim_api_key"):
+            api_key = self.config.api.nvidia_nim_api_key
+            base_url = getattr(
+                self.config.api,
+                "nvidia_nim_base_url",
+                "https://integrate.api.nvidia.com/v1",
             )
-            self.gemini_available = True
 
-            # Setup rate limiting
-            rpm_limit = getattr(self.config.api, "gemini_rate_limit_rpm", 10)
-            daily_limit = getattr(self.config.api, "gemini_rate_limit_daily", 500)
-            self.rate_limiter = RateLimiter(rpm_limit, daily_limit)
+            if api_key:
+                self.client = AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=base_url,
+                )
+                self.model = getattr(
+                    self.config.api, "nvidia_nim_model", "qwen/qwen3.5-397b-a17b"
+                )
+                self.alt_model = getattr(
+                    self.config.api, "nvidia_nim_alt_model", "moonshotai/kimi-k2-5"
+                )
+                self.nim_available = True
 
+                # Setup rate limiting
+                rpm_limit = getattr(self.config.api, "nvidia_nim_rate_limit_rpm", 60)
+                self.rate_limiter = RateLimiter(rpm_limit)
+            else:
+                self.nim_available = False
+                self.client = None
+                self.logger.warning(
+                    "NVIDIA NIM API key not configured - some AI features will be limited"
+                )
         else:
-            self.gemini_available = False
+            self.nim_available = False
+            self.client = None
             self.logger.warning(
-                "Gemini not available - some AI features will be limited"
+                "NVIDIA NIM not available - some AI features will be limited"
             )
 
         # AI analysis prompts
@@ -103,6 +130,16 @@ class GeminiAIClient:
         2. THE STORY (3-35s): Fast-paced explanation using the research.
         3. THE OUTRO (35-45s): Quick conclusion.
 
+        CRITICAL RETENTION RULE - THE PERFECT LOOP:
+        The very last sentence of the video must grammatically and sonically lead 
+        directly into the very first sentence. This creates an endless loop that 
+        tricks viewers into rewatching the first 3 seconds.
+        
+        Example:
+        First sentence: "the smartest player in Geometry Dash history."
+        Last sentence: "And that is exactly why nobody remembers..."
+        (Plays as: "And that is exactly why nobody remembers... the smartest player in Geometry Dash history.")
+
         Output MUST be valid JSON matching this exact structure:
         {{
             "suggested_title": "Optimized Title",
@@ -110,12 +147,23 @@ class GeminiAIClient:
             "mood": "mysterious",
             "hashtags": ["#lore", "#mystery"],
             "narrative_script_segments": [
-                {{"text": "Your hook here", "time_seconds": 0.0, "intended_duration_seconds": 3.0}},
-                {{"text": "The next sentence", "time_seconds": 3.0, "intended_duration_seconds": 5.0}}
+                {{
+                    "text": "Your hook here",
+                    "time_seconds": 0.0,
+                    "intended_duration_seconds": 3.0,
+                    "b_roll_search_query": "specific image search query for visual evidence"
+                }},
+                {{
+                    "text": "The next sentence",
+                    "time_seconds": 3.0,
+                    "intended_duration_seconds": 5.0,
+                    "b_roll_search_query": "image query for this segment"
+                }}
             ],
             "text_overlays": [
                 {{"text": "CAPTION 1", "timestamp_seconds": 0.0, "duration": 3.0}}
-            ]
+            ],
+            "loop_bridge_text": "text that connects end to beginning"
         }}
         """
 
@@ -137,70 +185,58 @@ class GeminiAIClient:
         Comment Type: [question/praise/criticism/spam/other]
         """
 
+    @staticmethod
+    def _get_content_field(content: Any, field: str, default: Any = "") -> Any:
+        """Extract a field from reddit content object or dict."""
+        if hasattr(content, "get"):
+            return content.get(field, default)
+        return getattr(content, field, default)
+
     async def analyze_video_content(
-        self, video_path: Path, reddit_content: Any
+        self, video_path: Optional[Path], reddit_content: Any
     ) -> Optional[VideoAnalysisEnhanced]:
         """
         Analyze video content for optimization opportunities
 
         Args:
             video_path: Path to video file
-            reddit_content: Original Reddit content data (RedditPost object or dict)
+            reddit_content: Original Reddit content data
 
         Returns:
             Enhanced video analysis or None if failed
         """
         try:
-            self.logger.info("Starting Gemini video content analysis...")
+            self.logger.info("Starting NVIDIA NIM video content analysis...")
 
-            # Extract video metadata
-            video_metadata = self._extract_video_metadata(video_path)
-
-            # Prepare analysis context - handle both RedditPost object and dict
-            if (
-                hasattr(reddit_content, "__dict__")
-                and hasattr(reddit_content, "title")
-                and not hasattr(reddit_content, "get")
-            ):
-                # RedditPost object (dataclass/object with attributes)
-                analysis_context = {
-                    "title": getattr(reddit_content, "title", ""),
-                    "description": getattr(reddit_content, "selftext", ""),
-                    "duration": video_metadata.get("duration", 60),
-                    "subreddit": getattr(reddit_content, "subreddit", ""),
-                    "score": getattr(reddit_content, "score", 0),
-                    "num_comments": getattr(reddit_content, "num_comments", 0),
-                    "deep_research": getattr(reddit_content, "deep_research", "")
-                    if hasattr(reddit_content, "deep_research")
-                    else "",
-                }
+            # Extract video metadata when a source file is available.
+            if video_path is not None:
+                video_metadata = self._extract_video_metadata(video_path)
             else:
-                # Dictionary format (legacy support)
-                analysis_context = {
-                    "title": reddit_content.get("title", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                    "description": reddit_content.get("selftext", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                    "duration": video_metadata.get("duration", 60),
-                    "subreddit": reddit_content.get("subreddit", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                    "score": reddit_content.get("score", 0)
-                    if hasattr(reddit_content, "get")
-                    else 0,
-                    "num_comments": reddit_content.get("num_comments", 0)
-                    if hasattr(reddit_content, "get")
-                    else 0,
-                    "deep_research": reddit_content.get("deep_research", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
+                video_metadata = {
+                    "duration": 60,
+                    "fps": 30,
+                    "size": (1920, 1080),
+                    "has_audio": True,
                 }
+
+            # Prepare analysis context
+            analysis_context = {
+                "title": self._get_content_field(reddit_content, "title", ""),
+                "description": self._get_content_field(reddit_content, "selftext", ""),
+                "duration": video_metadata.get("duration", 60),
+                "subreddit": self._get_content_field(reddit_content, "subreddit", ""),
+                "score": self._get_content_field(reddit_content, "score", 0),
+                "num_comments": self._get_content_field(
+                    reddit_content, "num_comments", 0
+                ),
+                "deep_research": self._get_content_field(
+                    reddit_content, "deep_research", ""
+                ),
+            }
 
             # Perform AI analysis
-            if self.gemini_available:
-                analysis_result = await self._analyze_with_gemini(analysis_context)
+            if self.nim_available:
+                analysis_result = await self._analyze_with_nim(analysis_context)
             else:
                 analysis_result = self._analyze_with_fallback(analysis_context)
 
@@ -212,11 +248,11 @@ class GeminiAIClient:
                 analysis_result, reddit_content
             )
 
-            self.logger.info("Gemini video content analysis completed")
+            self.logger.info("NVIDIA NIM video content analysis completed")
             return enhanced_analysis
 
         except Exception as e:
-            self.logger.error(f"Gemini video analysis failed: {e}")
+            self.logger.error(f"NVIDIA NIM video analysis failed: {e}")
             return None
 
     async def analyze_comment_engagement(
@@ -237,8 +273,8 @@ class GeminiAIClient:
             AI analysis response or None if failed
         """
         try:
-            if self.gemini_available:
-                return await self._analyze_comment_with_gemini(
+            if self.nim_available:
+                return await self._analyze_comment_with_nim(
                     comment_text, video_context, analysis_prompt
                 )
             else:
@@ -265,12 +301,12 @@ class GeminiAIClient:
             self.logger.warning(f"Video metadata extraction failed: {e}")
             return {"duration": 60, "fps": 30, "size": (1920, 1080), "has_audio": True}
 
-    async def _analyze_with_gemini(
+    async def _analyze_with_nim(
         self, context: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
-        """Analyze content using Gemini API"""
-        if not getattr(self, "model", None):
-            self.logger.error("Gemini model is not configured or available")
+        """Analyze content using NVIDIA NIM API"""
+        if not self.client:
+            self.logger.error("NVIDIA NIM client is not configured or available")
             return None
 
         try:
@@ -280,23 +316,19 @@ class GeminiAIClient:
             # Prepare prompt
             prompt = self.video_analysis_prompt.format(**context)
 
-            self.logger.debug(f"Sending prompt to Gemini: {prompt[:100]}...")
+            self.logger.debug(f"Sending prompt to NVIDIA NIM: {prompt[:100]}...")
 
-            # Make API call
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.7,
-                    max_output_tokens=2000,
-                    candidate_count=1,
-                    response_mime_type="application/json",
-                ),
+            # Make API call using OpenAI SDK with NVIDIA NIM backend
+            response = await self._chat_completion_with_fallback(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
             )
 
             # Parse response
-            content = response.text
-            self.logger.debug(f"Gemini response: {content[:200]}...")
+            content = response.choices[0].message.content
+            self.logger.debug(f"NVIDIA NIM response: {content[:200]}...")
 
             # Try to extract JSON from response
             try:
@@ -308,36 +340,44 @@ class GeminiAIClient:
                         self.logger.error(
                             f"Expected parsed response to be a dict, got {type(parsed_response)}"
                         )
-                        return self._parse_gemini_text_response(content, context)
+                        return self._parse_nim_text_response(content, context)
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.error(
-                    f"Failed to parse Gemini JSON response directly: {e}", exc_info=True
+                    f"Failed to parse NVIDIA NIM JSON response directly: {e}",
+                    exc_info=True,
                 )
-                # Look for JSON block in response
-                start_idx = content.find("{")
-                end_idx = content.rfind("}") + 1
-
-                if start_idx >= 0 and end_idx > start_idx:
-                    json_str = content[start_idx:end_idx]
-                    return json.loads(json_str)
-            except (json.JSONDecodeError, ValueError) as e:
-                self.logger.error(
-                    f"Failed to parse Gemini JSON response directly: {e}", exc_info=True
-                )
+                parsed_json = self._extract_json_object(content)
+                if isinstance(parsed_json, dict):
+                    return parsed_json
 
             # If JSON parsing fails, create structured response from text
-            return self._parse_gemini_text_response(content, context)
+            return self._parse_nim_text_response(content, context)
 
         except Exception as e:
-            self.logger.error(f"Gemini analysis failed: {e}")
+            self.logger.error(f"NVIDIA NIM analysis failed: {e}")
             return None
 
-    def _parse_gemini_text_response(
+    def _extract_json_object(self, content: str) -> Optional[Dict[str, Any]]:
+        """Extract the first decodable JSON object from mixed text."""
+        decoder = json.JSONDecoder()
+        start_idx = content.find("{")
+
+        while start_idx >= 0:
+            try:
+                parsed, _ = decoder.raw_decode(content[start_idx:])
+                if isinstance(parsed, dict):
+                    return parsed
+            except ValueError:
+                pass
+            start_idx = content.find("{", start_idx + 1)
+
+        return None
+
+    def _parse_nim_text_response(
         self, response_text: str, context: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Parse Gemini text response into structured format"""
+        """Parse NVIDIA NIM text response into structured format"""
         try:
-            # Extract key information from text response
             lines = response_text.split("\n")
 
             analysis = {
@@ -370,14 +410,11 @@ class GeminiAIClient:
                 ],
             }
 
-            # Try to extract better title if mentioned
             for line in lines:
                 if "title:" in line.lower():
                     title_part = line.split(":", 1)[1].strip()
                     if title_part:
-                        analysis["suggested_title"] = title_part[
-                            :60
-                        ]  # YouTube title limit
+                        analysis["suggested_title"] = title_part[:60]
                         break
 
             return analysis
@@ -387,16 +424,14 @@ class GeminiAIClient:
             return {}
 
     def _analyze_with_fallback(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """Fallback analysis when Gemini is not available"""
+        """Fallback analysis when NVIDIA NIM is not available"""
         try:
             title = context.get("title", "Video")
             duration = context.get("duration", 60)
             score = context.get("score", 0)
 
-            # Generate analysis based on content characteristics
             engagement_score = min(100, max(30, score // 10 + 50))
 
-            # Determine mood based on title keywords
             mood = "exciting"
             title_lower = title.lower()
             if any(word in title_lower for word in ["calm", "peaceful", "relaxing"]):
@@ -408,7 +443,6 @@ class GeminiAIClient:
             elif any(word in title_lower for word in ["funny", "hilarious", "comedy"]):
                 mood = "humorous"
 
-            # Generate hook variations based on title
             hook_base = "You won't believe this!"
             if "how to" in title_lower:
                 hook_base = "Learn this amazing trick!"
@@ -458,22 +492,19 @@ class GeminiAIClient:
     def _optimize_title(self, original_title: str) -> str:
         """Optimize title for YouTube engagement"""
         try:
-            # Remove Reddit-specific formatting
             title = (
                 original_title.replace("[OC]", "")
                 .replace("[Original Content]", "")
                 .strip()
             )
 
-            # Add engagement triggers if not present
             engagement_words = ["Amazing", "Incredible", "Shocking", "Unbelievable"]
             title_lower = title.lower()
 
             if not any(word.lower() in title_lower for word in engagement_words):
-                if len(title) < 50:  # Add prefix if title is short enough
+                if len(title) < 50:
                     title = f"Amazing: {title}"
 
-            # Ensure proper length (YouTube optimal: 60 characters)
             if len(title) > 60:
                 title = title[:57] + "..."
 
@@ -487,16 +518,13 @@ class GeminiAIClient:
         """Generate key moments based on video duration"""
         moments = []
 
-        # Opening hook
         moments.append({"timestamp": 2.0, "description": "Opening hook moment"})
 
-        # Mid-point climax
         if duration > 20:
             moments.append(
                 {"timestamp": duration * 0.4, "description": "Main content peak"}
             )
 
-        # Closing moment
         if duration > 30:
             moments.append(
                 {"timestamp": duration * 0.8, "description": "Closing impact"}
@@ -508,11 +536,9 @@ class GeminiAIClient:
         """Generate relevant hashtags"""
         hashtags = ["#shorts", "#viral"]
 
-        # Add subreddit-based tags
         if subreddit:
             hashtags.append(f"#{subreddit.lower()}")
 
-        # Add content-based tags
         title_lower = title.lower()
 
         if any(word in title_lower for word in ["funny", "comedy", "hilarious"]):
@@ -524,53 +550,46 @@ class GeminiAIClient:
         elif any(word in title_lower for word in ["reaction", "responds"]):
             hashtags.extend(["#reaction", "#response"])
 
-        # Add trending tags
         hashtags.extend(["#trending", "#fyp", "#explore"])
 
-        return hashtags[:10]  # Limit to 10 hashtags
+        return hashtags[:10]
 
-    async def _analyze_comment_with_gemini(
+    async def _analyze_comment_with_nim(
         self,
         comment_text: str,
         video_context: Dict[str, Any],
         analysis_prompt: Optional[str] = None,
     ) -> Optional[str]:
-        """Analyze comment using Gemini"""
+        """Analyze comment using NVIDIA NIM"""
         try:
-            # Wait for rate limit if needed
             await self.rate_limiter.wait_if_needed()
 
-            # Use provided prompt or default
             prompt = analysis_prompt or self.comment_analysis_prompt
 
-            # Prepare the full prompt
             full_prompt = prompt.format(
                 comment_text=comment_text,
                 video_context=json.dumps(video_context, indent=2),
             )
 
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                full_prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.3, max_output_tokens=800, candidate_count=1
-                ),
+            response = await self._chat_completion_with_fallback(
+                messages=[{"role": "user", "content": full_prompt}],
+                temperature=0.3,
+                max_tokens=800,
             )
 
-            return response.text
+            return response.choices[0].message.content
 
         except Exception as e:
-            self.logger.error(f"Gemini comment analysis failed: {e}")
+            self.logger.error(f"NVIDIA NIM comment analysis failed: {e}")
             return None
 
     async def analyze_comments_batch(self, comments: list, video_context: dict) -> list:
-        """Analyze a batch of comments using Gemini"""
-        if not self.model:
-            self.logger.error("Gemini model is not configured or available")
+        """Analyze a batch of comments using NVIDIA NIM"""
+        if not self.client:
+            self.logger.error("NVIDIA NIM client is not configured or available")
             return []
 
         try:
-            # Wait for rate limit if needed
             await self.rate_limiter.wait_if_needed()
 
             prompt = f"""Analyze these YouTube comments for engagement potential.
@@ -586,24 +605,28 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 - sentiment: string (positive/negative/neutral)
 - category: string (question/feedback/praise/complaint)
 """
-            response = await asyncio.to_thread(
-                self.model.generate_content,
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    temperature=0.7, response_mime_type="application/json"
-                ),
+            response = await self._chat_completion_with_fallback(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.7,
+                max_tokens=1000,
+                response_format={"type": "json_object"},
             )
 
             try:
-                if response.text.strip():
-                    parsed_response = json.loads(response.text)
+                content = response.choices[0].message.content
+                if content.strip():
+                    parsed_response = json.loads(content)
                     if isinstance(parsed_response, list):
                         return parsed_response
-                    else:
-                        self.logger.error(
-                            f"Expected parsed response to be a list, got {type(parsed_response)}"
-                        )
-                        return []
+                    if isinstance(parsed_response, dict):
+                        for key in ("comments", "results", "items", "data"):
+                            value = parsed_response.get(key)
+                            if isinstance(value, list):
+                                return value
+                    self.logger.error(
+                        f"Expected parsed response to include a list, got {type(parsed_response)}"
+                    )
+                    return []
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.error(f"Failed to parse batch comment analysis JSON: {e}")
 
@@ -612,6 +635,92 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
         return []
 
+    async def _chat_completion_with_fallback(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        response_format: Optional[Dict[str, str]] = None,
+    ):
+        """Execute chat completion with primary model and fallback model retry."""
+        if not self.client:
+            raise RuntimeError("NVIDIA NIM client is not configured")
+
+        models_to_try = [self.model]
+        if self.alt_model and self.alt_model != self.model:
+            models_to_try.append(self.alt_model)
+
+        max_retries = 3
+        base_delay = 0.5
+        last_error = None
+        for model_name in models_to_try:
+            for attempt in range(max_retries):
+                try:
+                    request_kwargs: Dict[str, Any] = {
+                        "model": model_name,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    }
+                    if response_format:
+                        request_kwargs["response_format"] = response_format
+
+                    response = await self.client.chat.completions.create(
+                        **request_kwargs
+                    )
+                    if model_name != self.model:
+                        self.logger.warning(
+                            "NVIDIA NIM request succeeded with fallback model: %s",
+                            model_name,
+                        )
+                    return response
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < max_retries - 1 and self._is_retryable_error(exc):
+                        delay = (base_delay * (2**attempt)) + random.uniform(0.0, 0.25)
+                        self.logger.warning(
+                            "NVIDIA NIM transient error on %s (attempt %d/%d): %s. Retrying in %.2fs",
+                            model_name,
+                            attempt + 1,
+                            max_retries,
+                            exc,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    self.logger.warning(
+                        "NVIDIA NIM model %s failed, trying next model if available: %s",
+                        model_name,
+                        exc,
+                    )
+                    break
+
+        raise RuntimeError(f"All NVIDIA NIM models failed: {last_error}")
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        if isinstance(exc, (asyncio.TimeoutError, OSError)):
+            return True
+
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+
+        if isinstance(status_code, int):
+            return status_code == 429 or 500 <= status_code < 600
+
+        message = str(exc).lower()
+        retry_tokens = (
+            "timeout",
+            "timed out",
+            "rate limit",
+            "too many requests",
+            "temporar",
+        )
+        return any(token in message for token in retry_tokens)
+
     def _analyze_comment_with_fallback(
         self, comment_text: str, video_context: Dict[str, Any]
     ) -> str:
@@ -619,27 +728,22 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
         try:
             text_lower = comment_text.lower()
 
-            # Simple engagement scoring
-            engagement_score = 50  # Base score
+            engagement_score = 50
 
-            # Positive indicators
             if any(
                 word in text_lower for word in ["great", "amazing", "love", "awesome"]
             ):
                 engagement_score += 20
 
-            # Question indicates engagement
             if "?" in comment_text:
                 engagement_score += 15
 
-            # Personal experience sharing
             if any(
                 phrase in text_lower
                 for phrase in ["i think", "my experience", "i tried"]
             ):
                 engagement_score += 25
 
-            # Determine sentiment
             positive_words = ["great", "amazing", "love", "awesome", "fantastic"]
             negative_words = ["hate", "terrible", "awful", "boring"]
 
@@ -653,7 +757,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             else:
                 sentiment = "neutral"
 
-            # Generate response
             response_parts = [
                 f"Engagement Score: {engagement_score}",
                 f"Sentiment: {sentiment}",
@@ -679,29 +782,22 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
     def _convert_to_enhanced_analysis(
         self, analysis_result: Dict[str, Any], reddit_content: Any
     ) -> VideoAnalysisEnhanced:
-        """Convert Gemini analysis result to VideoAnalysisEnhanced model"""
+        """Convert NVIDIA NIM analysis result to VideoAnalysisEnhanced model"""
         try:
-            from src.models import (
-                HookMoment,
-                AudioHook,
-                VideoSegment,
-                ThumbnailInfo,
-                CallToAction,
-                AudioDuckingConfig,
-                NarrativeSegment,
-                TextOverlay,
-            )
-
             raw_narrative_segments = analysis_result.get(
                 "narrative_script_segments", []
             )
             narrative_segments: List[NarrativeSegment] = []
+            b_roll_moments = []
+
             for item in raw_narrative_segments:
                 if not isinstance(item, dict):
                     continue
                 text = str(item.get("text", "")).strip()
                 if not text:
                     continue
+
+                b_roll_query = item.get("b_roll_search_query")
                 narrative_segments.append(
                     NarrativeSegment(
                         text=text,
@@ -709,8 +805,20 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                         intended_duration_seconds=float(
                             item.get("intended_duration_seconds", 4.0)
                         ),
+                        b_roll_search_query=b_roll_query,
                     )
                 )
+
+                if b_roll_query:
+                    b_roll_moments.append(
+                        {
+                            "search_query": b_roll_query,
+                            "timestamp_seconds": float(item.get("time_seconds", 0.0)),
+                            "duration": float(
+                                item.get("intended_duration_seconds", 4.0)
+                            ),
+                        }
+                    )
 
             if not narrative_segments:
                 narrative_segments = [
@@ -740,7 +848,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                     )
                 )
 
-            # Create hook moment
             visual_hook_moment = HookMoment(
                 timestamp_seconds=narrative_segments[0].time_seconds
                 if narrative_segments
@@ -748,14 +855,12 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 description="Opening hook",
             )
 
-            # Create audio hook
             audio_hook = AudioHook(
                 type="dramatic",
                 sound_name="whoosh",
                 timestamp_seconds=visual_hook_moment.timestamp_seconds,
             )
 
-            # Create thumbnail info
             thumbnail_timestamp = visual_hook_moment.timestamp_seconds
             thumbnail_info = ThumbnailInfo(
                 timestamp_seconds=thumbnail_timestamp,
@@ -765,7 +870,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 )[:80],
             )
 
-            # Create call to action
             call_to_action = CallToAction(text="Subscribe for more!", type="subscribe")
 
             raw_overlays = analysis_result.get("text_overlays", [])
@@ -784,19 +888,14 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                     )
                 )
 
-            # Handle both RedditPost object and dict for content extraction
             if (
                 hasattr(reddit_content, "__dict__")
                 and hasattr(reddit_content, "title")
                 and not hasattr(reddit_content, "get")
             ):
-                # RedditPost object (dataclass/object with attributes)
                 title = getattr(reddit_content, "title", "Video")
-                description = getattr(reddit_content, "title", "Amazing content!")[
-                    :200
-                ]  # Use title as description since RedditPost doesn't have selftext
+                description = getattr(reddit_content, "title", "Amazing content!")[:200]
             else:
-                # Dictionary format
                 title = (
                     reddit_content.get("title", "Video")
                     if hasattr(reddit_content, "get")
@@ -808,7 +907,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                     else ""
                 )[:200] or "Amazing content!"
 
-            # Create enhanced analysis
             enhanced_analysis = VideoAnalysisEnhanced(
                 suggested_title=analysis_result.get("suggested_title", title),
                 summary_for_description=analysis_result.get(
@@ -843,6 +941,8 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 audio_ducking_config=AudioDuckingConfig(
                     duck_during_narration=True, duck_volume=0.3, fade_duration=0.5
                 ),
+                b_roll_moments=b_roll_moments,
+                loop_bridge_text=analysis_result.get("loop_bridge_text"),
             )
 
             return enhanced_analysis
@@ -863,17 +963,14 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 AudioDuckingConfig,
             )
 
-            # Handle both RedditPost object and dict
             if (
                 hasattr(reddit_content, "__dict__")
                 and hasattr(reddit_content, "title")
                 and not hasattr(reddit_content, "get")
             ):
-                # RedditPost object (dataclass/object with attributes)
                 title = getattr(reddit_content, "title", "Engaging Video")[:60]
                 description = "Check out this content!"
             else:
-                # Dictionary format
                 title = (
                     reddit_content.get("title", "Engaging Video")
                     if hasattr(reddit_content, "get")

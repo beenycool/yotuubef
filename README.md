@@ -9,6 +9,7 @@ An advanced, AI-driven system for automatically creating engaging YouTube Shorts
 - **Scene Analysis**: Intelligent detection of visual complexity and motion
 - **Composition Optimization**: Rule of thirds, symmetry, and contrast analysis
 - **Cinematic Transitions**: Smooth transitions between scenes
+- **Default On**: Cinematic editing is enabled by default in `config.yaml`
 
 ### 🎵 **Advanced Audio Processing**
 - **Intelligent Audio Ducking**: Smart background music volume adjustment during speech
@@ -218,6 +219,28 @@ thumbnail_optimization:
   test_duration_hours: 24
   min_impressions_for_test: 1000
 ```
+
+### Content Safety Tiers
+
+```yaml
+content:
+  hard_disallowed:
+    - nsfw
+    - porn
+    - self-harm
+  demonetization_risk:
+    - violence
+    - gore
+    - gambling
+  caution:
+    - political
+    - religion
+    - misinformation
+```
+
+- `hard_disallowed`: blocks a post.
+- `demonetization_risk`: allows with a risk flag in logs.
+- `caution`: allows with a caution flag in logs.
 
 ## 📊 Performance & Analytics
 
