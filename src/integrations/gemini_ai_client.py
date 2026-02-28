@@ -269,7 +269,7 @@ class GeminiAIClient:
         self, context: Dict[str, Any]
     ) -> Optional[Dict[str, Any]]:
         """Analyze content using Gemini API"""
-        if not getattr(self, 'model', None):
+        if not getattr(self, "model", None):
             self.logger.error("Gemini model is not configured or available")
             return None
 
@@ -287,16 +287,11 @@ class GeminiAIClient:
                 self.model.generate_content,
                 prompt,
                 generation_config=genai.GenerationConfig(
-<<<<<<< Updated upstream
                     temperature=0.7,
                     max_output_tokens=2000,
                     candidate_count=1,
-                    response_mime_type="application/json"
-                )
-=======
-                    temperature=0.7, max_output_tokens=2000, candidate_count=1
+                    response_mime_type="application/json",
                 ),
->>>>>>> Stashed changes
             )
 
             # Parse response
@@ -305,18 +300,19 @@ class GeminiAIClient:
 
             # Try to extract JSON from response
             try:
-<<<<<<< Updated upstream
                 if content.strip():
                     parsed_response = json.loads(content)
                     if isinstance(parsed_response, dict):
                         return parsed_response
                     else:
-                        self.logger.error(f"Expected parsed response to be a dict, got {type(parsed_response)}")
+                        self.logger.error(
+                            f"Expected parsed response to be a dict, got {type(parsed_response)}"
+                        )
                         return self._parse_gemini_text_response(content, context)
             except (json.JSONDecodeError, ValueError) as e:
-                self.logger.error(f"Failed to parse Gemini JSON response directly: {e}", exc_info=True)
-            
-=======
+                self.logger.error(
+                    f"Failed to parse Gemini JSON response directly: {e}", exc_info=True
+                )
                 # Look for JSON block in response
                 start_idx = content.find("{")
                 end_idx = content.rfind("}") + 1
@@ -324,10 +320,11 @@ class GeminiAIClient:
                 if start_idx >= 0 and end_idx > start_idx:
                     json_str = content[start_idx:end_idx]
                     return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
+            except (json.JSONDecodeError, ValueError) as e:
+                self.logger.error(
+                    f"Failed to parse Gemini JSON response directly: {e}", exc_info=True
+                )
 
->>>>>>> Stashed changes
             # If JSON parsing fails, create structured response from text
             return self._parse_gemini_text_response(content, context)
 
@@ -565,8 +562,7 @@ class GeminiAIClient:
         except Exception as e:
             self.logger.error(f"Gemini comment analysis failed: {e}")
             return None
-<<<<<<< Updated upstream
-    
+
     async def analyze_comments_batch(self, comments: list, video_context: dict) -> list:
         """Analyze a batch of comments using Gemini"""
         if not self.model:
@@ -594,9 +590,8 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 self.model.generate_content,
                 prompt,
                 generation_config=genai.GenerationConfig(
-                    temperature=0.7,
-                    response_mime_type="application/json"
-                )
+                    temperature=0.7, response_mime_type="application/json"
+                ),
             )
 
             try:
@@ -605,7 +600,9 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                     if isinstance(parsed_response, list):
                         return parsed_response
                     else:
-                        self.logger.error(f"Expected parsed response to be a list, got {type(parsed_response)}")
+                        self.logger.error(
+                            f"Expected parsed response to be a list, got {type(parsed_response)}"
+                        )
                         return []
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.error(f"Failed to parse batch comment analysis JSON: {e}")
@@ -615,15 +612,9 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
         return []
 
-    def _analyze_comment_with_fallback(self, 
-                                     comment_text: str,
-                                     video_context: Dict[str, Any]) -> str:
-=======
-
     def _analyze_comment_with_fallback(
         self, comment_text: str, video_context: Dict[str, Any]
     ) -> str:
->>>>>>> Stashed changes
         """Fallback comment analysis"""
         try:
             text_lower = comment_text.lower()
