@@ -8,6 +8,7 @@ transformers>=4.30.0             # Hugging Face transformers for local AI models
 torch>=2.0.0                     # PyTorch for GPU-accelerated processing
 torchvision>=0.15.0              # Computer vision models
 torchaudio>=2.0.0                # Audio processing models
+git+https://github.com/QwenLM/Qwen3-TTS.git  # Qwen3-TTS local model runtime
 
 # Advanced Audio Processing
 librosa>=0.10.0                  # Advanced audio analysis and processing

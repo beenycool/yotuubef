@@ -293,13 +293,6 @@ tts:
     pitch: +0Hz
     rate: +0%
     voice: en-US-AriaNeural
-  elevenlabs:
-    enable_voice_enhancement: true
-    model_id: eleven_monolingual_v1
-    voice_id: 21m00Tcm4TlvDq8ikWAM
-    voice_similarity_boost: 0.75
-    voice_stability: 0.75
-  primary_service: elevenlabs
 video_processing:
   audio_bitrate: 128k
   audio_codec: aac

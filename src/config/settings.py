@@ -170,10 +170,6 @@ class APIConfig:
     nvidia_nim_base_url: str = "https://integrate.api.nvidia.com/v1"
     ai_provider: str = "nvidia_nim"
 
-    # ElevenLabs TTS
-    elevenlabs_timeout: int = 20
-    default_voice_id: str = "21m00Tcm4TlvDq8ikWAM"
-
     # Rate limiting
     api_delay_seconds: int = 2
 
