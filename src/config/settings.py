@@ -593,7 +593,14 @@ class ConfigManager:
 
         nvidia_nim_rate_limit_rpm = os.getenv("NVIDIA_NIM_RATE_LIMIT_RPM", "").strip()
         if nvidia_nim_rate_limit_rpm:
-            self.api.nvidia_nim_rate_limit_rpm = int(nvidia_nim_rate_limit_rpm)
+            try:
+                self.api.nvidia_nim_rate_limit_rpm = int(nvidia_nim_rate_limit_rpm)
+            except ValueError:
+                self.logger.warning(
+                    "Invalid NVIDIA_NIM_RATE_LIMIT_RPM value '%s'; using default %s",
+                    nvidia_nim_rate_limit_rpm,
+                    self.api.nvidia_nim_rate_limit_rpm,
+                )
 
         ai_provider = os.getenv("AI_PROVIDER", "").strip().lower()
         if ai_provider:
@@ -624,23 +631,55 @@ class ConfigManager:
         self.effects.enable_seamless_looping = (
             os.getenv("ENABLE_SEAMLESS_LOOPING", "true").lower() == "true"
         )
-        self.effects.loop_crossfade_duration = float(
-            os.getenv(
-                "LOOP_CROSSFADE_DURATION", str(self.effects.loop_crossfade_duration)
+        loop_crossfade_duration = os.getenv(
+            "LOOP_CROSSFADE_DURATION", str(self.effects.loop_crossfade_duration)
+        )
+        try:
+            self.effects.loop_crossfade_duration = float(loop_crossfade_duration)
+        except ValueError:
+            self.logger.warning(
+                "Invalid LOOP_CROSSFADE_DURATION '%s'; using %s",
+                loop_crossfade_duration,
+                self.effects.loop_crossfade_duration,
             )
+
+        loop_compatibility_threshold = os.getenv(
+            "LOOP_COMPATIBILITY_THRESHOLD",
+            str(self.effects.loop_compatibility_threshold),
         )
-        self.effects.loop_compatibility_threshold = float(
-            os.getenv(
-                "LOOP_COMPATIBILITY_THRESHOLD",
-                str(self.effects.loop_compatibility_threshold),
+        try:
+            self.effects.loop_compatibility_threshold = float(
+                loop_compatibility_threshold
             )
+        except ValueError:
+            self.logger.warning(
+                "Invalid LOOP_COMPATIBILITY_THRESHOLD '%s'; using %s",
+                loop_compatibility_threshold,
+                self.effects.loop_compatibility_threshold,
+            )
+
+        loop_sample_duration = os.getenv(
+            "LOOP_SAMPLE_DURATION", str(self.effects.loop_sample_duration)
         )
-        self.effects.loop_sample_duration = float(
-            os.getenv("LOOP_SAMPLE_DURATION", str(self.effects.loop_sample_duration))
-        )
+        try:
+            self.effects.loop_sample_duration = float(loop_sample_duration)
+        except ValueError:
+            self.logger.warning(
+                "Invalid LOOP_SAMPLE_DURATION '%s'; using %s",
+                loop_sample_duration,
+                self.effects.loop_sample_duration,
+            )
 
         if os.getenv("LOOP_TARGET_DURATION"):
-            self.effects.loop_target_duration = float(os.getenv("LOOP_TARGET_DURATION"))
+            loop_target_duration = os.getenv("LOOP_TARGET_DURATION", "")
+            try:
+                self.effects.loop_target_duration = float(loop_target_duration)
+            except ValueError:
+                self.logger.warning(
+                    "Invalid LOOP_TARGET_DURATION '%s'; keeping %s",
+                    loop_target_duration,
+                    self.effects.loop_target_duration,
+                )
 
         self.effects.enable_audio_crossfade = (
             os.getenv("ENABLE_AUDIO_CROSSFADE", "true").lower() == "true"

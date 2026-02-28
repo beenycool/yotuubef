@@ -28,30 +28,35 @@ class RateLimiter:
         self.max_rpm = max_requests_per_minute
         self.requests_this_minute = []
         self.last_reset = time.time()
+        self._lock = asyncio.Lock()
 
     async def wait_if_needed(self):
         """Wait if rate limit would be exceeded"""
-        current_time = time.time()
+        while True:
+            async with self._lock:
+                current_time = time.time()
 
-        # Reset every minute
-        if current_time - self.last_reset >= 60:
-            self.requests_this_minute = []
-            self.last_reset = current_time
+                # Reset every minute
+                if current_time - self.last_reset >= 60:
+                    self.requests_this_minute = []
+                    self.last_reset = current_time
 
-        # Clean old requests
-        minute_ago = current_time - 60
-        self.requests_this_minute = [
-            t for t in self.requests_this_minute if t > minute_ago
-        ]
+                # Clean old requests
+                minute_ago = current_time - 60
+                self.requests_this_minute = [
+                    t for t in self.requests_this_minute if t > minute_ago
+                ]
 
-        # Check if we need to wait
-        if len(self.requests_this_minute) >= self.max_rpm:
-            wait_time = 60 - (current_time - self.requests_this_minute[0])
+                if len(self.requests_this_minute) < self.max_rpm:
+                    self.requests_this_minute.append(current_time)
+                    return
+
+                wait_time = 60 - (current_time - self.requests_this_minute[0])
+
             if wait_time > 0:
                 await asyncio.sleep(wait_time)
-
-        # Record this request
-        self.requests_this_minute.append(current_time)
+            else:
+                await asyncio.sleep(0)
 
 
 class NvidiaNimAIClient:
@@ -82,7 +87,7 @@ class NvidiaNimAIClient:
                     self.config.api, "nvidia_nim_model", "qwen/qwen3.5-397b-a17b"
                 )
                 self.alt_model = getattr(
-                    self.config.api, "nvidia_nim_alt_model", "moonshotai/kimi-k2.5"
+                    self.config.api, "nvidia_nim_alt_model", "moonshotai/kimi-k2-5"
                 )
                 self.nim_available = True
 

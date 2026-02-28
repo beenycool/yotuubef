@@ -8,6 +8,11 @@ import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+try:
+    import torch
+except Exception:  # pragma: no cover - optional dependency
+    torch = None
+
 from src.config.settings import get_config
 
 # Try to import faster-whisper
@@ -32,7 +37,12 @@ class CaptionGenerator:
 
         # Model settings - tiny.en is fast, base.en is more accurate
         self.model_size = getattr(self.config.api, "whisper_model_size", "tiny.en")
-        self.device = "cuda" if os.getenv("USE_GPU", "").lower() == "true" else "cpu"
+        use_gpu_env = os.getenv("USE_GPU", "").strip().lower()
+        if use_gpu_env in {"true", "false"}:
+            self.device = "cuda" if use_gpu_env == "true" else "cpu"
+        else:
+            cuda_available = bool(torch and torch.cuda.is_available())
+            self.device = "cuda" if cuda_available else "cpu"
 
         self.model = None
         if FASTER_WHISPER_AVAILABLE:
@@ -116,6 +126,8 @@ class CaptionGenerator:
             self.logger.warning("Cannot generate captions - Whisper not available")
             return None
 
+        caption_clips = []
+        composite_clip = None
         try:
             from moviepy import TextClip, CompositeVideoClip
 
@@ -124,8 +136,6 @@ class CaptionGenerator:
             if not words:
                 self.logger.warning("No words transcribed from audio")
                 return None
-
-            caption_clips = []
 
             for word_data in words:
                 word_text = word_data["word"].upper()
@@ -160,12 +170,23 @@ class CaptionGenerator:
 
             if caption_clips:
                 self.logger.info(f"Generated {len(caption_clips)} word captions")
-                return CompositeVideoClip([video_clip] + caption_clips)
+                composite_clip = CompositeVideoClip([video_clip] + caption_clips)
+                return composite_clip
             else:
                 return None
 
         except Exception as e:
             self.logger.error(f"Error generating word captions: {e}")
+            for clip in caption_clips:
+                try:
+                    clip.close()
+                except Exception:
+                    pass
+            if composite_clip is not None:
+                try:
+                    composite_clip.close()
+                except Exception:
+                    pass
             return None
 
     def get_word_count_and_duration(self, audio_path: Path) -> Dict[str, Any]:

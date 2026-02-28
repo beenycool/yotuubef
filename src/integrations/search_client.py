@@ -12,6 +12,17 @@ class DeepResearchClient:
             "BRAVE_SEARCH_API_KEY"
         )
         self.base_url = "https://search.hackclub.com/res/v1/web/search"
+        self._session = None
+
+    async def _ensure_session(self):
+        if not self._session or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
 
     async def conduct_deep_research(self, query: str) -> str:
         if not self.api_key:
@@ -23,20 +34,20 @@ class DeepResearchClient:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.base_url,
-                    headers=headers,
-                    params={"q": query, "count": 3},
-                    timeout=aiohttp.ClientTimeout(total=20),
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return self._compile_report(data)
-                    self.logger.warning(
-                        "Brave search failed with status %s", response.status
-                    )
-                    return "Research failed."
+            session = await self._ensure_session()
+            async with session.get(
+                self.base_url,
+                headers=headers,
+                params={"q": query, "count": 3},
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return self._compile_report(data)
+                self.logger.warning(
+                    "Brave search failed with status %s", response.status
+                )
+                return "Research failed."
         except Exception as e:
             self.logger.error("Deep research error: %s", e)
             return "Research error."
@@ -61,10 +72,21 @@ class AgenticResearcher:
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("BRAVE_SEARCH_API_KEY")
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self._session = None
 
         self.logger.info("AgenticResearcher initialized with deterministic planner")
 
-    async def _execute_search(self, query: str) -> str:
+    async def _ensure_session(self):
+        if not self._session or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
+
+    async def _execute_search(self, query: str, session: aiohttp.ClientSession) -> str:
         """Execute a single Brave search and return results."""
         if not self.api_key:
             self.logger.warning("BRAVE_SEARCH_API_KEY not set")
@@ -73,23 +95,22 @@ class AgenticResearcher:
         headers = {"Accept": "application/json", "X-Subscription-Token": self.api_key}
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    self.base_url,
-                    headers=headers,
-                    params={"q": query, "count": 3},
-                    timeout=aiohttp.ClientTimeout(total=15),
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        results = data.get("web", {}).get("results", [])
-                        return " ".join([r.get("description", "") for r in results])
-                    self.logger.warning(
-                        f"Brave search failed with status {response.status}"
-                    )
-                    return ""
+            async with session.get(
+                self.base_url,
+                headers=headers,
+                params={"q": query, "count": 3},
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    results = data.get("web", {}).get("results", [])
+                    return " ".join([r.get("description", "") for r in results])
+                self.logger.warning(
+                    "Brave search failed with status %s", response.status
+                )
+                return ""
         except Exception as e:
-            self.logger.error(f"Search error for '{query}': {e}")
+            self.logger.error("Search error for '%s': %s", query, e)
             return ""
 
     async def deep_dive(
@@ -111,29 +132,35 @@ class AgenticResearcher:
         accumulated_knowledge = f"REDDIT POST: {initial_context}\n\n"
         previous_queries = []
 
-        for turn in range(max_turns):
-            self.logger.info(f"Research turn {turn + 1}/{max_turns}")
+        session = await self._ensure_session()
+        try:
+            for turn in range(max_turns):
+                self.logger.info(f"Research turn {turn + 1}/{max_turns}")
 
-            queries = self._build_queries_for_turn(topic, turn, previous_queries)
-            try:
-                if not queries:
-                    self.logger.warning("No queries generated for turn %s", turn + 1)
+                queries = self._build_queries_for_turn(topic, turn, previous_queries)
+                try:
+                    if not queries:
+                        self.logger.warning(
+                            "No queries generated for turn %s", turn + 1
+                        )
+                        break
+
+                    self.logger.info(f"Planned search queries: {queries}")
+                    previous_queries.extend(queries)
+
+                    # Execute all searches concurrently
+                    search_tasks = [self._execute_search(q, session) for q in queries]
+                    results = await asyncio.gather(*search_tasks)
+
+                    # Accumulate knowledge for next turn or final output
+                    for q, res in zip(queries, results):
+                        accumulated_knowledge += f"\nSearch '{q}': {res}"
+
+                except Exception as e:
+                    self.logger.error(f"Research turn {turn} failed: {e}")
                     break
-
-                self.logger.info(f"Planned search queries: {queries}")
-                previous_queries.extend(queries)
-
-                # Execute all searches concurrently
-                search_tasks = [self._execute_search(q) for q in queries]
-                results = await asyncio.gather(*search_tasks)
-
-                # Accumulate knowledge for next turn or final output
-                for q, res in zip(queries, results):
-                    accumulated_knowledge += f"\nSearch '{q}': {res}"
-
-            except Exception as e:
-                self.logger.error(f"Research turn {turn} failed: {e}")
-                break
+        finally:
+            await self.close()
 
         self.logger.info(
             f"Deep dive complete. Final knowledge length: {len(accumulated_knowledge)} chars"

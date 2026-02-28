@@ -83,13 +83,29 @@ def scan_repository_for_secrets(
             continue
 
         relative_path = str(path.relative_to(scan_root))
+        in_comment_block = False
         for line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
+
+            if in_comment_block:
+                if "*/" in stripped:
+                    in_comment_block = False
                 continue
 
+            if stripped.startswith("/*"):
+                if "*/" not in stripped:
+                    in_comment_block = True
+                continue
+
+            if not stripped or stripped.startswith(("#", "//")):
+                continue
+
+            seen_patterns = set()
             for pattern_name, pattern in SECRET_PATTERNS.items():
+                if pattern_name in seen_patterns:
+                    continue
                 if pattern.search(stripped):
+                    seen_patterns.add(pattern_name)
                     findings.append(
                         SecretFinding(
                             path=relative_path,

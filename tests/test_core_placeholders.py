@@ -150,6 +150,7 @@ def test_channel_manager_get_video_path_uses_db_mapping(tmp_path: Path, monkeypa
         sys.modules, "src.monitoring.engagement_metrics", fake_engagement_module
     )
 
+    sys.modules.pop("src.management.channel_manager", None)
     channel_manager_module = importlib.import_module("src.management.channel_manager")
     ChannelManager = channel_manager_module.ChannelManager
 
@@ -209,6 +210,7 @@ def test_channel_manager_get_video_path_rejects_missing_local_file(
         sys.modules, "src.monitoring.engagement_metrics", fake_engagement_module
     )
 
+    sys.modules.pop("src.management.channel_manager", None)
     channel_manager_module = importlib.import_module("src.management.channel_manager")
     ChannelManager = channel_manager_module.ChannelManager
 

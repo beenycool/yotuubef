@@ -9,7 +9,7 @@ import json
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, asdict
 
 from src.config.settings import get_config
@@ -579,7 +579,7 @@ class ChannelManager:
             return False
 
         last_time = datetime.fromisoformat(last_analyzed)
-        return (datetime.now() - last_time).hours < 24
+        return (datetime.now() - last_time).total_seconds() < 24 * 3600
 
     def _mark_comment_analyzed(self, comment_id: str):
         """Mark comment as analyzed"""
@@ -658,7 +658,7 @@ class ChannelManager:
             # Only test thumbnails for videos less than 48 hours old
             upload_time = datetime.fromisoformat(upload_date.replace("Z", "+00:00"))
             hours_since_upload = (
-                datetime.now() - upload_time.replace(tzinfo=None)
+                datetime.now(timezone.utc) - upload_time
             ).total_seconds() / 3600
 
             if hours_since_upload > 48:

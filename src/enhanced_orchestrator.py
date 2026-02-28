@@ -324,6 +324,7 @@ class EnhancedVideoOrchestrator:
                 caption_gen = CaptionGenerator()
                 # Combine all TTS paths for transcription
                 combined_audio_path = self.config.paths.temp_dir / "combined_tts.wav"
+                combined_audio_path.parent.mkdir(parents=True, exist_ok=True)
                 main_audio.write_audiofile(
                     str(combined_audio_path), verbose=False, logger=None
                 )
@@ -359,38 +360,55 @@ class EnhancedVideoOrchestrator:
                 audio_layers.append(boom_clip)
 
             # Composite audio
-            final_audio = CompositeAudioClip(audio_layers)
-            final_video = MoviePyCompat.with_audio(video_clip, final_audio)
-
-            # Step 10: Write output
+            final_audio = None
+            final_video = None
             output_file = (
                 self.config.paths.processed_dir
                 / f"production_studio_{reddit_post.id}.mp4"
             )
-            output_file.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                final_audio = CompositeAudioClip(audio_layers)
+                final_video = MoviePyCompat.with_audio(video_clip, final_audio)
 
-            self.logger.info("Step 10: Rendering final video")
-            final_video.write_videofile(
-                str(output_file),
-                fps=30,
-                codec="libx264",
-                audio_codec="aac",
-            )
+                # Step 10: Write output
+                output_file.parent.mkdir(parents=True, exist_ok=True)
 
-            # Cleanup
-            for clip in audio_segments:
+                self.logger.info("Step 10: Rendering final video")
+                final_video.write_videofile(
+                    str(output_file),
+                    fps=30,
+                    codec="libx264",
+                    audio_codec="aac",
+                )
+            finally:
+                for clip in audio_segments:
+                    try:
+                        clip.close()
+                    except Exception as e:
+                        self.logger.warning("Failed to close audio segment clip: %s", e)
+                for clip in audio_layers:
+                    if clip is main_audio:
+                        continue
+                    try:
+                        clip.close()
+                    except Exception as e:
+                        self.logger.warning("Failed to close audio layer clip: %s", e)
+                if final_audio is not None:
+                    try:
+                        final_audio.close()
+                    except Exception as e:
+                        self.logger.warning(
+                            "Failed to close composite audio clip: %s", e
+                        )
                 try:
-                    clip.close()
-                except:
-                    pass
-            try:
-                main_audio.close()
-            except:
-                pass
-            try:
-                final_video.close()
-            except:
-                pass
+                    main_audio.close()
+                except Exception as e:
+                    self.logger.warning("Failed to close main audio clip: %s", e)
+                if final_video is not None:
+                    try:
+                        final_video.close()
+                    except Exception as e:
+                        self.logger.warning("Failed to close final video clip: %s", e)
 
             self.logger.info("AI Production Studio pipeline complete!")
 
@@ -399,11 +417,17 @@ class EnhancedVideoOrchestrator:
                 "video_path": str(output_file),
                 "pipeline": "ai_production_studio",
                 "features_used": [
-                    "agentic_research",
-                    "perfect_loop",
-                    "broll_injection",
-                    "word_captions" if options.get("enable_word_captions") else None,
-                    "sound_design",
+                    feature
+                    for feature in [
+                        "agentic_research",
+                        "perfect_loop",
+                        "broll_injection",
+                        "word_captions"
+                        if options.get("enable_word_captions")
+                        else None,
+                        "sound_design",
+                    ]
+                    if feature is not None
                 ],
                 "broll_moments": len(broll_moments),
                 "research_turns": 2,

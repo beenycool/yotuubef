@@ -454,8 +454,6 @@ class DatabaseManager:
 
                 metadata_json = None
                 if metadata:
-                    import json
-
                     metadata_json = json.dumps(metadata)
 
                 cursor.execute(

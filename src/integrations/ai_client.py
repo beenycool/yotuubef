@@ -43,11 +43,6 @@ class AIClient:
         else:
             self.active_client = None
             self.ai_available = False
-            self.logger.warning(
-                "No AI provider available - some AI features will be limited"
-            )
-
-        if not self.ai_available:
             self.logger.warning("AI not available - some AI features will be limited")
 
     async def analyze_video_content(
@@ -360,7 +355,31 @@ class AIClient:
                     max_tokens=max_tokens,
                 )
 
-            return response.choices[0].message.content
+            if not response:
+                self.logger.error("NVIDIA NIM returned an empty response object")
+                return None
+
+            choices = getattr(response, "choices", None)
+            if not choices:
+                self.logger.error("NVIDIA NIM returned no choices: %s", response)
+                return None
+
+            first_choice = choices[0]
+            message = getattr(first_choice, "message", None)
+            if not message:
+                self.logger.error(
+                    "NVIDIA NIM response choice missing message: %s", first_choice
+                )
+                return None
+
+            content = getattr(message, "content", None)
+            if not content:
+                self.logger.error(
+                    "NVIDIA NIM response message missing content: %s", message
+                )
+                return None
+
+            return content
         except Exception as e:
             self.logger.error(f"NVIDIA NIM generation failed: {e}")
             return None

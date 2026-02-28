@@ -8,7 +8,7 @@ import os
 import asyncio
 import aiohttp
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import hashlib
 
 from src.config.settings import get_config
@@ -21,15 +21,22 @@ class BraveImageClient:
     """
 
     DEFAULT_MAX_CONCURRENT_DOWNLOADS = 6
+    DEFAULT_MAX_CONNECTIONS = 20
+    DEFAULT_MAX_CONNECTIONS_PER_HOST = 10
 
     def __init__(
-        self, max_concurrent_downloads: int = DEFAULT_MAX_CONCURRENT_DOWNLOADS
+        self,
+        max_concurrent_downloads: int = DEFAULT_MAX_CONCURRENT_DOWNLOADS,
+        max_connections: int = DEFAULT_MAX_CONNECTIONS,
+        max_connections_per_host: int = DEFAULT_MAX_CONNECTIONS_PER_HOST,
     ):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("BRAVE_SEARCH_API_KEY")
         self.base_url = "https://api.search.brave.com/res/v1/images/search"
         self.max_concurrent_downloads = max(1, max_concurrent_downloads)
+        self.max_connections = max(1, max_connections)
+        self.max_connections_per_host = max(1, max_connections_per_host)
 
         self._session: Optional[aiohttp.ClientSession] = None
         self._search_timeout = aiohttp.ClientTimeout(total=15)
@@ -55,13 +62,17 @@ class BraveImageClient:
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
         if not self._session or self._session.closed:
-            self._session = aiohttp.ClientSession()
+            connector = aiohttp.TCPConnector(
+                limit=self.max_connections,
+                limit_per_host=self.max_connections_per_host,
+            )
+            self._session = aiohttp.ClientSession(connector=connector)
         return self._session
 
     def _get_cache_path(self, query: str) -> Path:
         """Generate cache filename from query"""
         # Create a hash of the query for the filename
-        query_hash = hashlib.md5(query.encode()).hexdigest()[:12]
+        query_hash = hashlib.sha256(query.encode()).hexdigest()[:24]
         return self.cache_dir / f"{query_hash}.jpg"
 
     async def search_images(self, query: str, count: int = 3) -> List[Dict[str, Any]]:
@@ -113,11 +124,13 @@ class BraveImageClient:
             Path to downloaded image, or None if failed
         """
         cache_path = self._get_cache_path(query)
+        candidate_extensions = (".jpg", ".png", ".webp")
 
-        # Return cached version if exists
-        if cache_path.exists():
-            self.logger.debug(f"Using cached image for: {query}")
-            return cache_path
+        for ext in candidate_extensions:
+            candidate = cache_path.with_suffix(ext)
+            if candidate.exists():
+                self.logger.debug(f"Using cached image for: {query}")
+                return candidate
 
         try:
             session = await self._ensure_session()
@@ -163,7 +176,7 @@ class BraveImageClient:
             Dictionary mapping query to list of image paths
         """
         results: Dict[str, List[Path]] = {}
-        pending_downloads: List[tuple[str, str]] = []
+        pending_downloads: List[Tuple[str, str]] = []
 
         for query in queries:
             if not query:
@@ -179,7 +192,7 @@ class BraveImageClient:
 
         async def _download_with_limit(
             query: str, image_url: str
-        ) -> tuple[str, Optional[Path]]:
+        ) -> Tuple[str, Optional[Path]]:
             async with semaphore:
                 downloaded_path = await self.download_image(image_url, query)
                 return query, downloaded_path

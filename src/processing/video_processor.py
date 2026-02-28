@@ -1470,31 +1470,45 @@ class TextOverlayProcessor:
 
         try:
             broll_clips = []
+            base_duration = float(video_clip.duration or 0.0)
 
             for moment in broll_moments:
                 image_path = moment.get("image_path")
                 if not image_path or not Path(image_path).exists():
                     continue
 
-                start_time = moment.get("timestamp_seconds", 0.0)
-                duration = moment.get("duration", 3.0)
+                try:
+                    start_time = float(moment.get("timestamp_seconds", 0.0))
+                    duration = float(moment.get("duration", 3.0))
+                except (TypeError, ValueError):
+                    continue
+
+                if start_time < 0:
+                    continue
+
+                if base_duration > 0:
+                    duration = max(min(duration, base_duration - start_time), 0.0)
+
+                if duration <= 0:
+                    continue
 
                 # Create image clip from B-roll
                 img_clip = ImageClip(str(image_path))
 
                 # Resize to fit nicely in vertical frame (70% width with padding)
                 target_width = video_clip.w * 0.7
-                img_clip = img_clip.resize(width=target_width)
+                img_clip = MoviePyCompat.resize(img_clip, width=target_width)
 
                 # Center the image
-                img_clip = img_clip.set_position(("center", "center"))
+                img_clip = MoviePyCompat.with_position(img_clip, ("center", "center"))
 
                 # Set timing
-                img_clip = img_clip.set_start(start_time).set_duration(duration)
+                img_clip = MoviePyCompat.with_start(img_clip, start_time)
+                img_clip = MoviePyCompat.with_duration(img_clip, duration)
 
                 # Add quick pop-in animation (crossfade)
                 fade_duration = min(0.3, duration * 0.15)
-                img_clip = img_clip.crossfadein(fade_duration)
+                img_clip = MoviePyCompat.crossfadein(img_clip, fade_duration)
 
                 # Add a subtle border/shadow effect
                 # Note: moviepy doesn't have built-in border, so we use a simple approach

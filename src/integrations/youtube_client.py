@@ -186,7 +186,7 @@ class YouTubeClient:
             return None
 
     def _update_token_in_env(self, creds):
-        """Update the YOUTUBE_TOKEN_JSON environment variable with refreshed credentials"""
+        """Update in-process YOUTUBE_TOKEN_JSON (not persisted to disk)."""
         try:
             # Note: This only updates the current process environment
             # For persistent updates, the user would need to update their .env file
@@ -194,7 +194,7 @@ class YouTubeClient:
 
             os.environ["YOUTUBE_TOKEN_JSON"] = creds.to_json()
             self.logger.info(
-                "Updated YOUTUBE_TOKEN_JSON environment variable with refreshed credentials"
+                "Updated YOUTUBE_TOKEN_JSON for this process only; persist manually for future sessions"
             )
         except Exception as e:
             self.logger.warning(f"Failed to update environment variable: {e}")
@@ -721,8 +721,11 @@ class YouTubeClient:
             # This would need to be implemented through comment moderation
             # For now, we'll log the intended action
 
-            self.logger.info(f"Hearting comment: {comment_id}")
-            return True
+            self.logger.warning(
+                "heart_comment is not implemented via YouTube API for comment_id=%s",
+                comment_id,
+            )
+            return False
 
         except Exception as e:
             self.logger.error(f"Failed to heart comment {comment_id}: {e}")
@@ -747,8 +750,11 @@ class YouTubeClient:
             # This would typically need to be done through YouTube Studio
             # For now, we'll log the intended action
 
-            self.logger.info(f"Pinning comment: {comment_id}")
-            return True
+            self.logger.warning(
+                "pin_comment is not implemented via YouTube API for comment_id=%s",
+                comment_id,
+            )
+            return False
 
         except Exception as e:
             self.logger.error(f"Failed to pin comment {comment_id}: {e}")
@@ -758,7 +764,7 @@ class YouTubeClient:
         """Execute API request asynchronously"""
         try:
             # Asynchronous execution of Google API requests
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(None, request.execute)
 
         except Exception as e:
