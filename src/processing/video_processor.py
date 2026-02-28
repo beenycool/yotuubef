@@ -2492,8 +2492,7 @@ class VideoProcessor:
                     resource_manager.register_clip(music_clip)
                 elif music_clip.duration > video_duration:
                     # Trim the music if it's longer than video
-                    music_clip = music_clip.subclip(0, video_duration)
-                    resource_manager.register_clip(music_clip)
+                    music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
                     resource_manager.register_clip(music_clip)
 
                 # Trim to video duration if needed (using MoviePyCompat)
