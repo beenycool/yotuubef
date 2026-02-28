@@ -10,14 +10,14 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
-from moviepy import AudioFileClip, concatenate_audioclips
+from moviepy import AudioFileClip, CompositeAudioClip, concatenate_audioclips
 
 import asyncprawcore.exceptions
 
 from src.config.settings import get_config
 from src.models import VideoAnalysis, VideoAnalysisEnhanced, PerformanceMetrics
 from src.integrations.reddit_client import RedditClient
-from src.integrations.search_client import DeepResearchClient
+from src.integrations.search_client import DeepResearchClient, AgenticResearcher
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
 from src.processing.cinematic_editor import CinematicEditor
@@ -30,6 +30,9 @@ from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.video_processor import VideoProcessor
 from src.processing.background_manager import BackgroundManager
 from src.processing.video_processor_fixes import MoviePyCompat
+from src.processing.image_search_client import BraveImageClient
+from src.processing.caption_generator import CaptionGenerator
+from src.processing.sound_effects_manager import SoundEffectsManager
 
 
 class EnhancedVideoOrchestrator:
@@ -189,6 +192,227 @@ class EnhancedVideoOrchestrator:
             self.logger.error("Lore generation failed: %s", e, exc_info=True)
             self.gpu_manager.clear_gpu_cache()
             return {"success": False, "error": str(e), "stage": "faceless_lore"}
+
+    async def process_ai_production_studio(
+        self, reddit_url: str, options: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        AI Production Studio Pipeline - Uses all 5 Improvements:
+        1. Multi-Turn Agentic Research
+        2. Perfect Loop Retention
+        3. Dynamic B-Roll Injection
+        4. Word-Level Dynamic Captions
+        5. Sound Design Architecture
+        """
+        try:
+            self.logger.info(
+                "Starting AI Production Studio pipeline for: %s", reddit_url
+            )
+            options = options or {}
+
+            # Step 1: Get Reddit post
+            async with RedditClient() as reddit_client:
+                reddit_post = await reddit_client.get_post_by_url(reddit_url)
+
+            if not reddit_post:
+                return {"success": False, "error": "Failed to load Reddit post"}
+            if reddit_post.is_video:
+                return {"success": False, "error": "Text posts only for this pipeline"}
+
+            # Improvement 1: Multi-Turn Agentic Research
+            self.logger.info("Step 1: Agentic Research (Improvement 1)")
+            researcher = AgenticResearcher()
+            query = f"{reddit_post.title} {reddit_post.subreddit} history"
+            initial_context = f"{reddit_post.title}: {reddit_post.selftext[:500]}"
+
+            research_facts = await researcher.deep_dive(
+                topic=query, initial_context=initial_context, max_turns=2
+            )
+
+            # Step 2: Generate script with Perfect Loop + B-roll queries
+            self.logger.info(
+                "Step 2: Script Generation with Perfect Loop (Improvement 2)"
+            )
+            reddit_content_dict = {
+                "title": reddit_post.title,
+                "selftext": reddit_post.selftext,
+                "subreddit": reddit_post.subreddit,
+                "score": reddit_post.score,
+                "num_comments": reddit_post.num_comments,
+                "deep_research": research_facts,
+            }
+            analysis = await self.ai_client.analyze_video_content(
+                None, reddit_content_dict
+            )
+            if not analysis:
+                return {"success": False, "error": "Script generation failed"}
+
+            # Step 3: Generate TTS audio
+            self.logger.info("Step 3: TTS Generation")
+            tts_results = (
+                self.advanced_audio_processor.tts_service.generate_multiple_segments(
+                    analysis.narrative_script_segments
+                )
+            )
+            tts_paths = [
+                item.get("audio_path")
+                for item in tts_results
+                if item.get("success") and item.get("audio_path")
+            ]
+            if not tts_paths:
+                return {"success": False, "error": "TTS generation failed"}
+
+            # Concatenate TTS segments
+            audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
+            main_audio = concatenate_audioclips(audio_segments)
+
+            # Step 4: Download B-roll images (Improvement 3)
+            self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
+            broll_queries = []
+            for segment in analysis.narrative_script_segments:
+                if (
+                    hasattr(segment, "b_roll_search_query")
+                    and segment.b_roll_search_query
+                ):
+                    broll_queries.append(segment.b_roll_search_query)
+
+            async with BraveImageClient() as image_client:
+                broll_images = await image_client.get_broll_images(
+                    broll_queries, max_per_query=1
+                )
+
+            # Map images to moments
+            broll_moments = []
+            for segment in analysis.narrative_script_segments:
+                if (
+                    hasattr(segment, "b_roll_search_query")
+                    and segment.b_roll_search_query
+                ):
+                    query = segment.b_roll_search_query
+                    if query in broll_images and broll_images[query]:
+                        broll_moments.append(
+                            {
+                                "image_path": str(broll_images[query][0]),
+                                "timestamp_seconds": segment.time_seconds,
+                                "duration": segment.intended_duration_seconds,
+                            }
+                        )
+
+            # Step 5: Get background video
+            self.logger.info("Step 5: Background Video")
+            bg_manager = BackgroundManager()
+            video_clip = bg_manager.get_sliced_background(
+                target_duration=main_audio.duration
+            )
+
+            # Step 6: Apply B-roll images
+            if broll_moments:
+                self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
+                video_clip = self.video_processor.apply_broll_images(
+                    video_clip, broll_moments
+                )
+
+            # Step 7: Add text overlays
+            if analysis.text_overlays:
+                video_clip = self.video_processor.text_processor.add_text_overlays(
+                    video_clip, analysis.text_overlays
+                )
+
+            # Step 8: Add word-level captions (Improvement 4) - optional
+            if options.get("enable_word_captions", False):
+                self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
+                caption_gen = CaptionGenerator()
+                # Combine all TTS paths for transcription
+                combined_audio_path = self.config.paths.temp_dir / "combined_tts.wav"
+                main_audio.write_audiofile(
+                    str(combined_audio_path), verbose=False, logger=None
+                )
+
+                video_clip = (
+                    caption_gen.generate_word_captions(video_clip, combined_audio_path)
+                    or video_clip
+                )
+
+            # Step 9: Add sound effects (Improvement 5)
+            self.logger.info("Step 9: Sound Design (Improvement 5)")
+            sfx_manager = SoundEffectsManager()
+            audio_layers = [main_audio]
+
+            # Add whoosh for each B-roll moment
+            for moment in broll_moments:
+                whoosh_path = sfx_manager.get_whoosh_sound()
+                if whoosh_path:
+                    whoosh_clip = (
+                        AudioFileClip(str(whoosh_path))
+                        .set_start(moment["timestamp_seconds"])
+                        .volumex(0.4)
+                    )
+                    audio_layers.append(whoosh_clip)
+
+            # Add boom for hook
+            boom_path = sfx_manager.get_boom_sound()
+            if boom_path and analysis.narrative_script_segments:
+                hook_time = analysis.narrative_script_segments[0].time_seconds
+                boom_clip = (
+                    AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.5)
+                )
+                audio_layers.append(boom_clip)
+
+            # Composite audio
+            final_audio = CompositeAudioClip(audio_layers)
+            final_video = MoviePyCompat.with_audio(video_clip, final_audio)
+
+            # Step 10: Write output
+            output_file = (
+                self.config.paths.processed_dir
+                / f"production_studio_{reddit_post.id}.mp4"
+            )
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+
+            self.logger.info("Step 10: Rendering final video")
+            final_video.write_videofile(
+                str(output_file),
+                fps=30,
+                codec="libx264",
+                audio_codec="aac",
+            )
+
+            # Cleanup
+            for clip in audio_segments:
+                try:
+                    clip.close()
+                except:
+                    pass
+            try:
+                main_audio.close()
+            except:
+                pass
+            try:
+                final_video.close()
+            except:
+                pass
+
+            self.logger.info("AI Production Studio pipeline complete!")
+
+            return {
+                "success": True,
+                "video_path": str(output_file),
+                "pipeline": "ai_production_studio",
+                "features_used": [
+                    "agentic_research",
+                    "perfect_loop",
+                    "broll_injection",
+                    "word_captions" if options.get("enable_word_captions") else None,
+                    "sound_design",
+                ],
+                "broll_moments": len(broll_moments),
+                "research_turns": 2,
+            }
+
+        except Exception as e:
+            self.logger.error("AI Production Studio failed: %s", e, exc_info=True)
+            self.gpu_manager.clear_gpu_cache()
+            return {"success": False, "error": str(e), "stage": "ai_production_studio"}
 
     async def _download_and_analyze_video(self, reddit_url: str) -> Dict[str, Any]:
         """Download video and perform base analysis"""
@@ -856,15 +1080,6 @@ class EnhancedVideoOrchestrator:
                     self.gpu_manager.clear_gpu_cache()
 
                 except Exception as e:
-<<<<<<< Updated upstream
-                    self.logger.error(f"Batch processing failed for video {i+1}", exc_info=True)
-                    results.append({
-                        'url': url,
-                        'index': i,
-                        'result': {'success': False, 'error': str(e)}
-                    })
-            
-=======
                     self.logger.error(f"Batch processing failed for video {i + 1}: {e}")
                     results.append(
                         {
@@ -874,7 +1089,6 @@ class EnhancedVideoOrchestrator:
                         }
                     )
 
->>>>>>> Stashed changes
             total_processing_time = (datetime.now() - total_start_time).total_seconds()
 
             # Run system optimization after batch

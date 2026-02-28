@@ -1448,6 +1448,72 @@ class TextOverlayProcessor:
             self.logger.warning(f"Error creating hook text clip: {e}")
             return None
 
+    def apply_broll_images(
+        self, video_clip: VideoFileClip, broll_moments: List[Dict[str, Any]]
+    ) -> VideoFileClip:
+        """
+        Apply B-roll images as picture-in-picture overlay.
+
+        Args:
+            video_clip: The base video clip
+            broll_moments: List of B-roll moments with image paths and timestamps
+                Each dict should have:
+                - image_path: Path to the B-roll image
+                - timestamp_seconds: When to show the image
+                - duration: How long to show the image
+
+        Returns:
+            Video clip with B-roll overlays
+        """
+        if not broll_moments:
+            return video_clip
+
+        try:
+            broll_clips = []
+
+            for moment in broll_moments:
+                image_path = moment.get("image_path")
+                if not image_path or not Path(image_path).exists():
+                    continue
+
+                start_time = moment.get("timestamp_seconds", 0.0)
+                duration = moment.get("duration", 3.0)
+
+                # Create image clip from B-roll
+                img_clip = ImageClip(str(image_path))
+
+                # Resize to fit nicely in vertical frame (70% width with padding)
+                target_width = video_clip.w * 0.7
+                img_clip = img_clip.resize(width=target_width)
+
+                # Center the image
+                img_clip = img_clip.set_position(("center", "center"))
+
+                # Set timing
+                img_clip = img_clip.set_start(start_time).set_duration(duration)
+
+                # Add quick pop-in animation (crossfade)
+                fade_duration = min(0.3, duration * 0.15)
+                img_clip = img_clip.crossfadein(fade_duration)
+
+                # Add a subtle border/shadow effect
+                # Note: moviepy doesn't have built-in border, so we use a simple approach
+
+                broll_clips.append(img_clip)
+                self.logger.info(
+                    f"Added B-roll at {start_time}s: {Path(image_path).name}"
+                )
+
+            if broll_clips:
+                # Composite B-roll over video
+                return CompositeVideoClip([video_clip] + broll_clips)
+            else:
+                return video_clip
+
+        except Exception as e:
+            self.logger.warning(f"Error applying B-roll images: {e}")
+            return video_clip
+
     def _create_text_clip(
         self, video_clip: VideoFileClip, overlay: TextOverlay
     ) -> Optional[TextClip]:

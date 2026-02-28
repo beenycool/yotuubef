@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install CI dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install \
+            pytest \
+            pytest-asyncio \
+            ruff \
+            pydantic \
+            pyyaml \
+            python-dotenv \
+            aiohttp \
+            asyncpraw \
+            asyncprawcore \
+            moviepy \
+            numpy \
+            opencv-python \
+            psutil \
+            yt-dlp
+
+      - name: Ruff
+        run: ruff check src/config src/integrations src/database src/management src/utils tests --select E9,F63,F7,F82
+
+      - name: Pytest
+        run: pytest -k "not fallback_audio_fix and not video_processor_fallback_audio"

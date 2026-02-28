@@ -5,7 +5,10 @@ Analyzes video performance data and automatically fine-tunes enhancement paramet
 
 import logging
 import json
+import os
+import tempfile
 import numpy as np
+import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
@@ -56,6 +59,17 @@ class EnhancementOptimizer:
             'color_grading_strength': {'min': 0.0, 'max': 1.0, 'step': 0.05},
             'hook_text_font_size': {'min': 40, 'max': 120, 'step': 5},
             'background_music_volume': {'min': 0.1, 'max': 0.8, 'step': 0.05}
+        }
+
+        self.parameter_yaml_paths = {
+            'background_music_volume': ('audio', 'background_music', 'volume'),
+            'sound_effects_volume': ('audio', 'sound_effects', 'volume'),
+            'visual_effects_intensity': ('effects', 'visual_effects_intensity'),
+            'text_overlay_duration': ('text_overlay', 'text_overlay_duration'),
+            'speed_effect_factor': ('video_processing', 'speed_effect_factor'),
+            'zoom_intensity': ('effects', 'zoom_intensity'),
+            'color_grading_strength': ('effects', 'color_grading_strength'),
+            'hook_text_font_size': ('text_overlay', 'hook_text_font_size')
         }
         
         # Load current optimization state
@@ -399,18 +413,97 @@ class EnhancementOptimizer:
     def _update_config_parameters(self, updates: Dict[str, float]):
         """Update configuration parameters"""
         try:
-            # This would update the actual config.yaml file in production
-            # For now, we'll just log the intended changes
-            self.logger.info(f"Configuration updates: {updates}")
-            
-            # In production, this would:
-            # 1. Load config.yaml
-            # 2. Update relevant sections
-            # 3. Save config.yaml
-            # 4. Reload configuration
-            
+            if not self.config.config_file:
+                self.logger.warning("Cannot update config parameters: no config file configured")
+                return
+
+            config_path = Path(self.config.config_file)
+            config_data = self._load_config_yaml(config_path)
+
+            updated_paths = []
+            for parameter_name, new_value in updates.items():
+                key_path = self.parameter_yaml_paths.get(parameter_name)
+                if not key_path:
+                    self.logger.warning(f"No YAML key path mapping for parameter: {parameter_name}")
+                    continue
+
+                self._set_nested_value(config_data, key_path, new_value)
+                updated_paths.append('.'.join(key_path))
+
+            if not updated_paths:
+                return
+
+            self._atomic_write_yaml(config_path, config_data)
+
+            if hasattr(self.config, 'reload'):
+                self.config.reload()
+            else:
+                self.config = get_config()
+
+            self.logger.info(f"Configuration updates applied: {updated_paths}")
+
         except Exception as e:
             self.logger.error(f"Config update failed: {e}")
+
+    def _load_config_yaml(self, config_path: Path) -> Dict[str, Any]:
+        """Load YAML config safely and return a dictionary root."""
+        if not config_path.exists():
+            self.logger.warning(f"Config file not found, creating new mapping at {config_path}")
+            return {}
+
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+        except yaml.YAMLError as e:
+            self.logger.error(f"Malformed YAML in {config_path}: {e}")
+            return {}
+
+        if data is None:
+            return {}
+
+        if not isinstance(data, dict):
+            self.logger.warning(f"Config root is not a dict in {config_path}; resetting root structure")
+            return {}
+
+        return data
+
+    def _set_nested_value(self, root: Dict[str, Any], key_path: Tuple[str, ...], value: Any):
+        """Set nested dictionary value by key path, creating dict nodes if missing."""
+        current_node = root
+        for key in key_path[:-1]:
+            child = current_node.get(key)
+            if not isinstance(child, dict):
+                child = {}
+                current_node[key] = child
+            current_node = child
+
+        current_node[key_path[-1]] = value
+
+    def _atomic_write_yaml(self, config_path: Path, yaml_data: Dict[str, Any]):
+        """Write YAML atomically using temporary file replacement."""
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+
+        temp_path = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='w',
+                encoding='utf-8',
+                dir=str(config_path.parent),
+                prefix=f".{config_path.name}.",
+                suffix='.tmp',
+                delete=False
+            ) as temp_file:
+                yaml.safe_dump(yaml_data, temp_file, sort_keys=False)
+                temp_path = temp_file.name
+
+            os.replace(temp_path, config_path)
+        except Exception:
+            if temp_path and os.path.exists(temp_path):
+                try:
+                    os.unlink(temp_path)
+                except OSError:
+                    pass
+            raise
     
     def _get_current_parameter_value(self, parameter_name: str) -> float:
         """Get current value of a parameter"""
