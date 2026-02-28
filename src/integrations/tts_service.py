@@ -290,7 +290,7 @@ class TTSService:
     
     def _get_elevenlabs_voice_settings(self, 
                                      emotion: EmotionType, 
-                                     pacing: PacingType) -> VoiceSettings:
+                                     pacing: PacingType) -> "VoiceSettings":
         """Map emotion and pacing to ElevenLabs voice settings"""
         # Base settings
         stability = 0.5

@@ -156,7 +156,7 @@ def test_channel_manager_get_video_path_uses_db_mapping(tmp_path: Path, monkeypa
 
     manager = ChannelManager.__new__(ChannelManager)
     manager.logger = logging.getLogger(__name__)
-    manager._db_manager = db_manager
+    manager._get_db_manager = lambda: db_manager
 
     resolved_path = manager._get_video_path("yt_video_123")
     assert resolved_path == video_path
@@ -216,7 +216,7 @@ def test_channel_manager_get_video_path_rejects_missing_local_file(
 
     manager = ChannelManager.__new__(ChannelManager)
     manager.logger = logging.getLogger(__name__)
-    manager._db_manager = db_manager
+    manager._get_db_manager = lambda: db_manager
 
     resolved_path = manager._get_video_path("yt_video_124")
     assert resolved_path is None
