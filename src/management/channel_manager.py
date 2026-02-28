@@ -182,7 +182,7 @@ class ChannelManager:
     async def _analyze_comments(self,
                                comments: List[Dict[str, Any]],
                                video_info: Dict[str, Any]) -> List[CommentAnalysis]:
-        """Analyze comments using AI for engagement optimization"""
+        """Analyze comments using AI for engagement optimization in batches"""
         analyses = []
         
         try:
@@ -192,20 +192,41 @@ class ChannelManager:
                 'tags': video_info.get('tags', [])[:5]  # First 5 tags
             }
             
-            for comment in comments:
-                try:
-                    analysis = await self._analyze_single_comment(comment, video_context)
-                    if analysis:
-                        analyses.append(analysis)
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to analyze comment {comment.get('id', 'unknown')}: {e}")
+            # Take up to 20 comments to prevent huge context windows
+            batch_comments = comments[:20]
+            if not batch_comments:
+                return []
+
+            formatted_comments = []
+            for c in batch_comments:
+                formatted_comments.append({
+                    'id': c.get('id', ''),
+                    'author': c.get('authorDisplayName', ''),
+                    'text': c.get('textDisplay', '')
+                })
+
+            # Call AI client for batch analysis
+            results = []
+            if hasattr(self.ai_client, 'analyze_comments_batch'):
+                results = await self.ai_client.analyze_comments_batch(formatted_comments, video_context)
+            else:
+                self.logger.warning("AI client does not support batch comment analysis")
+
+            for res in results:
+                analyses.append(CommentAnalysis(
+                    comment_id=res.get('comment_id', ''),
+                    sentiment=res.get('sentiment', 'neutral'),
+                    category=res.get('category', 'feedback'),
+                    suggested_reply=res.get('suggested_reply', ''),
+                    action_required=res.get('interaction_priority', 0) > 70,
+                    interaction_priority=res.get('interaction_priority', 50)
+                ))
             
             # Sort by interaction priority
             analyses.sort(key=lambda x: x.interaction_priority, reverse=True)
             
         except Exception as e:
-            self.logger.error(f"Comment analysis batch failed: {e}")
+            self.logger.error("Comment analysis batch failed", exc_info=True)
         
         return analyses
     

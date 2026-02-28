@@ -485,6 +485,45 @@ class GeminiAIClient:
             self.logger.error(f"Gemini comment analysis failed: {e}")
             return None
     
+    async def analyze_comments_batch(self, comments: list, video_context: dict) -> list:
+        """Analyze a batch of comments using Gemini"""
+        try:
+            # Wait for rate limit if needed
+            await self.rate_limiter.wait_if_needed()
+
+            prompt = f"""Analyze these YouTube comments for engagement potential.
+Video Context: {json.dumps(video_context)}
+
+Comments to analyze:
+{json.dumps(comments, indent=2)}
+
+Return a JSON array of the top 3 most engaging comments. Each object in the array should have:
+- comment_id: string
+- interaction_priority: integer (0-100)
+- suggested_reply: string
+- sentiment: string (positive/negative/neutral)
+- category: string (question/feedback/praise/complaint)
+"""
+            response = await asyncio.to_thread(
+                self.model.generate_content,
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    temperature=0.7,
+                    response_mime_type="application/json"
+                )
+            )
+
+            try:
+                if response.text.strip():
+                    return json.loads(response.text)
+            except json.JSONDecodeError:
+                self.logger.error("Failed to parse batch comment analysis JSON")
+
+        except Exception as e:
+            self.logger.error("Batch comment analysis failed", exc_info=True)
+
+        return []
+
     def _analyze_comment_with_fallback(self, 
                                      comment_text: str,
                                      video_context: Dict[str, Any]) -> str:

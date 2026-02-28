@@ -2332,7 +2332,7 @@ class VideoProcessor:
             return self._write_video_with_retry(final_clip, output_path, temp_manager)
             
         except Exception as e:
-            self.logger.error(f"Error in video rendering: {e}")
+            self.logger.error("Error in video rendering", exc_info=True)
             return False
     
     def _process_tts_segments(self, segments: List[NarrativeSegment]) -> List[AudioFileClip]:
@@ -2697,7 +2697,7 @@ class VideoProcessor:
             self.logger.info(f"Video encoding completed in {encoding_time:.2f} seconds")
             
         except Exception as e:
-            self.logger.error(f"Error writing video: {e}")
+            self.logger.error("Error writing video", exc_info=True)
             raise
 
 

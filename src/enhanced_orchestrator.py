@@ -703,7 +703,7 @@ class EnhancedVideoOrchestrator:
             return status
             
         except Exception as e:
-            self.logger.error(f"System status check failed: {e}")
+            self.logger.error("System status check failed", exc_info=True)
             return {
                 'timestamp': datetime.now().isoformat(),
                 'system_status': 'error',
@@ -737,7 +737,7 @@ class EnhancedVideoOrchestrator:
                     self.gpu_manager.clear_gpu_cache()
                     
                 except Exception as e:
-                    self.logger.error(f"Batch processing failed for video {i+1}: {e}")
+                    self.logger.error(f"Batch processing failed for video {i+1}", exc_info=True)
                     results.append({
                         'url': url,
                         'index': i,
