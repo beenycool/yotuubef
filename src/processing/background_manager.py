@@ -21,6 +21,9 @@ class BackgroundManager:
 
     def get_sliced_background(self, target_duration: float) -> VideoFileClip:
         """Grab a random Minecraft clip chunk matching target duration."""
+        if target_duration <= 0:
+            raise ValueError("target_duration must be positive")
+
         bg_files = list(self.bg_folder.glob("*.mp4"))
         if not bg_files:
             raise FileNotFoundError(

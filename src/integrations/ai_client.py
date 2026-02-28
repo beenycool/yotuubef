@@ -46,7 +46,7 @@ class AIClient:
             self.logger.warning("AI not available - some AI features will be limited")
 
     async def analyze_video_content(
-        self, video_path: Path, reddit_content: Dict[str, Any]
+        self, video_path: Optional[Path], reddit_content: Any
     ) -> Optional[VideoAnalysisEnhanced]:
         """
         Analyze video content for optimization opportunities using AI

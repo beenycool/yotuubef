@@ -308,9 +308,15 @@ class EnhancedVideoOrchestrator:
             # Step 6: Apply B-roll images
             if broll_moments:
                 self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
-                video_clip = self.video_processor.apply_broll_images(
-                    video_clip, broll_moments
-                )
+                apply_broll = getattr(self.video_processor, "apply_broll_images", None)
+                if callable(apply_broll):
+                    video_clip = apply_broll(video_clip, broll_moments)
+                else:
+                    text_apply_broll = getattr(
+                        self.video_processor.text_processor, "apply_broll_images", None
+                    )
+                    if callable(text_apply_broll):
+                        video_clip = text_apply_broll(video_clip, broll_moments)
 
             # Step 7: Add text overlays
             if analysis.text_overlays:
@@ -319,6 +325,7 @@ class EnhancedVideoOrchestrator:
                 )
 
             # Step 8: Add word-level captions (Improvement 4) - optional
+            combined_audio_path = None
             if options.get("enable_word_captions", False):
                 self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
                 caption_gen = CaptionGenerator()
@@ -409,6 +416,15 @@ class EnhancedVideoOrchestrator:
                         final_video.close()
                     except Exception as e:
                         self.logger.warning("Failed to close final video clip: %s", e)
+                if combined_audio_path and combined_audio_path.exists():
+                    try:
+                        combined_audio_path.unlink()
+                    except OSError as e:
+                        self.logger.warning(
+                            "Failed to remove temp caption audio %s: %s",
+                            combined_audio_path,
+                            e,
+                        )
 
             self.logger.info("AI Production Studio pipeline complete!")
 

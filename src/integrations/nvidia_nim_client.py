@@ -193,7 +193,7 @@ class NvidiaNimAIClient:
         return getattr(content, field, default)
 
     async def analyze_video_content(
-        self, video_path: Path, reddit_content: Any
+        self, video_path: Optional[Path], reddit_content: Any
     ) -> Optional[VideoAnalysisEnhanced]:
         """
         Analyze video content for optimization opportunities
@@ -208,8 +208,16 @@ class NvidiaNimAIClient:
         try:
             self.logger.info("Starting NVIDIA NIM video content analysis...")
 
-            # Extract video metadata
-            video_metadata = self._extract_video_metadata(video_path)
+            # Extract video metadata when a source file is available.
+            if video_path is not None:
+                video_metadata = self._extract_video_metadata(video_path)
+            else:
+                video_metadata = {
+                    "duration": 60,
+                    "fps": 30,
+                    "size": (1920, 1080),
+                    "has_audio": True,
+                }
 
             # Prepare analysis context
             analysis_context = {

@@ -443,7 +443,8 @@ class EnhancementOptimizer:
         try:
             # Update configuration file
             config_updates = {parameter_name: new_value}
-            self._update_config_parameters(config_updates)
+            if not self._update_config_parameters(config_updates):
+                return False
 
             # Update internal state
             self.optimization_state["current_parameters"][parameter_name] = new_value
@@ -454,14 +455,14 @@ class EnhancementOptimizer:
             self.logger.error(f"Failed to apply parameter change {parameter_name}: {e}")
             return False
 
-    def _update_config_parameters(self, updates: Dict[str, float]):
+    def _update_config_parameters(self, updates: Dict[str, float]) -> bool:
         """Update configuration parameters"""
         try:
             if not self.config.config_file:
                 self.logger.warning(
                     "Cannot update config parameters: no config file configured"
                 )
-                return
+                return False
 
             config_path = Path(self.config.config_file)
             config_data = self._load_config_yaml(config_path)
@@ -479,7 +480,7 @@ class EnhancementOptimizer:
                 updated_paths.append(".".join(key_path))
 
             if not updated_paths:
-                return
+                return False
 
             self._atomic_write_yaml(config_path, config_data)
 
@@ -488,9 +489,11 @@ class EnhancementOptimizer:
             self.config = get_config()
 
             self.logger.info(f"Configuration updates applied: {updated_paths}")
+            return True
 
         except Exception as e:
             self.logger.error(f"Config update failed: {e}")
+            return False
 
     def _load_config_yaml(self, config_path: Path) -> Dict[str, Any]:
         """Load YAML config safely and return a dictionary root."""

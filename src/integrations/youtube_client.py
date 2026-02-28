@@ -40,6 +40,7 @@ class YouTubeClient:
         self.youtube_service = None
         self.analytics_service = None
         self._services_initialized = False
+        self._services_init_lock = asyncio.Lock()
 
         if not GOOGLE_API_AVAILABLE:
             self.logger.warning(
@@ -67,17 +68,16 @@ class YouTubeClient:
 
     async def _ensure_services_initialized(self):
         """Ensure services are initialized before use"""
-        if not self._services_initialized and GOOGLE_API_AVAILABLE:
-            await asyncio.to_thread(self._initialize_services)
-            self._services_initialized = True
+        if self._services_initialized or not GOOGLE_API_AVAILABLE:
+            return
+
+        async with self._services_init_lock:
+            if not self._services_initialized:
+                await asyncio.to_thread(self._initialize_services)
 
     def _get_credentials(self):
         """Get YouTube API credentials from environment variable or file"""
         try:
-            import os
-            import json
-            from pathlib import Path
-
             # First try YOUTUBE_TOKEN_JSON environment variable
             youtube_token_env = os.getenv("YOUTUBE_TOKEN_JSON")
             if youtube_token_env:

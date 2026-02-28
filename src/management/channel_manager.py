@@ -253,9 +253,9 @@ class ChannelManager:
                 comment_text = original_comment.get("textDisplay", "")
                 author_name = original_comment.get("authorDisplayName", "")
 
-                # Derive missing analysis fields
-                engagement_score = 50.0
-                toxicity_score = 0.0
+                # Derive analysis fields from model output
+                engagement_score = float(res.get("engagement_score", 50.0))
+                toxicity_score = float(res.get("toxicity_score", 0.0))
                 sentiment = res.get("sentiment", "neutral")
 
                 # Determine reply urgency and actions
@@ -977,8 +977,17 @@ class ChannelManager:
             return False
 
         winner_variant = variants[winner_index]
-        thumbnail_path = Path(winner_variant.get("file_path", ""))
-        if not thumbnail_path.exists():
+        raw_thumbnail_path = winner_variant.get("file_path")
+        if not raw_thumbnail_path:
+            self.logger.info(
+                "Skipping winner selection for %s: winner thumbnail file missing at %s",
+                video_id,
+                raw_thumbnail_path,
+            )
+            return False
+
+        thumbnail_path = Path(raw_thumbnail_path)
+        if not thumbnail_path.exists() or not thumbnail_path.is_file():
             self.logger.info(
                 "Skipping winner selection for %s: winner thumbnail file missing at %s",
                 video_id,

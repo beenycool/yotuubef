@@ -346,13 +346,28 @@ class DatabaseManager:
 
                 cursor.execute(
                     """
-                    INSERT OR REPLACE INTO uploads (
+                    INSERT INTO uploads (
                         reddit_url, reddit_post_id, youtube_url, youtube_video_id,
                         title, subreddit, original_score,
                         processing_duration_seconds, video_duration_seconds, file_size_mb,
                         status, error_message, thumbnail_uploaded, ai_analysis_used,
                         upload_timestamp, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(reddit_url) DO UPDATE SET
+                        reddit_post_id = excluded.reddit_post_id,
+                        youtube_url = excluded.youtube_url,
+                        youtube_video_id = excluded.youtube_video_id,
+                        title = excluded.title,
+                        subreddit = excluded.subreddit,
+                        original_score = excluded.original_score,
+                        processing_duration_seconds = excluded.processing_duration_seconds,
+                        video_duration_seconds = excluded.video_duration_seconds,
+                        file_size_mb = excluded.file_size_mb,
+                        status = excluded.status,
+                        error_message = excluded.error_message,
+                        thumbnail_uploaded = excluded.thumbnail_uploaded,
+                        ai_analysis_used = excluded.ai_analysis_used,
+                        updated_at = excluded.updated_at
                 """,
                     (
                         reddit_url,
@@ -375,6 +390,13 @@ class DatabaseManager:
                 )
 
                 upload_id = cursor.lastrowid
+                if not upload_id:
+                    cursor.execute(
+                        "SELECT id FROM uploads WHERE reddit_url = ?",
+                        (reddit_url,),
+                    )
+                    row = cursor.fetchone()
+                    upload_id = row[0] if row else None
                 conn.commit()
 
                 self.logger.info(f"Recorded upload: {title[:50]}... (ID: {upload_id})")
@@ -615,6 +637,8 @@ class DatabaseManager:
     def get_processing_stats(self, days: int = 30) -> Dict[str, Any]:
         """Get processing statistics for the last N days"""
         try:
+            days_int = max(0, int(days))
+            days_modifier = f"-{days_int} days"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -629,8 +653,9 @@ class DatabaseManager:
                         AVG(video_duration_seconds) as avg_video_duration,
                         SUM(file_size_mb) as total_file_size_mb
                     FROM uploads 
-                    WHERE upload_timestamp >= datetime('now', '-{} days')
-                """.format(days)
+                    WHERE upload_timestamp >= datetime('now', ?)
+                """,
+                    (days_modifier,),
                 )
 
                 stats = dict(cursor.fetchone())
@@ -648,11 +673,12 @@ class DatabaseManager:
                     """
                     SELECT subreddit, COUNT(*) as count
                     FROM uploads 
-                    WHERE upload_timestamp >= datetime('now', '-{} days')
+                    WHERE upload_timestamp >= datetime('now', ?)
                     GROUP BY subreddit
                     ORDER BY count DESC
                     LIMIT 10
-                """.format(days)
+                """,
+                    (days_modifier,),
                 )
 
                 stats["top_subreddits"] = [dict(row) for row in cursor.fetchall()]
@@ -716,6 +742,9 @@ class DatabaseManager:
     def cleanup_old_records(self, days_to_keep: int = 90):
         """Clean up old records to prevent database bloat"""
         try:
+            days_int = max(0, int(days_to_keep))
+            history_modifier = f"-{days_int} days"
+            analytics_modifier = f"-{days_int * 2} days"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -723,8 +752,9 @@ class DatabaseManager:
                 cursor.execute(
                     """
                     DELETE FROM processing_history 
-                    WHERE created_at < datetime('now', '-{} days')
-                """.format(days_to_keep)
+                    WHERE created_at < datetime('now', ?)
+                """,
+                    (history_modifier,),
                 )
 
                 deleted_history = cursor.rowcount
@@ -733,8 +763,9 @@ class DatabaseManager:
                 cursor.execute(
                     """
                     DELETE FROM analytics 
-                    WHERE created_at < datetime('now', '-{} days')
-                """.format(days_to_keep * 2)
+                    WHERE created_at < datetime('now', ?)
+                """,
+                    (analytics_modifier,),
                 )
 
                 deleted_analytics = cursor.rowcount
@@ -955,6 +986,8 @@ class DatabaseManager:
             List of uploads ready for evaluation
         """
         try:
+            hours_int = max(0, int(hours_since_start))
+            hours_modifier = f"+{hours_int} hours"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -962,9 +995,10 @@ class DatabaseManager:
                     SELECT * FROM uploads
                     WHERE thumbnail_test_start_date IS NOT NULL
                     AND thumbnail_test_complete = FALSE
-                    AND datetime(thumbnail_test_start_date, '+{} hours') <= datetime('now')
+                    AND datetime(thumbnail_test_start_date, ?) <= datetime('now')
                     ORDER BY thumbnail_test_start_date ASC
-                """.format(hours_since_start)
+                """,
+                    (hours_modifier,),
                 )
 
                 rows = cursor.fetchall()
@@ -1024,6 +1058,15 @@ class DatabaseManager:
     ) -> bool:
         """Complete thumbnail test by video ID and persist winner variant."""
         try:
+            normalized_variant = str(winning_variant).strip().upper()
+            if normalized_variant not in {"A", "B"}:
+                self.logger.warning(
+                    "Invalid winning variant '%s' for video %s",
+                    winning_variant,
+                    youtube_video_id,
+                )
+                return False
+
             with self.get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute(
@@ -1036,8 +1079,8 @@ class DatabaseManager:
                     WHERE youtube_video_id = ?
                     """,
                     (
-                        winning_variant,
-                        winning_variant,
+                        normalized_variant,
+                        normalized_variant,
                         datetime.now(),
                         youtube_video_id,
                     ),
