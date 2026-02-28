@@ -469,9 +469,18 @@ class EngagementAnalyzer:
                     """
                     SELECT vm.* FROM video_metrics vm
                     WHERE vm.upload_date >= ? 
-                    AND vm.enhancements_used LIKE ?
+                    AND EXISTS (
+                        SELECT 1
+                        FROM json_each(
+                            CASE
+                                WHEN json_valid(vm.enhancements_used) THEN vm.enhancements_used
+                                ELSE '[]'
+                            END
+                        ) je
+                        WHERE je.value = ?
+                    )
                 """,
-                    (cutoff_date, f"%{enhancement_type}%"),
+                    (cutoff_date, enhancement_type),
                 )
 
                 with_enhancement = cursor.fetchall()
@@ -481,9 +490,18 @@ class EngagementAnalyzer:
                     """
                     SELECT vm.* FROM video_metrics vm
                     WHERE vm.upload_date >= ? 
-                    AND (vm.enhancements_used NOT LIKE ? OR vm.enhancements_used IS NULL)
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM json_each(
+                            CASE
+                                WHEN json_valid(vm.enhancements_used) THEN vm.enhancements_used
+                                ELSE '[]'
+                            END
+                        ) je
+                        WHERE je.value = ?
+                    )
                 """,
-                    (cutoff_date, f"%{enhancement_type}%"),
+                    (cutoff_date, enhancement_type),
                 )
 
                 without_enhancement = cursor.fetchall()

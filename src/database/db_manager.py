@@ -94,19 +94,7 @@ class DatabaseManager:
                     )
                 """)
 
-                # Create local artifacts mapping table
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS local_artifacts (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        reddit_url TEXT NOT NULL UNIQUE,
-                        local_project_id TEXT,
-                        local_video_path TEXT,
-                        local_thumbnail_paths_json TEXT,
-                        youtube_video_id TEXT,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+                self._ensure_local_artifacts_table(cursor)
 
                 conn.commit()
 
@@ -236,18 +224,7 @@ class DatabaseManager:
             artifacts_table_exists = cursor.fetchone() is not None
 
             if not artifacts_table_exists:
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS local_artifacts (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        reddit_url TEXT NOT NULL UNIQUE,
-                        local_project_id TEXT,
-                        local_video_path TEXT,
-                        local_thumbnail_paths_json TEXT,
-                        youtube_video_id TEXT,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+                self._ensure_local_artifacts_table(cursor)
             else:
                 cursor.execute("PRAGMA table_info(local_artifacts)")
                 artifact_columns = {row[1] for row in cursor.fetchall()}
@@ -291,6 +268,21 @@ class DatabaseManager:
 
         except sqlite3.Error as e:
             self.logger.warning(f"Error during database migration: {e}")
+
+    def _ensure_local_artifacts_table(self, cursor: sqlite3.Cursor) -> None:
+        """Create local_artifacts with the canonical schema when missing."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS local_artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reddit_url TEXT NOT NULL UNIQUE,
+                local_project_id TEXT,
+                local_video_path TEXT,
+                local_thumbnail_paths_json TEXT,
+                youtube_video_id TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
     @contextmanager
     def get_connection(self):

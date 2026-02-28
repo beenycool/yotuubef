@@ -6,6 +6,7 @@ Handles AI-powered content analysis, comment processing, and optimization sugges
 import logging
 import json
 import asyncio
+import random
 import time
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -18,7 +19,17 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 from src.config.settings import get_config
-from src.models import VideoAnalysisEnhanced
+from src.models import (
+    AudioDuckingConfig,
+    AudioHook,
+    CallToAction,
+    HookMoment,
+    NarrativeSegment,
+    TextOverlay,
+    ThumbnailInfo,
+    VideoAnalysisEnhanced,
+    VideoSegment,
+)
 
 
 class RateLimiter:
@@ -174,6 +185,13 @@ class NvidiaNimAIClient:
         Comment Type: [question/praise/criticism/spam/other]
         """
 
+    @staticmethod
+    def _get_content_field(content: Any, field: str, default: Any = "") -> Any:
+        """Extract a field from reddit content object or dict."""
+        if hasattr(content, "get"):
+            return content.get(field, default)
+        return getattr(content, field, default)
+
     async def analyze_video_content(
         self, video_path: Path, reddit_content: Any
     ) -> Optional[VideoAnalysisEnhanced]:
@@ -194,44 +212,19 @@ class NvidiaNimAIClient:
             video_metadata = self._extract_video_metadata(video_path)
 
             # Prepare analysis context
-            if (
-                hasattr(reddit_content, "__dict__")
-                and hasattr(reddit_content, "title")
-                and not hasattr(reddit_content, "get")
-            ):
-                analysis_context = {
-                    "title": getattr(reddit_content, "title", ""),
-                    "description": getattr(reddit_content, "selftext", ""),
-                    "duration": video_metadata.get("duration", 60),
-                    "subreddit": getattr(reddit_content, "subreddit", ""),
-                    "score": getattr(reddit_content, "score", 0),
-                    "num_comments": getattr(reddit_content, "num_comments", 0),
-                    "deep_research": getattr(reddit_content, "deep_research", "")
-                    if hasattr(reddit_content, "deep_research")
-                    else "",
-                }
-            else:
-                analysis_context = {
-                    "title": reddit_content.get("title", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                    "description": reddit_content.get("selftext", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                    "duration": video_metadata.get("duration", 60),
-                    "subreddit": reddit_content.get("subreddit", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                    "score": reddit_content.get("score", 0)
-                    if hasattr(reddit_content, "get")
-                    else 0,
-                    "num_comments": reddit_content.get("num_comments", 0)
-                    if hasattr(reddit_content, "get")
-                    else 0,
-                    "deep_research": reddit_content.get("deep_research", "")
-                    if hasattr(reddit_content, "get")
-                    else "",
-                }
+            analysis_context = {
+                "title": self._get_content_field(reddit_content, "title", ""),
+                "description": self._get_content_field(reddit_content, "selftext", ""),
+                "duration": video_metadata.get("duration", 60),
+                "subreddit": self._get_content_field(reddit_content, "subreddit", ""),
+                "score": self._get_content_field(reddit_content, "score", 0),
+                "num_comments": self._get_content_field(
+                    reddit_content, "num_comments", 0
+                ),
+                "deep_research": self._get_content_field(
+                    reddit_content, "deep_research", ""
+                ),
+            }
 
             # Perform AI analysis
             if self.nim_available:
@@ -345,13 +338,9 @@ class NvidiaNimAIClient:
                     f"Failed to parse NVIDIA NIM JSON response directly: {e}",
                     exc_info=True,
                 )
-                # Fallback: look for JSON block in response
-                start_idx = content.find("{")
-                end_idx = content.rfind("}") + 1
-
-                if start_idx >= 0 and end_idx > start_idx:
-                    json_str = content[start_idx:end_idx]
-                    return json.loads(json_str)
+                parsed_json = self._extract_json_object(content)
+                if isinstance(parsed_json, dict):
+                    return parsed_json
 
             # If JSON parsing fails, create structured response from text
             return self._parse_nim_text_response(content, context)
@@ -359,6 +348,22 @@ class NvidiaNimAIClient:
         except Exception as e:
             self.logger.error(f"NVIDIA NIM analysis failed: {e}")
             return None
+
+    def _extract_json_object(self, content: str) -> Optional[Dict[str, Any]]:
+        """Extract the first decodable JSON object from mixed text."""
+        decoder = json.JSONDecoder()
+        start_idx = content.find("{")
+
+        while start_idx >= 0:
+            try:
+                parsed, _ = decoder.raw_decode(content[start_idx:])
+                if isinstance(parsed, dict):
+                    return parsed
+            except ValueError:
+                pass
+            start_idx = content.find("{", start_idx + 1)
+
+        return None
 
     def _parse_nim_text_response(
         self, response_text: str, context: Dict[str, Any]
@@ -637,34 +642,76 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
         if self.alt_model and self.alt_model != self.model:
             models_to_try.append(self.alt_model)
 
+        max_retries = 3
+        base_delay = 0.5
         last_error = None
         for model_name in models_to_try:
-            try:
-                request_kwargs: Dict[str, Any] = {
-                    "model": model_name,
-                    "messages": messages,
-                    "temperature": temperature,
-                    "max_tokens": max_tokens,
-                }
-                if response_format:
-                    request_kwargs["response_format"] = response_format
+            for attempt in range(max_retries):
+                try:
+                    request_kwargs: Dict[str, Any] = {
+                        "model": model_name,
+                        "messages": messages,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                    }
+                    if response_format:
+                        request_kwargs["response_format"] = response_format
 
-                response = await self.client.chat.completions.create(**request_kwargs)
-                if model_name != self.model:
-                    self.logger.warning(
-                        "NVIDIA NIM request succeeded with fallback model: %s",
-                        model_name,
+                    response = await self.client.chat.completions.create(
+                        **request_kwargs
                     )
-                return response
-            except Exception as exc:
-                last_error = exc
-                self.logger.warning(
-                    "NVIDIA NIM model %s failed, trying next model if available: %s",
-                    model_name,
-                    exc,
-                )
+                    if model_name != self.model:
+                        self.logger.warning(
+                            "NVIDIA NIM request succeeded with fallback model: %s",
+                            model_name,
+                        )
+                    return response
+                except Exception as exc:
+                    last_error = exc
+                    if attempt < max_retries - 1 and self._is_retryable_error(exc):
+                        delay = (base_delay * (2**attempt)) + random.uniform(0.0, 0.25)
+                        self.logger.warning(
+                            "NVIDIA NIM transient error on %s (attempt %d/%d): %s. Retrying in %.2fs",
+                            model_name,
+                            attempt + 1,
+                            max_retries,
+                            exc,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+
+                    self.logger.warning(
+                        "NVIDIA NIM model %s failed, trying next model if available: %s",
+                        model_name,
+                        exc,
+                    )
+                    break
 
         raise RuntimeError(f"All NVIDIA NIM models failed: {last_error}")
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        if isinstance(exc, (asyncio.TimeoutError, OSError)):
+            return True
+
+        status_code = getattr(exc, "status_code", None)
+        if status_code is None:
+            response = getattr(exc, "response", None)
+            status_code = getattr(response, "status_code", None)
+
+        if isinstance(status_code, int):
+            return status_code == 429 or 500 <= status_code < 600
+
+        message = str(exc).lower()
+        retry_tokens = (
+            "timeout",
+            "timed out",
+            "rate limit",
+            "too many requests",
+            "temporar",
+        )
+        return any(token in message for token in retry_tokens)
 
     def _analyze_comment_with_fallback(
         self, comment_text: str, video_context: Dict[str, Any]
@@ -729,17 +776,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
     ) -> VideoAnalysisEnhanced:
         """Convert NVIDIA NIM analysis result to VideoAnalysisEnhanced model"""
         try:
-            from src.models import (
-                HookMoment,
-                AudioHook,
-                VideoSegment,
-                ThumbnailInfo,
-                CallToAction,
-                AudioDuckingConfig,
-                NarrativeSegment,
-                TextOverlay,
-            )
-
             raw_narrative_segments = analysis_result.get(
                 "narrative_script_segments", []
             )

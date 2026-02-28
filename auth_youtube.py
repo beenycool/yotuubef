@@ -36,7 +36,7 @@ def _write_token_file_secure(token_file: str, token_payload: str) -> None:
                 pass
 
 
-def authenticate_youtube():
+def authenticate_youtube() -> Credentials | None:
     # Load environment variables
     load_dotenv()
 

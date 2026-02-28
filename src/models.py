@@ -74,13 +74,6 @@ class VisualCue(BaseModel):
         description="Effect duration in seconds (0.1-10.0)",
     )
 
-    @field_validator("timestamp_seconds")
-    @classmethod
-    def validate_timestamp(cls, v):
-        if v < 0:
-            raise ValueError("Timestamp must be non-negative")
-        return v
-
     model_config = ConfigDict(use_enum_values=True)
 
 
@@ -168,11 +161,8 @@ class SpeedEffect(BaseModel):
     @field_validator("end_seconds")
     @classmethod
     def validate_time_range(cls, v, info):
-        if (
-            hasattr(info, "data")
-            and "start_seconds" in info.data
-            and v <= info.data["start_seconds"]
-        ):
+        start = info.data.get("start_seconds")
+        if start is not None and v <= start:
             raise ValueError("End time must be greater than start time")
         return v
 
@@ -201,11 +191,8 @@ class VideoSegment(BaseModel):
     @field_validator("end_seconds")
     @classmethod
     def validate_segment_range(cls, v, info):
-        if (
-            hasattr(info, "data")
-            and "start_seconds" in info.data
-            and v <= info.data["start_seconds"]
-        ):
+        start = info.data.get("start_seconds")
+        if start is not None and v <= start:
             raise ValueError("End time must be greater than start time")
         return v
 

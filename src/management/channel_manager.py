@@ -1126,11 +1126,7 @@ class ChannelManager:
         return f"V{index + 1}"
 
     def _get_db_manager(self) -> DatabaseManager:
-        db_manager: Optional[DatabaseManager] = getattr(self, "_db_manager", None)
-        if db_manager is None:
-            db_manager = get_db_manager()
-            self._db_manager = db_manager
-        return db_manager
+        return get_db_manager()
 
     def _get_video_path(self, video_id: str) -> Optional[Path]:
         """Get local path for video file using database mapping."""

@@ -3,9 +3,9 @@ Reddit API integration for content fetching and filtering.
 Handles Reddit authentication, post fetching, and content validation.
 """
 
-import re
 import logging
-from typing import List, Optional, Dict, Any
+import re
+from typing import List, Optional, Dict, Any, Pattern
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -127,19 +127,20 @@ class ContentFilter:
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
+        self._pattern_cache: Dict[str, Pattern[str]] = {}
 
-    @staticmethod
-    def _build_pattern(term: str) -> str:
-        return rf"\b{re.escape(term.lower())}\b"
+    def _build_pattern(self, term: str) -> Pattern[str]:
+        pattern = self._pattern_cache.get(term)
+        if pattern is None:
+            pattern = re.compile(rf"\b{re.escape(term)}\b", re.IGNORECASE)
+            self._pattern_cache[term] = pattern
+        return pattern
 
     def _find_matching_terms(self, text: Optional[str], terms: List[str]) -> List[str]:
         if not text or not terms:
             return []
 
-        text_lower = text.lower()
-        matches = [
-            term for term in terms if re.search(self._build_pattern(term), text_lower)
-        ]
+        matches = [term for term in terms if self._build_pattern(term).search(text)]
         return sorted(set(matches))
 
     def _tier_terms(self) -> Dict[str, List[str]]:
