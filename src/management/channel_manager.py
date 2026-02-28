@@ -182,7 +182,7 @@ class ChannelManager:
     async def _analyze_comments(self,
                                comments: List[Dict[str, Any]],
                                video_info: Dict[str, Any]) -> List[CommentAnalysis]:
-        """Analyze comments using AI for engagement optimization"""
+        """Analyze comments using AI for engagement optimization in batches"""
         analyses = []
         
         try:
@@ -192,20 +192,84 @@ class ChannelManager:
                 'tags': video_info.get('tags', [])[:5]  # First 5 tags
             }
             
-            for comment in comments:
-                try:
-                    analysis = await self._analyze_single_comment(comment, video_context)
-                    if analysis:
-                        analyses.append(analysis)
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to analyze comment {comment.get('id', 'unknown')}: {e}")
+            # Take up to 20 comments to prevent huge context windows
+            batch_comments = comments[:20]
+            if not batch_comments:
+                return []
+
+            formatted_comments = []
+            for c in batch_comments:
+                formatted_comments.append({
+                    'id': c.get('id', ''),
+                    'author': c.get('authorDisplayName', ''),
+                    'text': c.get('textDisplay', '')
+                })
+
+            # Call AI client for batch analysis
+            results = []
+            if hasattr(self.ai_client, 'analyze_comments_batch'):
+                results = await self.ai_client.analyze_comments_batch(formatted_comments, video_context)
+            else:
+                self.logger.warning("AI client does not support batch comment analysis, falling back to individual analysis")
+                for c in batch_comments:
+                    try:
+                        analysis = await self._analyze_single_comment(c, video_context)
+                        if analysis:
+                            analyses.append(analysis)
+                    except Exception as e:
+                        self.logger.warning(f"Failed to analyze comment {c.get('id', 'unknown')}: {e}")
+
+            # Create a map of comments for easy lookup
+            comment_map = {c.get('id'): c for c in batch_comments}
+
+            for res in results:
+                comment_id = res.get('comment_id')
+                if not comment_id or comment_id not in comment_map:
+                    continue
+
+                original_comment = comment_map[comment_id]
+                comment_text = original_comment.get('textDisplay', '')
+                author_name = original_comment.get('authorDisplayName', '')
+
+                # Derive missing analysis fields
+                engagement_score = 50.0
+                toxicity_score = 0.0
+                sentiment = res.get('sentiment', 'neutral')
+
+                # Determine reply urgency and actions
+                if engagement_score > 85 and toxicity_score < 15:
+                    reply_urgency = 'high'
+                elif engagement_score > 60 and toxicity_score < 30:
+                    reply_urgency = 'medium'
+                else:
+                    reply_urgency = 'low'
+
+                should_pin = engagement_score > 80 and toxicity_score < 20 and sentiment == 'positive'
+                should_heart = engagement_score > 60 and toxicity_score < 10 and sentiment != 'negative'
+
+                # Scale interaction priority from 0-100 to 1-10
+                interaction_priority_100 = res.get('interaction_priority', 50)
+                interaction_priority_10 = min(10, max(1, int(interaction_priority_100 / 10)))
+
+                analyses.append(CommentAnalysis(
+                    comment_id=comment_id,
+                    comment_text=comment_text,
+                    author_name=author_name,
+                    engagement_score=engagement_score,
+                    sentiment=sentiment,
+                    toxicity_score=toxicity_score,
+                    reply_urgency=reply_urgency,
+                    suggested_response=res.get('suggested_reply', ''),
+                    should_pin=should_pin,
+                    should_heart=should_heart,
+                    interaction_priority=interaction_priority_10
+                ))
             
             # Sort by interaction priority
             analyses.sort(key=lambda x: x.interaction_priority, reverse=True)
             
         except Exception as e:
-            self.logger.error(f"Comment analysis batch failed: {e}")
+            self.logger.error("Comment analysis batch failed", exc_info=True)
         
         return analyses
     
