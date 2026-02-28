@@ -243,6 +243,10 @@ class GeminiAIClient:
     
     async def _analyze_with_gemini(self, context: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Analyze content using Gemini API"""
+        if not getattr(self, 'model', None):
+            self.logger.error("Gemini model is not configured or available")
+            return None
+
         try:
             # Wait for rate limit if needed
             await self.rate_limiter.wait_if_needed()
@@ -259,7 +263,8 @@ class GeminiAIClient:
                 generation_config=genai.GenerationConfig(
                     temperature=0.7,
                     max_output_tokens=2000,
-                    candidate_count=1
+                    candidate_count=1,
+                    response_mime_type="application/json"
                 )
             )
             
@@ -269,15 +274,15 @@ class GeminiAIClient:
             
             # Try to extract JSON from response
             try:
-                # Look for JSON block in response
-                start_idx = content.find('{')
-                end_idx = content.rfind('}') + 1
-                
-                if start_idx >= 0 and end_idx > start_idx:
-                    json_str = content[start_idx:end_idx]
-                    return json.loads(json_str)
-            except json.JSONDecodeError:
-                pass
+                if content.strip():
+                    parsed_response = json.loads(content)
+                    if isinstance(parsed_response, dict):
+                        return parsed_response
+                    else:
+                        self.logger.error(f"Expected parsed response to be a dict, got {type(parsed_response)}")
+                        return self._parse_gemini_text_response(content, context)
+            except (json.JSONDecodeError, ValueError) as e:
+                self.logger.error(f"Failed to parse Gemini JSON response directly: {e}", exc_info=True)
             
             # If JSON parsing fails, create structured response from text
             return self._parse_gemini_text_response(content, context)
@@ -487,6 +492,10 @@ class GeminiAIClient:
     
     async def analyze_comments_batch(self, comments: list, video_context: dict) -> list:
         """Analyze a batch of comments using Gemini"""
+        if not self.model:
+            self.logger.error("Gemini model is not configured or available")
+            return []
+
         try:
             # Wait for rate limit if needed
             await self.rate_limiter.wait_if_needed()
@@ -515,9 +524,14 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
             try:
                 if response.text.strip():
-                    return json.loads(response.text)
-            except json.JSONDecodeError:
-                self.logger.error("Failed to parse batch comment analysis JSON")
+                    parsed_response = json.loads(response.text)
+                    if isinstance(parsed_response, list):
+                        return parsed_response
+                    else:
+                        self.logger.error(f"Expected parsed response to be a list, got {type(parsed_response)}")
+                        return []
+            except (json.JSONDecodeError, ValueError) as e:
+                self.logger.error(f"Failed to parse batch comment analysis JSON: {e}")
 
         except Exception as e:
             self.logger.error("Batch comment analysis failed", exc_info=True)
