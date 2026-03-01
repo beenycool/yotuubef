@@ -1223,6 +1223,34 @@ Search results:
 
         return False
 
+    @staticmethod
+    def _safe_parse_phase_json(content: str) -> Optional[Dict[str, Any]]:
+        """Extract a valid JSON object from possibly malformed LLM output."""
+        text = (content or "").strip()
+        if not text:
+            return None
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        start = text.find("{")
+        if start < 0:
+            return None
+        decoder = json.JSONDecoder()
+        try:
+            parsed, _ = decoder.raw_decode(text[start:])
+            if isinstance(parsed, dict):
+                return parsed
+        except (json.JSONDecodeError, ValueError):
+            pass
+        end = text.rfind("}")
+        if end > start:
+            try:
+                return json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                pass
+        return None
+
     async def _generate_hybrid_phase_payload(
         self,
         state,
@@ -1235,38 +1263,37 @@ Search results:
         prompt = build_state_machine_prompt(state, context)
         active_client = getattr(self.ai_client, "active_client", None)
 
-        if active_client and hasattr(active_client, "_chat_completion_with_fallback"):
-            try:
-                response = await active_client._chat_completion_with_fallback(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Return strict JSON for the provided phase contract only.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.3,
-                    max_tokens=1800,
-                    response_format={"type": "json_object"},
-                )
-                content = response.choices[0].message.content or "{}"
-                parsed = json.loads(content)
-                if isinstance(parsed, dict) and self._is_valid_hybrid_phase_payload(
-                    phase, parsed
-                ):
-                    return parsed
-                self.logger.warning(
-                    "Hybrid phase payload failed contract validation for %s",
-                    phase.value,
-                )
-            except Exception as exc:
-                self.logger.warning(
-                    "Hybrid phase model call failed for %s, using fallback: %s",
-                    phase.value,
-                    exc,
-                )
+        if not active_client or not hasattr(
+            active_client, "_chat_completion_with_fallback"
+        ):
+            raise RuntimeError(
+                f"No AI client available for hybrid phase {phase.value}"
+            )
 
-        return self._fallback_hybrid_phase_payload(phase, context)
+        max_tokens = 4000 if phase == PipelinePhase.SCRIPTING else 1800
+        response = await active_client._chat_completion_with_fallback(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Return strict JSON for the provided phase contract only.",
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.3,
+            max_tokens=max_tokens,
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content or "{}"
+        parsed = self._safe_parse_phase_json(content)
+        if not isinstance(parsed, dict):
+            raise RuntimeError(
+                f"Hybrid phase {phase.value}: AI returned invalid JSON (unparseable)"
+            )
+        if not self._is_valid_hybrid_phase_payload(phase, parsed):
+            raise RuntimeError(
+                f"Hybrid phase {phase.value}: AI payload failed contract validation"
+            )
+        return parsed
 
     @staticmethod
     def _is_valid_hybrid_phase_payload(
@@ -1644,7 +1671,7 @@ Search results:
     ) -> List[Dict[str, str]]:
         project_dir = Path(state.project_dir)
         raw_media_dir = project_dir / "raw_media"
-        image_dir = project_dir / "research" / "media" / "images"
+        image_dir = project_dir / "research" / "media_images"
         raw_media_dir.mkdir(parents=True, exist_ok=True)
         image_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1955,6 +1982,8 @@ Search results:
         assets: List[str] = []
         for subdir in [
             "raw_media",
+            "research/media_images",
+            "research/media_videos",
             "research/media/images",
             "research/media/videos",
             "research/transcripts",

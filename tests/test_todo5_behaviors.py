@@ -166,11 +166,11 @@ def test_hybrid_script_asset_mapping_rewrites_unknown_paths():
 
     orchestrator._enforce_script_asset_mapping(
         payload,
-        assets=["research/media/images/image_001.jpg"],
+        assets=["research/media_images/image_001.jpg"],
     )
 
     assert payload["phase"] == "SCRIPTING"
     assert (
         payload["segments"][0]["visual_asset_path"]
-        == "research/media/images/image_001.jpg"
+        == "research/media_images/image_001.jpg"
     )

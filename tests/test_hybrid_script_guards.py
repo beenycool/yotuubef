@@ -114,7 +114,7 @@ def test_enforce_script_asset_mapping_uses_visual_assets_and_balances_duration(
     }
     assets = [
         "research/evidence/evidence_index.json",
-        "research/media/images/image_001.jpg",
+        "research/media_images/image_001.jpg",
         "raw_media/video_001.mp4",
     ]
 
@@ -172,7 +172,7 @@ def test_enforce_script_asset_mapping_honors_target_duration_override(monkeypatc
             },
         ],
     }
-    assets = ["research/media/images/image_001.jpg"]
+    assets = ["research/media_images/image_001.jpg"]
 
     orchestrator._enforce_script_asset_mapping(payload, assets)
 
@@ -191,12 +191,12 @@ async def test_apply_hybrid_image_relevance_mapping_prefers_high_score_candidate
     monkeypatch.setenv("HYBRID_IMAGE_RELEVANCE_MAX_CALLS", "10")
 
     project_dir = tmp_path / "run1"
-    (project_dir / "research" / "media" / "images").mkdir(parents=True)
+    (project_dir / "research" / "media_images").mkdir(parents=True)
     (project_dir / "research" / "evidence").mkdir(parents=True)
     (project_dir / "raw_media").mkdir(parents=True)
 
-    img_relevant = project_dir / "research" / "media" / "images" / "image_001.jpg"
-    img_irrelevant = project_dir / "research" / "media" / "images" / "image_007.jpg"
+    img_relevant = project_dir / "research" / "media_images" / "image_001.jpg"
+    img_irrelevant = project_dir / "research" / "media_images" / "image_007.jpg"
     video_fallback = project_dir / "raw_media" / "video_001.mp4"
     img_relevant.write_bytes(b"relevant")
     img_irrelevant.write_bytes(b"irrelevant")
@@ -209,14 +209,14 @@ async def test_apply_hybrid_image_relevance_mapping_prefers_high_score_candidate
                 "downloaded_media": [
                     {
                         "media_type": "image",
-                        "local_path": "research/media/images/image_001.jpg",
+                        "local_path": "research/media_images/image_001.jpg",
                         "query": "dream speedrun leaderboard removed",
                         "title": "Dream leaderboard screenshot",
                         "source_url": "https://example.com/relevant",
                     },
                     {
                         "media_type": "image",
-                        "local_path": "research/media/images/image_007.jpg",
+                        "local_path": "research/media_images/image_007.jpg",
                         "query": "ender pearl guide",
                         "title": "How to farm pearls",
                         "source_url": "https://example.com/irrelevant",
@@ -250,13 +250,13 @@ async def test_apply_hybrid_image_relevance_mapping_prefers_high_score_candidate
                 "intended_duration_seconds": 6.0,
                 "narration": "Show the leaderboard where Dream's run was removed.",
                 "visual_directive": "Zoom into leaderboard receipts.",
-                "visual_asset_path": "research/media/images/image_007.jpg",
+                "visual_asset_path": "research/media_images/image_007.jpg",
             }
         ],
     }
     assets = [
-        "research/media/images/image_007.jpg",
-        "research/media/images/image_001.jpg",
+        "research/media_images/image_007.jpg",
+        "research/media_images/image_001.jpg",
         "raw_media/video_001.mp4",
     ]
 
@@ -264,7 +264,7 @@ async def test_apply_hybrid_image_relevance_mapping_prefers_high_score_candidate
 
     assert (
         payload["segments"][0]["visual_asset_path"]
-        == "research/media/images/image_001.jpg"
+        == "research/media_images/image_001.jpg"
     )
 
     report_path = project_dir / "research" / "evidence" / "media_relevance_report.json"
@@ -278,11 +278,11 @@ async def test_apply_hybrid_image_relevance_mapping_excludes_low_score_images(
     monkeypatch.setenv("HYBRID_IMAGE_RELEVANCE_MIN_SCORE", "70")
 
     project_dir = tmp_path / "run2"
-    (project_dir / "research" / "media" / "images").mkdir(parents=True)
+    (project_dir / "research" / "media_images").mkdir(parents=True)
     (project_dir / "research" / "evidence").mkdir(parents=True)
     (project_dir / "raw_media").mkdir(parents=True)
 
-    img_irrelevant = project_dir / "research" / "media" / "images" / "image_007.jpg"
+    img_irrelevant = project_dir / "research" / "media_images" / "image_007.jpg"
     video_fallback = project_dir / "raw_media" / "video_001.mp4"
     img_irrelevant.write_bytes(b"irrelevant")
     video_fallback.write_bytes(b"video")
@@ -294,7 +294,7 @@ async def test_apply_hybrid_image_relevance_mapping_excludes_low_score_images(
                 "downloaded_media": [
                     {
                         "media_type": "image",
-                        "local_path": "research/media/images/image_007.jpg",
+                        "local_path": "research/media_images/image_007.jpg",
                         "query": "minecraft pearl farming guide",
                         "title": "general gameplay guide",
                         "source_url": "https://example.com/guide",
@@ -335,12 +335,12 @@ async def test_apply_hybrid_image_relevance_mapping_excludes_low_score_images(
                 "intended_duration_seconds": 6.0,
                 "narration": "Show Dream disqualification leaderboard proof.",
                 "visual_directive": "Highlight removed entry.",
-                "visual_asset_path": "research/media/images/image_007.jpg",
+                "visual_asset_path": "research/media_images/image_007.jpg",
             }
         ],
     }
     assets = [
-        "research/media/images/image_007.jpg",
+        "research/media_images/image_007.jpg",
         "raw_media/video_001.mp4",
     ]
 
@@ -357,11 +357,11 @@ async def test_apply_hybrid_image_relevance_mapping_can_select_relevant_video(
     monkeypatch.setenv("HYBRID_IMAGE_RELEVANCE_TOP_K", "3")
 
     project_dir = tmp_path / "run3"
-    (project_dir / "research" / "media" / "images").mkdir(parents=True)
+    (project_dir / "research" / "media_images").mkdir(parents=True)
     (project_dir / "research" / "evidence").mkdir(parents=True)
     (project_dir / "raw_media").mkdir(parents=True)
 
-    img_irrelevant = project_dir / "research" / "media" / "images" / "image_007.jpg"
+    img_irrelevant = project_dir / "research" / "media_images" / "image_007.jpg"
     video_relevant = project_dir / "raw_media" / "video_001.mp4"
     img_irrelevant.write_bytes(b"irrelevant")
     video_relevant.write_bytes(b"video")
@@ -373,7 +373,7 @@ async def test_apply_hybrid_image_relevance_mapping_can_select_relevant_video(
                 "downloaded_media": [
                     {
                         "media_type": "image",
-                        "local_path": "research/media/images/image_007.jpg",
+                        "local_path": "research/media_images/image_007.jpg",
                         "query": "general minecraft image",
                         "title": "ender pearl guide",
                         "source_url": "https://example.com/image",
@@ -414,12 +414,12 @@ async def test_apply_hybrid_image_relevance_mapping_can_select_relevant_video(
                 "intended_duration_seconds": 6.0,
                 "narration": "Show the evidence clip of Dream leaderboard removal.",
                 "visual_directive": "Use direct footage proving the dispute.",
-                "visual_asset_path": "research/media/images/image_007.jpg",
+                "visual_asset_path": "research/media_images/image_007.jpg",
             }
         ],
     }
     assets = [
-        "research/media/images/image_007.jpg",
+        "research/media_images/image_007.jpg",
         "raw_media/video_001.mp4",
     ]
 

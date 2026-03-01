@@ -648,6 +648,8 @@ def gather_workspace_assets(state: RunState) -> List[str]:
     base = Path(state.project_dir)
     assets: List[str] = []
     for sub in [
+        "research/media_images",
+        "research/media_videos",
         "research/media/images",
         "research/media/videos",
         "research/transcripts",
@@ -727,7 +729,7 @@ def phase_scripting(state: RunState) -> Dict[str, Any]:
         '      "narration": "...",\n'
         '      "on_screen_text": "...",\n'
         '      "visual_search_query": "...",\n'
-        '      "visual_asset_path": "research/media/...",\n'
+        '      "visual_asset_path": "research/media_images/...",\n'
         '      "evidence_refs": ["..."],\n'
         '      "pace": "fast|normal|slow",\n'
         '      "emotion": "excited|calm|dramatic|neutral"\n'

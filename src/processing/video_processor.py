@@ -243,10 +243,17 @@ class VideoDownloader:
                 "embed_info": False,
                 "writesubtitles": False,
                 "writeautomaticsub": False,
-                # Add Reddit-specific options
                 "ignore_errors": False,
                 "no_check_certificate": True,
+                "retries": 10,
+                "fragment_retries": 10,
             }
+            # YouTube-specific: use Android client to reduce 403 errors from cloud IPs
+            if "youtube.com" in url or "youtu.be" in url:
+                ydl_opts["extractor_args"] = {
+                    "youtube": {"player_client": ["android", "web"]},
+                }
+                ydl_opts["hls_prefer_ffmpeg"] = True
             ydl_opts.update(self._get_yt_dlp_auth_options())
 
             try:
@@ -273,19 +280,32 @@ class VideoDownloader:
                         "requested format is not available",
                         "no video formats found",
                         "format not found",
+                        "403",
+                        "forbidden",
+                        "fragment not found",
+                        "the downloaded file is empty",
                     ]
                 ):
                     self.logger.warning(
                         f"Primary format failed for {url}, trying progressive fallbacks"
                     )
 
-                    # Progressive fallback strategy
-                    fallback_formats = [
-                        "worst[ext=mp4]/worst[ext=webm]/worst",  # Any available format
-                        "bestvideo+bestaudio/best",  # Separate video+audio
-                        "bestvideo/best",  # Video only if needed
-                        "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",  # Specific containers
-                    ]
+                    # YouTube: prefer lower-res progressive first to avoid 403 on DASH/HLS
+                    if "youtube.com" in url or "youtu.be" in url:
+                        fallback_formats = [
+                            "best[height<=720][ext=mp4]/best[height<=720]/worst[ext=mp4]/worst",
+                            "worst[ext=mp4]/worst[ext=webm]/worst",
+                            "bestvideo+bestaudio/best",
+                            "bestvideo/best",
+                            "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
+                        ]
+                    else:
+                        fallback_formats = [
+                            "worst[ext=mp4]/worst[ext=webm]/worst",
+                            "bestvideo+bestaudio/best",
+                            "bestvideo/best",
+                            "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
+                        ]
 
                     success = False
                     for i, fallback_format in enumerate(fallback_formats):
