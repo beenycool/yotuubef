@@ -11,7 +11,17 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Dict,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from uuid import uuid4
 
 import aiohttp
@@ -190,6 +200,10 @@ STATE_MACHINE_PROMPT_TEMPLATE = """You are an elite YouTube Shorts Documentary P
 Guiding principle: INFORMATION DENSITY.
 Every ~2 seconds, audience should receive a new concrete piece of proof.
 Prefer receipts over generic b-roll: exact dates, quotes, handles, URLs, leaderboard snapshots, forum excerpts, and clip timestamps.
+For SCRIPTING, match a conversational rabbit-hole investigation tone (not formal documentary narration):
+- Open with a spoken question hook in Segment 1 narration.
+- Escalate clue-by-clue ("you might think... but then..."), showing how each receipt was discovered.
+- Keep language sharp and human while still factual.
 
 CURRENT_PIPELINE_PHASE: {current_phase}
 PROJECT: {project_name}

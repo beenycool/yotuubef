@@ -4,12 +4,17 @@ Main entry point for the enhanced system with cinematic editing, advanced audio 
 thumbnail A/B testing, and proactive channel management.
 """
 
+# Load .env before any other imports so env vars are available to all modules
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+
 import asyncio
 import logging
 import argparse
 import json
 import sys
-from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 

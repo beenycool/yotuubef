@@ -62,13 +62,17 @@ LOG_FILE = os.getenv("LOG_FILE", "run_log.txt")
 
 
 SCRIPT_SYSTEM_PROMPT = (
-    "You are an elite YouTube Shorts Documentary Editor specializing in hyper-niche internet/gaming history. "
-    "Your guiding principle is INFORMATION DENSITY. "
-    "1. Every sentence must introduce a new concrete fact (a date, a name, an exact number, a specific forum post). "
-    "2. Zero fluff. No 'Have you ever wondered...' or 'Let\'s dive in'. "
-    "3. Visuals dictate the script: map every sentence to a specific piece of evidence in the provided context. "
-    "4. Create a Perfect Loop: the final sentence must grammatically and seamlessly flow directly into the first sentence. "
-    "Return strict JSON only. Do not invent facts."
+    "You are an elite YouTube Shorts documentary editor for hyper-niche internet/gaming history. "
+    "Primary mode: fast, conversational internet-investigation voiceover. "
+    "Guiding principle: INFORMATION DENSITY. "
+    "1. In SCRIPTING, start Segment 1 narration with a compelling question hook, not a flat declarative line. "
+    "2. Write like a live rabbit-hole investigation: use transitions such as 'you might think... but...' and 'when people checked...'. "
+    "3. Every sentence must add a concrete receipt-backed detail (exact numbers, usernames, IDs, dates, posts, PDFs, quotes, timestamps). "
+    "4. Prefer progression over summary: reveal how the community discovered each clue step-by-step, escalating stakes each beat. "
+    "5. Avoid formal documentary phrasing and dry report tone. Keep wording sharp, human, and conversational while factual. "
+    "6. Visuals dictate script: map each narration beat to specific evidence in provided context/assets. "
+    "7. Create a perfect loop: final sentence must flow grammatically back into the first hook line. "
+    "Return strict JSON only. Never invent facts, sources, dates, quotes, or numbers."
 )
 
 
@@ -277,7 +281,9 @@ async def phase_idea_generation(state: RunState) -> None:
     Return strict JSON: {"scouting_queries": ["query 1", "query 2", ...]}
     """
 
-    planning_raw = chat_json(planning_prompt, validator=lambda x: "scouting_queries" in x)
+    planning_raw = chat_json(
+        planning_prompt, validator=lambda x: "scouting_queries" in x
+    )
     scouting_queries = planning_raw["scouting_queries"]
     log_event("AI_PLANNED_QUERIES", scouting_queries)
 
@@ -300,7 +306,7 @@ async def phase_idea_generation(state: RunState) -> None:
         search_context,
         max_tokens=120000,
         api_key=NVIDIA_API_KEY,
-        model="qwen/qwen3.5-397b-a17b" # Or your gpt-oss-120b equivalent
+        model="qwen/qwen3.5-397b-a17b",  # Or your gpt-oss-120b equivalent
     ).context
 
     # STEP 4: Generate the 3 Mid-Tier Angles + the Master Gemini Prompt
@@ -328,12 +334,15 @@ async def phase_idea_generation(state: RunState) -> None:
     """
 
     def _validate_ideation(payload):
-        if len(payload.get("angles", [])) != 3: raise ValueError("Need 3 angles")
+        if len(payload.get("angles", [])) != 3:
+            raise ValueError("Need 3 angles")
 
     final_ideas = chat_json(ideation_prompt, validator=_validate_ideation)
 
     # Save results to project folder
-    saved_path = save_finding(state.project_dir, "ideas", "idea_generation.json", final_ideas)
+    saved_path = save_finding(
+        state.project_dir, "ideas", "idea_generation.json", final_ideas
+    )
     add_artifact_to_state(state, saved_path, "ideas")
 
     # Update State

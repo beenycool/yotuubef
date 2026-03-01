@@ -5,8 +5,11 @@ performance tracking, and proactive channel management.
 """
 
 import asyncio
+import ast
+import base64
 import json
 import logging
+import mimetypes
 import os
 import re
 from pathlib import Path
@@ -15,7 +18,11 @@ from datetime import datetime
 from urllib.parse import urlparse
 
 import aiohttp
-from moviepy import AudioFileClip, CompositeAudioClip, concatenate_audioclips
+from moviepy import (
+    AudioFileClip,
+    CompositeAudioClip,
+    concatenate_audioclips,
+)
 
 import asyncprawcore.exceptions
 
@@ -534,6 +541,10 @@ class EnhancedVideoOrchestrator:
                 workflow_result["search_audit_path"] = state.metadata[
                     "search_audit_path"
                 ]
+            if state.metadata.get("deep_research_prompt_path"):
+                workflow_result["deep_research_prompt_path"] = state.metadata[
+                    "deep_research_prompt_path"
+                ]
             return workflow_result
         except Exception as exc:
             self.logger.error(
@@ -570,13 +581,27 @@ class EnhancedVideoOrchestrator:
                 idea_payload, audit_path = await self._run_idea_generation_search_first(
                     state,
                 )
+                idea_payload = self._prepare_idea_generation_payload(
+                    idea_payload,
+                    project_name=state.project_name,
+                )
                 idea_path = save_finding(
                     state.project_dir,
                     "ideas",
                     "idea_generation.json",
                     idea_payload,
                 )
+                prompt_path = self._save_deep_research_prompt_artifact(
+                    state,
+                    idea_payload,
+                )
                 state.metadata["idea_generation_path"] = str(idea_path)
+                if prompt_path:
+                    state.metadata["deep_research_prompt_path"] = str(prompt_path)
+                    print(
+                        f"[Hybrid] Deep research prompt saved: {prompt_path}",
+                        flush=True,
+                    )
                 if audit_path:
                     state.metadata["search_audit_path"] = str(audit_path)
                 state.context_snapshot = json.dumps(idea_payload, ensure_ascii=True)
@@ -590,6 +615,9 @@ class EnhancedVideoOrchestrator:
 
             if phase == PipelinePhase.WAIT_FOR_GEMINI_REPORT:
                 report_candidate = gemini_report_path or state.gemini_report_path
+                prompt_path = state.metadata.get("deep_research_prompt_path")
+                if prompt_path:
+                    print(f"[Hybrid] Deep research prompt: {prompt_path}", flush=True)
                 if not report_candidate and not no_auto_research:
                     report_candidate, audit_path = await self._run_auto_gemini_research(
                         state,
@@ -609,6 +637,9 @@ class EnhancedVideoOrchestrator:
                         "pipeline": "hybrid_documentary_studio",
                         "no_upload": bool(
                             state.metadata.get("hybrid_no_upload", False)
+                        ),
+                        "deep_research_prompt_path": state.metadata.get(
+                            "deep_research_prompt_path"
                         ),
                         "message": "Waiting for Gemini report. Resume with --gemini-report.",
                     }
@@ -811,7 +842,11 @@ class EnhancedVideoOrchestrator:
                     phase,
                     summary_result.context or raw_context,
                 )
-                self._enforce_script_asset_mapping(script_payload, workspace_assets)
+                await self._apply_hybrid_image_relevance_mapping(
+                    state,
+                    script_payload,
+                    workspace_assets,
+                )
                 final_script_path = save_finding(
                     state.project_dir,
                     "scripts",
@@ -844,9 +879,7 @@ class EnhancedVideoOrchestrator:
         "deleted world record receipts",
     ]
 
-    async def _run_idea_generation_search_first(
-        self, state
-    ) -> tuple:
+    async def _run_idea_generation_search_first(self, state) -> tuple:
         """Search-first IDEA_GENERATION: run searches, then LLM extracts angles with source_urls."""
         api_key = (
             os.getenv("HACKCLUB_SEARCH_API_KEY")
@@ -982,7 +1015,10 @@ Search results:
                     and isinstance(parsed.get("angles"), list)
                 ):
                     self._ensure_source_urls_on_angles(parsed)
-                    return parsed
+                    return self._prepare_idea_generation_payload(
+                        parsed,
+                        project_name=getattr(state, "project_name", ""),
+                    )
             except Exception as exc:
                 self.logger.warning("Extract angles failed: %s", exc)
 
@@ -990,13 +1026,18 @@ Search results:
             PipelinePhase.IDEA_GENERATION, search_context
         )
         self._ensure_source_urls_on_angles(fallback)
-        return fallback
+        return self._prepare_idea_generation_payload(
+            fallback,
+            project_name=getattr(state, "project_name", ""),
+        )
 
     async def _run_auto_gemini_research(self, state) -> tuple:
         """Run AgenticResearcher or DeepResearchClient to produce gemini report."""
         api_key_brave = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
-        api_key_hack = (
-            os.getenv("HACKCLUB_SEARCH_API_KEY") or os.getenv("HACKCLUB_SEARCH_KEY")
+        api_key_hack = str(
+            os.getenv("HACKCLUB_SEARCH_API_KEY")
+            or os.getenv("HACKCLUB_SEARCH_KEY")
+            or ""
         ).strip()
 
         idea_path = Path(state.metadata.get("idea_generation_path", ""))
@@ -1010,12 +1051,30 @@ Search results:
             self.logger.warning("Failed to read idea_generation.json: %s", exc)
             return None, None
 
-        prompt = idea_payload.get("gemini_deep_research_prompt", "")
-        angles = idea_payload.get("angles", [])
-        topic = angles[0].get("title", "") if angles else "research topic"
+        idea_payload = self._prepare_idea_generation_payload(
+            idea_payload,
+            project_name=getattr(state, "project_name", ""),
+        )
+        prompt_path = self._save_deep_research_prompt_artifact(state, idea_payload)
+        if prompt_path:
+            state.metadata["deep_research_prompt_path"] = str(prompt_path)
 
-        if not prompt:
-            prompt = f"Search for primary sources and key facts: {topic}"
+        try:
+            idea_path.write_text(
+                json.dumps(idea_payload, indent=2, ensure_ascii=True),
+                encoding="utf-8",
+            )
+        except Exception as exc:
+            self.logger.warning("Failed to persist enriched idea payload: %s", exc)
+
+        prompt = str(idea_payload.get("gemini_deep_research_prompt", "") or "").strip()
+        angles = idea_payload.get("angles", [])
+        topic = str(angles[0].get("title", "") or "").strip() if angles else ""
+
+        if not topic:
+            topic = str(state.project_name or "research topic").strip()
+
+        research_query = self._build_gemini_research_query(topic, prompt)
 
         logs_dir = Path(state.project_dir) / "research" / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
@@ -1027,18 +1086,25 @@ Search results:
             researcher = AgenticResearcher(audit_logger=audit_logger)
             report_text = await researcher.deep_dive(
                 topic=topic,
-                initial_context=prompt,
+                initial_context=research_query,
                 max_turns=3,
             )
         elif api_key_hack:
             client = DeepResearchClient(audit_logger=audit_logger)
-            report_text = await client.conduct_deep_research(prompt)
+            report_text = await client.conduct_deep_research(research_query)
             await client.close()
         else:
             self.logger.warning(
                 "No BRAVE_SEARCH_API_KEY or HACKCLUB_SEARCH_API_KEY for auto research"
             )
             return None, None
+
+        if not self._is_research_report_relevant(report_text, topic, angles):
+            self.logger.warning(
+                "Auto research output appears off-topic for '%s'; waiting for manual report",
+                topic,
+            )
+            return None, str(audit_path)
 
         report_path = save_finding(
             state.project_dir,
@@ -1049,13 +1115,123 @@ Search results:
         self.logger.info("Auto research report saved: %s", report_path)
         return str(report_path), str(audit_path)
 
+    @staticmethod
+    def _build_gemini_research_query(topic: str, prompt: str) -> str:
+        topic_text = str(topic or "research topic").strip()
+        prompt_text = str(prompt or "").strip()
+        if not prompt_text:
+            return f"Search for primary sources and key facts: {topic_text}"
+
+        lowered = prompt_text.lower()
+        keyword_map = {
+            "primary": "primary sources",
+            "timeline": "timeline",
+            "date": "exact dates",
+            "official": "official statements",
+            "archive": "archived links",
+            "forum": "forum posts",
+            "leaderboard": "leaderboard snapshots",
+            "court": "court filings",
+        }
+        inferred_terms: List[str] = []
+        for token, term in keyword_map.items():
+            if token in lowered and term not in inferred_terms:
+                inferred_terms.append(term)
+
+        source_urls = re.findall(r"https?://[^\s)]+", prompt_text)
+        site_filters: List[str] = []
+        for source_url in source_urls:
+            host = urlparse(source_url).netloc.lower()
+            if host.startswith("www."):
+                host = host[4:]
+            if host and host not in site_filters:
+                site_filters.append(host)
+            if len(site_filters) >= 2:
+                break
+
+        query_parts = [topic_text, "fact check"]
+        if inferred_terms:
+            query_parts.append(" ".join(inferred_terms[:4]))
+        if site_filters:
+            query_parts.append(" ".join(f"site:{host}" for host in site_filters))
+
+        return " | ".join(part for part in query_parts if part).strip()
+
+    @staticmethod
+    def _extract_topic_keywords(topic: str) -> List[str]:
+        words = re.findall(r"[a-z0-9]+", str(topic or "").lower())
+        stop_words = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "into",
+            "how",
+            "after",
+            "when",
+            "over",
+            "under",
+            "about",
+            "what",
+            "which",
+            "where",
+            "world",
+            "record",
+            "records",
+            "controversy",
+            "history",
+            "research",
+        }
+        filtered = [w for w in words if len(w) >= 4 and w not in stop_words]
+        deduped: List[str] = []
+        for token in filtered:
+            if token not in deduped:
+                deduped.append(token)
+        return deduped
+
+    def _is_research_report_relevant(
+        self,
+        report_text: Any,
+        topic: str,
+        angles: Any,
+    ) -> bool:
+        text = str(report_text or "").strip().lower()
+        if not text:
+            return False
+
+        keywords = self._extract_topic_keywords(topic)
+        if not keywords:
+            return True
+
+        keyword_hits = sum(1 for token in keywords if token in text)
+        if keyword_hits >= 2:
+            return True
+
+        if isinstance(angles, list):
+            for angle in angles:
+                if not isinstance(angle, dict):
+                    continue
+                for source_url in angle.get("source_urls", []) or []:
+                    if not isinstance(source_url, str):
+                        continue
+                    host = urlparse(source_url).netloc.lower()
+                    if host and host in text:
+                        return True
+
+        return False
+
     async def _generate_hybrid_phase_payload(
         self,
         state,
         phase: PipelinePhase,
         context: str,
     ) -> Dict[str, Any]:
-        print(f"[Hybrid] Calling AI for {phase.value}... (may take 1-2 min)", flush=True)
+        print(
+            f"[Hybrid] Calling AI for {phase.value}... (may take 1-2 min)", flush=True
+        )
         prompt = build_state_machine_prompt(state, context)
         active_client = getattr(self.ai_client, "active_client", None)
 
@@ -1139,6 +1315,15 @@ Search results:
         actual_keys = set(payload.keys())
         if actual_keys != expected_keys:
             return False
+
+        if phase == PipelinePhase.IDEA_GENERATION:
+            prompt_text = str(
+                payload.get("gemini_deep_research_prompt", "") or ""
+            ).strip()
+            if len(prompt_text.split()) < 8:
+                return False
+            if not isinstance(payload.get("angles"), list):
+                return False
 
         return True
 
@@ -1296,6 +1481,130 @@ Search results:
             normalized.append(f"primary source evidence {len(normalized) + 1}")
         return normalized
 
+    @staticmethod
+    def _collect_source_urls_from_angles(angles: Any, limit: int = 8) -> List[str]:
+        urls: List[str] = []
+        if not isinstance(angles, list):
+            return urls
+
+        for angle in angles:
+            if not isinstance(angle, dict):
+                continue
+            for candidate in angle.get("source_urls", []) or []:
+                url = str(candidate or "").strip()
+                if not url:
+                    continue
+                if not urlparse(url).scheme:
+                    continue
+                if url in urls:
+                    continue
+                urls.append(url)
+                if len(urls) >= max(1, limit):
+                    return urls
+        return urls
+
+    @staticmethod
+    def _build_deep_research_prompt(
+        topic: str,
+        hook: str,
+        source_urls: List[str],
+        existing_prompt: str,
+    ) -> str:
+        topic_text = str(topic or "research topic").strip() or "research topic"
+        hook_text = str(hook or "").strip()
+        existing_text = " ".join(str(existing_prompt or "").split())
+
+        lines = [
+            f"Topic: {topic_text}",
+            "Goal: build a verifiable fact dossier for a short documentary script.",
+            "Research tasks:",
+            "1) Build a dated timeline of key events using primary or near-primary sources.",
+            "2) Verify the strongest quantitative claims and quote exact numbers with context.",
+            "3) Capture direct statements from involved parties and moderators/official bodies.",
+            "4) Find archived links or snapshots for deleted/edited pages when possible.",
+            "5) Flag uncertain or conflicting claims instead of filling gaps.",
+            "Output format:",
+            "- Chronology: YYYY-MM-DD | event | citation URL",
+            "- Claims table: claim | evidence | confidence(high/medium/low) | citation URL",
+            "- Open questions: unresolved facts that still need receipts",
+        ]
+
+        if hook_text:
+            lines.append(f"Narrative hook to verify: {hook_text}")
+
+        if source_urls:
+            lines.append("Seed sources to verify (do not trust blindly):")
+            for url in source_urls[:8]:
+                lines.append(f"- {url}")
+
+        if existing_text:
+            lines.append(f"Additional directive: {existing_text}")
+
+        return "\n".join(lines)
+
+    def _prepare_idea_generation_payload(
+        self,
+        payload: Dict[str, Any],
+        project_name: str,
+    ) -> Dict[str, Any]:
+        if not isinstance(payload, dict):
+            payload = {}
+
+        prepared: Dict[str, Any] = dict(payload)
+        prepared["phase"] = PipelinePhase.IDEA_GENERATION.value
+
+        raw_angles = prepared.get("angles")
+        angles: List[Dict[str, Any]] = []
+        if isinstance(raw_angles, list):
+            for angle in raw_angles:
+                if not isinstance(angle, dict):
+                    continue
+                cleaned = dict(angle)
+                source_urls = cleaned.get("source_urls")
+                if not isinstance(source_urls, list):
+                    source_urls = []
+                cleaned["source_urls"] = [
+                    str(url).strip()
+                    for url in source_urls
+                    if str(url or "").strip().startswith(("http://", "https://"))
+                ]
+                angles.append(cleaned)
+        prepared["angles"] = angles
+
+        best_angle: Dict[str, Any] = angles[0] if angles else {}
+        topic = (
+            str(best_angle.get("title", "") or "").strip()
+            or str(project_name or "research topic").strip()
+        )
+        hook = str(best_angle.get("hook", "") or "").strip()
+        source_urls = self._collect_source_urls_from_angles(angles, limit=8)
+
+        prepared["gemini_deep_research_prompt"] = self._build_deep_research_prompt(
+            topic=topic,
+            hook=hook,
+            source_urls=source_urls,
+            existing_prompt=str(prepared.get("gemini_deep_research_prompt", "") or ""),
+        )
+        prepared["next_phase"] = PipelinePhase.WAIT_FOR_GEMINI_REPORT.value
+        return prepared
+
+    def _save_deep_research_prompt_artifact(
+        self,
+        state: Any,
+        idea_payload: Dict[str, Any],
+    ) -> Optional[Path]:
+        prompt_text = str(
+            idea_payload.get("gemini_deep_research_prompt", "") or ""
+        ).strip()
+        if not prompt_text:
+            return None
+        return save_finding(
+            state.project_dir,
+            "reports",
+            "deep_research_prompt.txt",
+            prompt_text,
+        )
+
     async def _run_hybrid_media_queries(
         self,
         image_queries: List[str],
@@ -1344,12 +1653,16 @@ Search results:
 
         downloaded: List[Dict[str, str]] = []
         video_targets: List[Dict[str, str]] = []
-        image_targets: List[Dict[str, str]] = []
+        image_targets: List[Dict[str, Any]] = []
 
         for query, hits in (search_payload.get("video", {}) or {}).items():
             if not isinstance(hits, list):
                 continue
-            for item in hits[:2]:
+            ranked_hits = sorted(
+                [item for item in hits if isinstance(item, dict)],
+                key=lambda item: self._video_source_rank(str(item.get("url", ""))),
+            )
+            for item in ranked_hits[:2]:
                 if not isinstance(item, dict):
                     continue
                 url = str(item.get("url", "")).strip()
@@ -1369,13 +1682,14 @@ Search results:
             for item in hits[:2]:
                 if not isinstance(item, dict):
                     continue
-                url = str(item.get("url", "")).strip()
-                if not url:
+                candidate_urls = self._extract_image_candidate_urls(item)
+                if not candidate_urls:
                     continue
                 image_targets.append(
                     {
                         "query": query,
-                        "url": url,
+                        "url": candidate_urls[0],
+                        "url_candidates": candidate_urls,
                         "title": str(item.get("title") or "image_evidence"),
                     }
                 )
@@ -1408,19 +1722,37 @@ Search results:
                 for idx, target in enumerate(
                     image_targets[:max_image_downloads], start=1
                 ):
-                    print(f"[Hybrid] Downloading image {idx}/{image_total}...", flush=True)
-                    downloaded_path = await self._download_hybrid_image_hit(
-                        session,
-                        target["url"],
-                        image_dir,
-                        idx,
+                    print(
+                        f"[Hybrid] Downloading image {idx}/{image_total}...", flush=True
                     )
+                    downloaded_path: Optional[Path] = None
+                    selected_source_url = str(target.get("url", ""))
+                    candidate_urls = target.get(
+                        "url_candidates", [target.get("url", "")]
+                    )
+                    if not isinstance(candidate_urls, list):
+                        candidate_urls = [target.get("url", "")]
+
+                    for candidate_url in candidate_urls:
+                        candidate_text = str(candidate_url).strip()
+                        if not candidate_text:
+                            continue
+                        downloaded_path = await self._download_hybrid_image_hit(
+                            session,
+                            candidate_text,
+                            image_dir,
+                            idx,
+                        )
+                        if downloaded_path is not None:
+                            selected_source_url = candidate_text
+                            break
+
                     if downloaded_path is None:
                         continue
                     downloaded.append(
                         {
                             "media_type": "image",
-                            "source_url": target["url"],
+                            "source_url": selected_source_url,
                             "query": target["query"],
                             "title": target["title"],
                             "local_path": str(downloaded_path.relative_to(project_dir)),
@@ -1445,6 +1777,82 @@ Search results:
             if candidate.suffix.lower() in {".mp4", ".webm", ".mkv", ".avi", ".mov"}:
                 return candidate
         return None
+
+    @staticmethod
+    def _video_source_rank(url: str) -> int:
+        host = (urlparse(str(url or "")).netloc or "").lower()
+        if "youtube.com" in host or "youtu.be" in host:
+            return 2
+        if "reddit.com" in host or "v.redd.it" in host:
+            return 1
+        return 0
+
+    def _extract_image_candidate_urls(self, item: Dict[str, Any]) -> List[str]:
+        candidates: List[str] = []
+
+        thumbnail_raw = item.get("thumbnail_url")
+        candidates.extend(self._parse_thumbnail_candidate_urls(thumbnail_raw))
+
+        primary_url = str(item.get("url", "") or "").strip()
+        if primary_url:
+            if self._is_probable_image_url(primary_url):
+                candidates.insert(0, primary_url)
+            else:
+                candidates.append(primary_url)
+
+        deduped: List[str] = []
+        for candidate in candidates:
+            text = str(candidate or "").strip()
+            if not text or text in deduped:
+                continue
+            if text.startswith("http://") or text.startswith("https://"):
+                deduped.append(text)
+        return deduped
+
+    @staticmethod
+    def _parse_thumbnail_candidate_urls(thumbnail_raw: Any) -> List[str]:
+        candidates: List[str] = []
+        if isinstance(thumbnail_raw, dict):
+            src = thumbnail_raw.get("src") or thumbnail_raw.get("url")
+            if isinstance(src, str) and src.strip():
+                candidates.append(src.strip())
+            return candidates
+
+        if not isinstance(thumbnail_raw, str):
+            return candidates
+
+        text = thumbnail_raw.strip()
+        if not text:
+            return candidates
+
+        if text.startswith("http://") or text.startswith("https://"):
+            candidates.append(text)
+            return candidates
+
+        if not text.startswith("{"):
+            return candidates
+
+        try:
+            payload = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
+            return candidates
+
+        if isinstance(payload, dict):
+            src = payload.get("src") or payload.get("url")
+            if isinstance(src, str) and src.strip():
+                candidates.append(src.strip())
+        return candidates
+
+    @staticmethod
+    def _is_probable_image_url(url: str) -> bool:
+        text = str(url or "").strip().lower()
+        if not text:
+            return False
+        for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".svg"):
+            if ext in text:
+                return True
+        host = (urlparse(text).netloc or "").lower()
+        return "img" in host or "image" in host or "ytimg" in host
 
     async def _download_hybrid_image_hit(
         self,
@@ -1561,11 +1969,547 @@ Search results:
         assets.sort()
         return assets
 
+    async def _apply_hybrid_image_relevance_mapping(
+        self,
+        state: Any,
+        script_payload: Dict[str, Any],
+        assets: List[str],
+    ) -> None:
+        self._enforce_script_asset_mapping(script_payload, assets)
+
+        segments = script_payload.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return
+
+        visual_assets = self._filter_visual_assets(assets)
+        if not visual_assets:
+            return
+
+        min_score = self._read_env_int(
+            "HYBRID_IMAGE_RELEVANCE_MIN_SCORE",
+            default=70,
+            minimum=1,
+            maximum=100,
+        )
+        top_k = self._read_env_int(
+            "HYBRID_IMAGE_RELEVANCE_TOP_K",
+            default=3,
+            minimum=1,
+            maximum=12,
+        )
+        max_calls = self._read_env_int(
+            "HYBRID_IMAGE_RELEVANCE_MAX_CALLS",
+            default=24,
+            minimum=1,
+            maximum=120,
+        )
+        remaining_calls = max_calls
+
+        media_metadata = self._load_hybrid_media_metadata(state)
+        project_dir = Path(getattr(state, "project_dir", ""))
+        if not project_dir:
+            return
+
+        report_segments: List[Dict[str, Any]] = []
+
+        for idx, segment in enumerate(segments):
+            if not isinstance(segment, dict):
+                continue
+
+            ranked_candidates = self._rank_visual_candidates_for_segment(
+                segment,
+                visual_assets,
+                media_metadata,
+                top_k=top_k,
+            )
+            current_asset = str(segment.get("visual_asset_path", "") or "").strip()
+            if current_asset and current_asset not in ranked_candidates:
+                ranked_candidates = [current_asset, *ranked_candidates]
+
+            candidate_scores: List[Dict[str, Any]] = []
+            approved_candidates: List[Dict[str, Any]] = []
+            scanned_assets: set[str] = set()
+
+            for candidate_asset in ranked_candidates:
+                if remaining_calls <= 0:
+                    break
+                candidate_path = project_dir / candidate_asset
+                if not candidate_path.exists() or not candidate_path.is_file():
+                    continue
+
+                score_result = await self._score_hybrid_visual_relevance(
+                    candidate_path,
+                    segment,
+                    media_metadata.get(candidate_asset, {}),
+                    project_dir=project_dir,
+                )
+                remaining_calls -= 1
+                scanned_assets.add(candidate_asset)
+
+                score = int(score_result.get("score", 0) or 0)
+                relevant = bool(score_result.get("relevant", score >= min_score))
+                reason = str(score_result.get("reason", "") or "")
+                row = {
+                    "asset_path": candidate_asset,
+                    "media_type": self._media_type_for_asset(candidate_asset),
+                    "score": score,
+                    "relevant": relevant,
+                    "reason": reason,
+                }
+                candidate_scores.append(row)
+                if score >= min_score and relevant:
+                    approved_candidates.append(row)
+
+            selected_asset = str(segment.get("visual_asset_path", "") or "")
+            selected_score: Optional[int] = None
+
+            if approved_candidates:
+                best = max(approved_candidates, key=lambda item: int(item["score"]))
+                selected_asset = str(best["asset_path"])
+                selected_score = int(best["score"])
+                segment["visual_asset_path"] = selected_asset
+            elif selected_asset and selected_asset in scanned_assets:
+                selected_asset = ""
+                segment["visual_asset_path"] = ""
+
+            report_segments.append(
+                {
+                    "segment_index": idx,
+                    "narration": str(segment.get("narration", "") or ""),
+                    "min_score": min_score,
+                    "selected_asset_path": selected_asset,
+                    "selected_score": selected_score,
+                    "candidates": candidate_scores,
+                }
+            )
+
+        report_payload = {
+            "phase": PipelinePhase.SCRIPTING.value,
+            "created_at": datetime.now().isoformat(),
+            "min_score": min_score,
+            "top_k": top_k,
+            "max_calls": max_calls,
+            "remaining_calls": remaining_calls,
+            "segments": report_segments,
+        }
+        save_finding(
+            state.project_dir,
+            "evidence",
+            "media_relevance_report.json",
+            report_payload,
+        )
+
     @staticmethod
     def _slugify_for_filename(text: str) -> str:
         cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", text.strip())
         cleaned = cleaned.strip("-._")
         return cleaned or "asset"
+
+    @staticmethod
+    def _filter_image_assets(assets: List[str]) -> List[str]:
+        image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+        return [
+            asset for asset in assets if Path(asset).suffix.lower() in image_extensions
+        ]
+
+    @staticmethod
+    def _is_image_asset_path(asset_path: str) -> bool:
+        return Path(str(asset_path or "")).suffix.lower() in {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif",
+            ".bmp",
+        }
+
+    def _load_hybrid_image_metadata(self, state: Any) -> Dict[str, Dict[str, str]]:
+        return self._load_hybrid_media_metadata(state)
+
+    def _load_hybrid_media_metadata(self, state: Any) -> Dict[str, Dict[str, str]]:
+        metadata: Dict[str, Dict[str, str]] = {}
+        state_meta = getattr(state, "metadata", {})
+        evidence_index_path = str(
+            state_meta.get("evidence_index_path", "") or ""
+        ).strip()
+        if not evidence_index_path:
+            return metadata
+
+        path = Path(evidence_index_path)
+        if not path.exists() or not path.is_file():
+            return metadata
+
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return metadata
+
+        downloaded_media = payload.get("downloaded_media")
+        if not isinstance(downloaded_media, list):
+            return metadata
+
+        for entry in downloaded_media:
+            if not isinstance(entry, dict):
+                continue
+            media_type = str(entry.get("media_type", "") or "").strip().lower()
+            if media_type not in {"image", "video"}:
+                media_type = self._media_type_for_asset(
+                    str(entry.get("local_path", "") or "")
+                )
+                if media_type not in {"image", "video"}:
+                    continue
+            local_path = str(entry.get("local_path", "") or "").strip()
+            if not local_path:
+                continue
+            metadata[local_path] = {
+                "media_type": media_type,
+                "query": str(entry.get("query", "") or ""),
+                "title": str(entry.get("title", "") or ""),
+                "source_url": str(entry.get("source_url", "") or ""),
+            }
+        return metadata
+
+    @staticmethod
+    def _media_type_for_asset(asset_path: str) -> str:
+        suffix = Path(str(asset_path or "")).suffix.lower()
+        if suffix in {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}:
+            return "image"
+        if suffix in {".mp4", ".webm", ".mkv", ".mov", ".avi"}:
+            return "video"
+        return "unknown"
+
+    @staticmethod
+    def _tokenize_relevance_text(text: str) -> List[str]:
+        stop_words = {
+            "the",
+            "and",
+            "for",
+            "with",
+            "from",
+            "that",
+            "this",
+            "into",
+            "then",
+            "about",
+            "your",
+            "show",
+            "video",
+            "image",
+            "dream",
+            "minecraft",
+        }
+        tokens = re.findall(r"[a-z0-9]+", str(text or "").lower())
+        return [
+            token for token in tokens if len(token) >= 3 and token not in stop_words
+        ]
+
+    def _rank_visual_candidates_for_segment(
+        self,
+        segment: Dict[str, Any],
+        visual_assets: List[str],
+        media_metadata: Dict[str, Dict[str, str]],
+        *,
+        top_k: int,
+    ) -> List[str]:
+        narration = str(segment.get("narration", "") or "")
+        visual_directive = str(segment.get("visual_directive", "") or "")
+        segment_tokens = set(
+            self._tokenize_relevance_text(f"{narration} {visual_directive}")
+        )
+
+        def _score(asset: str) -> int:
+            entry = media_metadata.get(asset, {})
+            filename = Path(asset).stem.replace("_", " ")
+            candidate_text = " ".join(
+                [
+                    str(entry.get("media_type", "") or ""),
+                    str(entry.get("query", "") or ""),
+                    str(entry.get("title", "") or ""),
+                    str(entry.get("source_url", "") or ""),
+                    filename,
+                ]
+            )
+            candidate_tokens = set(self._tokenize_relevance_text(candidate_text))
+            if not segment_tokens or not candidate_tokens:
+                return 1 if self._media_type_for_asset(asset) == "video" else 0
+            overlap = segment_tokens.intersection(candidate_tokens)
+            base = len(overlap) * 2
+            if self._media_type_for_asset(asset) == "video":
+                base += 1
+            return base
+
+        ranked = sorted(
+            visual_assets, key=lambda asset: (_score(asset), asset), reverse=True
+        )
+        return ranked[: max(1, top_k)]
+
+    def _rank_image_candidates_for_segment(
+        self,
+        segment: Dict[str, Any],
+        image_assets: List[str],
+        image_metadata: Dict[str, Dict[str, str]],
+        *,
+        top_k: int,
+    ) -> List[str]:
+        return self._rank_visual_candidates_for_segment(
+            segment,
+            image_assets,
+            image_metadata,
+            top_k=top_k,
+        )
+
+    async def _score_hybrid_visual_relevance(
+        self,
+        media_path: Path,
+        segment: Dict[str, Any],
+        media_meta: Dict[str, str],
+        *,
+        project_dir: Optional[Path] = None,
+    ) -> Dict[str, Any]:
+        media_type = str(media_meta.get("media_type", "") or "").strip().lower()
+        if media_type not in {"image", "video"}:
+            media_type = self._media_type_for_asset(str(media_path))
+
+        if media_type == "image":
+            return await self._score_hybrid_image_relevance(
+                media_path, segment, media_meta
+            )
+
+        if media_type == "video":
+            return await self._score_hybrid_video_relevance(
+                media_path,
+                segment,
+                media_meta,
+            )
+
+        return {
+            "score": 0,
+            "relevant": False,
+            "reason": "Unsupported media type",
+        }
+
+    async def _score_hybrid_image_relevance(
+        self,
+        image_path: Path,
+        segment: Dict[str, Any],
+        image_meta: Dict[str, str],
+    ) -> Dict[str, Any]:
+        if not image_path.exists() or not image_path.is_file():
+            return {
+                "score": 0,
+                "relevant": False,
+                "reason": "Image file missing",
+            }
+
+        narration = str(segment.get("narration", "") or "").strip()
+        visual_directive = str(segment.get("visual_directive", "") or "").strip()
+        evidence_refs = segment.get("evidence_refs", [])
+        if isinstance(evidence_refs, list):
+            evidence_text = ", ".join(
+                [str(item).strip() for item in evidence_refs if str(item).strip()]
+            )
+        else:
+            evidence_text = str(evidence_refs or "").strip()
+
+        metadata_text = json.dumps(image_meta, ensure_ascii=True)
+        prompt = (
+            "Evaluate whether this image is suitable for a documentary script segment. "
+            "Focus on semantic relevance to the narration and visual directive. "
+            "Return strict JSON only with keys: score (0-100 integer), relevant (boolean), reason (short string).\n\n"
+            f"Segment narration: {narration}\n"
+            f"Visual directive: {visual_directive}\n"
+            f"Evidence refs: {evidence_text}\n"
+            f"Image metadata: {metadata_text}\n"
+        )
+
+        score_result = await self._score_with_multimodal_payload(
+            media_type="image",
+            media_path=image_path,
+            prompt_text=prompt,
+        )
+        if score_result is not None:
+            return score_result
+
+        heuristic_score = self._estimate_image_relevance_score(
+            image_path=image_path,
+            segment=segment,
+            image_meta=image_meta,
+        )
+        return {
+            "score": heuristic_score,
+            "relevant": heuristic_score >= 70,
+            "reason": "Heuristic fallback score",
+        }
+
+    async def _score_hybrid_video_relevance(
+        self,
+        video_path: Path,
+        segment: Dict[str, Any],
+        video_meta: Dict[str, str],
+    ) -> Dict[str, Any]:
+        if not video_path.exists() or not video_path.is_file():
+            return {
+                "score": 0,
+                "relevant": False,
+                "reason": "Video file missing",
+            }
+
+        narration = str(segment.get("narration", "") or "").strip()
+        visual_directive = str(segment.get("visual_directive", "") or "").strip()
+        evidence_refs = segment.get("evidence_refs", [])
+        if isinstance(evidence_refs, list):
+            evidence_text = ", ".join(
+                [str(item).strip() for item in evidence_refs if str(item).strip()]
+            )
+        else:
+            evidence_text = str(evidence_refs or "").strip()
+
+        metadata_text = json.dumps(video_meta, ensure_ascii=True)
+        prompt = (
+            "Evaluate whether this entire video clip is suitable for a documentary script segment. "
+            "Focus on semantic relevance to narration and visual directive, not just generic gameplay visuals. "
+            "Return strict JSON only with keys: score (0-100 integer), relevant (boolean), reason (short string).\n\n"
+            f"Segment narration: {narration}\n"
+            f"Visual directive: {visual_directive}\n"
+            f"Evidence refs: {evidence_text}\n"
+            f"Video metadata: {metadata_text}\n"
+        )
+
+        score_result = await self._score_with_multimodal_payload(
+            media_type="video",
+            media_path=video_path,
+            prompt_text=prompt,
+        )
+        if score_result is not None:
+            return score_result
+
+        heuristic_score = self._estimate_image_relevance_score(
+            image_path=video_path,
+            segment=segment,
+            image_meta=video_meta,
+        )
+        return {
+            "score": heuristic_score,
+            "relevant": heuristic_score >= 70,
+            "reason": "Video metadata heuristic fallback",
+        }
+
+    async def _score_with_multimodal_payload(
+        self,
+        *,
+        media_type: str,
+        media_path: Path,
+        prompt_text: str,
+    ) -> Optional[Dict[str, Any]]:
+        active_client = getattr(getattr(self, "ai_client", None), "active_client", None)
+        if not (
+            active_client and hasattr(active_client, "_chat_completion_with_fallback")
+        ):
+            return None
+
+        try:
+            if media_type == "video":
+                data_url = self._encode_video_as_data_url(media_path)
+                user_content = [
+                    {"type": "text", "text": prompt_text},
+                    {"type": "video_url", "video_url": {"url": data_url}},
+                ]
+            else:
+                data_url = self._encode_image_as_data_url(media_path)
+                user_content = [
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ]
+
+            response = await active_client._chat_completion_with_fallback(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a strict visual relevance grader for documentary editing. "
+                            "Return JSON only."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": user_content,
+                    },
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"},
+            )
+        except Exception as exc:
+            self.logger.debug(
+                "%s relevance AI scoring failed for %s: %s",
+                media_type.capitalize(),
+                media_path,
+                exc,
+            )
+            return None
+
+        return self._parse_relevance_json_response(response)
+
+    @staticmethod
+    def _parse_relevance_json_response(response: Any) -> Dict[str, Any]:
+        content = response.choices[0].message.content or "{}"
+        parsed = json.loads(content)
+        score = int(parsed.get("score", 0) or 0)
+        score = max(0, min(100, score))
+        relevant = bool(parsed.get("relevant", score >= 70))
+        reason = str(parsed.get("reason", "") or "")
+        return {"score": score, "relevant": relevant, "reason": reason}
+
+    def _estimate_image_relevance_score(
+        self,
+        image_path: Path,
+        segment: Dict[str, Any],
+        image_meta: Dict[str, str],
+    ) -> int:
+        segment_text = " ".join(
+            [
+                str(segment.get("narration", "") or ""),
+                str(segment.get("visual_directive", "") or ""),
+            ]
+        )
+        segment_tokens = set(self._tokenize_relevance_text(segment_text))
+
+        metadata_text = " ".join(
+            [
+                str(image_meta.get("query", "") or ""),
+                str(image_meta.get("title", "") or ""),
+                str(image_meta.get("source_url", "") or ""),
+                image_path.stem.replace("_", " "),
+            ]
+        )
+        metadata_tokens = set(self._tokenize_relevance_text(metadata_text))
+
+        if not segment_tokens or not metadata_tokens:
+            return 45
+
+        overlap_count = len(segment_tokens.intersection(metadata_tokens))
+        if overlap_count <= 0:
+            return 30
+
+        return max(35, min(95, 35 + (overlap_count * 15)))
+
+    @staticmethod
+    def _encode_image_as_data_url(image_path: Path) -> str:
+        raw = image_path.read_bytes()
+        mime_type, _ = mimetypes.guess_type(str(image_path))
+        if not mime_type:
+            mime_type = "image/jpeg"
+        encoded = base64.b64encode(raw).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
+
+    @staticmethod
+    def _encode_video_as_data_url(video_path: Path) -> str:
+        raw = video_path.read_bytes()
+        mime_type, _ = mimetypes.guess_type(str(video_path))
+        if not mime_type:
+            mime_type = "video/mp4"
+        encoded = base64.b64encode(raw).decode("ascii")
+        return f"data:{mime_type};base64,{encoded}"
 
     def _enforce_script_asset_mapping(
         self,
@@ -1578,14 +2522,53 @@ Search results:
             script_payload["segments"] = []
             segments = script_payload["segments"]
 
+        visual_assets = self._filter_visual_assets(assets)
+        target_duration = self._read_env_float(
+            "HYBRID_TARGET_DURATION_SECONDS", default=45.0, minimum=15.0, maximum=180.0
+        )
+        min_segment_duration = self._read_env_float(
+            "HYBRID_MIN_SEGMENT_DURATION_SECONDS",
+            default=2.0,
+            minimum=0.8,
+            maximum=30.0,
+        )
+        max_segment_duration = self._read_env_float(
+            "HYBRID_MAX_SEGMENT_DURATION_SECONDS",
+            default=14.0,
+            minimum=3.0,
+            maximum=60.0,
+        )
+        narration_multiplier = self._read_env_float(
+            "HYBRID_NARRATION_DURATION_MULTIPLIER",
+            default=2.0,
+            minimum=1.0,
+            maximum=4.0,
+        )
+
         total_duration = 0.0
 
-        if not assets:
+        if not visual_assets:
             for segment in segments:
                 if isinstance(segment, dict):
                     segment["visual_asset_path"] = ""
+                    segment["intended_duration_seconds"] = (
+                        self._normalize_segment_duration(
+                            segment,
+                            min_segment_duration=min_segment_duration,
+                            max_segment_duration=max_segment_duration,
+                            narration_multiplier=narration_multiplier,
+                        )
+                    )
                 duration = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
                 total_duration += max(0.0, duration)
+            if total_duration < target_duration and segments:
+                self._distribute_segment_padding(
+                    segments,
+                    pad_seconds=target_duration - total_duration,
+                    min_segment_duration=min_segment_duration,
+                    max_segment_duration=max_segment_duration,
+                )
+                self._recompute_segment_timestamps(segments)
             return
 
         for idx, segment in enumerate(segments):
@@ -1600,24 +2583,168 @@ Search results:
             segment.setdefault("pace", "fast")
             segment.setdefault("emotion", "dramatic")
 
-            duration = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
+            duration = self._normalize_segment_duration(
+                segment,
+                min_segment_duration=min_segment_duration,
+                max_segment_duration=max_segment_duration,
+                narration_multiplier=narration_multiplier,
+            )
+            segment["intended_duration_seconds"] = duration
             total_duration += max(0.0, duration)
 
             existing = str(segment.get("visual_asset_path", "")).strip()
-            if existing and existing in assets:
+            if existing and existing in visual_assets:
                 continue
-            segment["visual_asset_path"] = assets[idx % len(assets)]
+            segment["visual_asset_path"] = visual_assets[idx % len(visual_assets)]
 
-        if total_duration < 45.0 and segments:
-            last_segment = segments[-1]
-            if isinstance(last_segment, dict):
-                pad = 45.0 - total_duration
-                last_duration = float(
-                    last_segment.get("intended_duration_seconds", 6.0) or 6.0
-                )
-                last_segment["intended_duration_seconds"] = max(
-                    1.0, last_duration + pad
-                )
+        if total_duration < target_duration and segments:
+            self._distribute_segment_padding(
+                segments,
+                pad_seconds=target_duration - total_duration,
+                min_segment_duration=min_segment_duration,
+                max_segment_duration=max_segment_duration,
+            )
+
+        self._recompute_segment_timestamps(segments)
+
+    @staticmethod
+    def _filter_visual_assets(assets: List[str]) -> List[str]:
+        visual_extensions = {
+            ".mp4",
+            ".webm",
+            ".mkv",
+            ".mov",
+            ".avi",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif",
+            ".bmp",
+        }
+        return [
+            asset for asset in assets if Path(asset).suffix.lower() in visual_extensions
+        ]
+
+    @staticmethod
+    def _normalize_segment_duration(
+        segment: Dict[str, Any],
+        *,
+        min_segment_duration: float,
+        max_segment_duration: float,
+        narration_multiplier: float,
+    ) -> float:
+        narration = str(segment.get("narration", "") or "").strip()
+        words = len(re.findall(r"\w+", narration))
+        estimated = 2.5 if words == 0 else max(2.5, min(12.0, (words / 2.6) + 0.8))
+
+        requested = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
+        baseline = requested if requested > 0 else estimated
+        cap = min(max_segment_duration, estimated * narration_multiplier)
+        duration = min(baseline, max(min_segment_duration, cap))
+        return max(min_segment_duration, duration)
+
+    @staticmethod
+    def _distribute_segment_padding(
+        segments: List[Any],
+        *,
+        pad_seconds: float,
+        min_segment_duration: float,
+        max_segment_duration: float,
+    ) -> None:
+        remaining = max(0.0, pad_seconds)
+        editable_segments = [seg for seg in segments if isinstance(seg, dict)]
+        if not editable_segments or remaining <= 0:
+            return
+
+        while remaining > 1e-6:
+            room_segments = [
+                seg
+                for seg in editable_segments
+                if float(seg.get("intended_duration_seconds", 0.0) or 0.0)
+                < max_segment_duration - 1e-6
+            ]
+            if not room_segments:
+                template = editable_segments[-1]
+                chunk = min(max_segment_duration, remaining)
+                if chunk <= 0:
+                    break
+                filler_segment = {
+                    "time_seconds": 0.0,
+                    "intended_duration_seconds": max(min_segment_duration, chunk),
+                    "narration": "Add one more concrete receipt beat with source and timestamp.",
+                    "visual_asset_path": str(
+                        template.get("visual_asset_path", "") or ""
+                    ),
+                    "visual_directive": str(template.get("visual_directive", "") or ""),
+                    "text_overlay": "",
+                    "evidence_refs": template.get("evidence_refs", []) or [],
+                    "pace": str(template.get("pace", "normal") or "normal"),
+                    "emotion": str(template.get("emotion", "neutral") or "neutral"),
+                }
+                segments.append(filler_segment)
+                editable_segments.append(filler_segment)
+                remaining -= chunk
+                continue
+
+            per_segment = remaining / len(room_segments)
+            progressed = False
+            for seg in room_segments:
+                current = float(seg.get("intended_duration_seconds", 0.0) or 0.0)
+                room = max(0.0, max_segment_duration - current)
+                add = min(per_segment, room)
+                if add <= 0:
+                    continue
+                seg["intended_duration_seconds"] = current + add
+                remaining -= add
+                progressed = True
+
+            if not progressed:
+                break
+
+    @staticmethod
+    def _recompute_segment_timestamps(segments: List[Any]) -> None:
+        cursor = 0.0
+        for segment in segments:
+            if not isinstance(segment, dict):
+                continue
+            segment["time_seconds"] = round(cursor, 3)
+            duration = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
+            cursor += max(0.0, duration)
+
+    @staticmethod
+    def _read_env_float(
+        key: str,
+        *,
+        default: float,
+        minimum: float,
+        maximum: float,
+    ) -> float:
+        raw = str(os.getenv(key, "")).strip()
+        if not raw:
+            return default
+        try:
+            value = float(raw)
+        except ValueError:
+            return default
+        return max(minimum, min(maximum, value))
+
+    @staticmethod
+    def _read_env_int(
+        key: str,
+        *,
+        default: int,
+        minimum: int,
+        maximum: int,
+    ) -> int:
+        raw = str(os.getenv(key, "")).strip()
+        if not raw:
+            return default
+        try:
+            value = int(raw)
+        except ValueError:
+            return default
+        return max(minimum, min(maximum, value))
 
     @staticmethod
     def _estimate_tokens_or_default(text: str) -> int:

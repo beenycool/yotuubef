@@ -148,6 +148,66 @@ class VideoDownloader:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
 
+    @staticmethod
+    def _parse_cookies_from_browser(raw_value: str) -> Optional[Tuple[str, ...]]:
+        value = str(raw_value or "").strip()
+        if not value:
+            return None
+
+        if ":" in value:
+            parts = [part.strip() for part in value.split(":") if part.strip()]
+        elif "," in value:
+            parts = [part.strip() for part in value.split(",") if part.strip()]
+        else:
+            parts = [value]
+
+        if not parts:
+            return None
+        return tuple(parts)
+
+    def _get_yt_dlp_auth_options(self) -> Dict[str, Any]:
+        opts: Dict[str, Any] = {}
+
+        cookie_file = (
+            os.getenv("YTDLP_COOKIES_FILE") or os.getenv("YOUTUBE_COOKIES_FILE") or ""
+        ).strip()
+        if cookie_file:
+            cookie_path = Path(cookie_file).expanduser()
+            if cookie_path.exists() and cookie_path.is_file():
+                opts["cookiefile"] = str(cookie_path)
+            else:
+                self.logger.warning(
+                    "Configured cookies file does not exist: %s",
+                    cookie_path,
+                )
+
+        cookies_from_browser_raw = (
+            os.getenv("YTDLP_COOKIES_FROM_BROWSER")
+            or os.getenv("YOUTUBE_COOKIES_FROM_BROWSER")
+            or ""
+        ).strip()
+        parsed_browser = self._parse_cookies_from_browser(cookies_from_browser_raw)
+        if parsed_browser:
+            opts["cookiesfrombrowser"] = parsed_browser
+
+        return opts
+
+    @staticmethod
+    def _looks_like_auth_error(error_text: str) -> bool:
+        lowered = str(error_text or "").lower()
+        return any(
+            needle in lowered
+            for needle in [
+                "sign in to confirm you're not a bot",
+                "use --cookies-from-browser",
+                "private video",
+                "members-only",
+                "video unavailable",
+                "requires payment",
+                "login required",
+            ]
+        )
+
     def download_video(self, url: str, output_path: Path) -> bool:
         """
         Download video from URL using yt-dlp
@@ -187,6 +247,7 @@ class VideoDownloader:
                 "ignore_errors": False,
                 "no_check_certificate": True,
             }
+            ydl_opts.update(self._get_yt_dlp_auth_options())
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -195,6 +256,17 @@ class VideoDownloader:
             except Exception as download_error:
                 # Enhanced error handling with multiple fallback strategies
                 error_msg = str(download_error).lower()
+                if self._looks_like_auth_error(error_msg):
+                    if not (
+                        ydl_opts.get("cookiefile") or ydl_opts.get("cookiesfrombrowser")
+                    ):
+                        self.logger.warning(
+                            "Video source requires authenticated cookies. Configure "
+                            "YTDLP_COOKIES_FILE or YTDLP_COOKIES_FROM_BROWSER. url=%s",
+                            url,
+                        )
+                    raise download_error
+
                 if any(
                     phrase in error_msg
                     for phrase in [
@@ -312,6 +384,7 @@ class VideoDownloader:
                     }
                 ],
             }
+            ydl_opts.update(self._get_yt_dlp_auth_options())
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -471,6 +544,7 @@ class VideoDownloader:
                 "embed_chapters": False,
                 "embed_info": False,
             }
+            generic_opts.update(self._get_yt_dlp_auth_options())
 
             with yt_dlp.YoutubeDL(generic_opts) as ydl_generic:
                 ydl_generic.download([url])
