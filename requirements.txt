@@ -1,7 +1,6 @@
 # Enhanced AI-Powered YouTube Shorts Generator Requirements
 
 # Core dependencies
--r requirements.txt
 
 # Enhanced AI and Machine Learning
 transformers>=4.30.0             # Hugging Face transformers for local AI models
