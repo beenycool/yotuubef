@@ -756,30 +756,17 @@ Examples:
     args = parser.parse_args()
 
     if not args.command:
-        # Default to 'find' command when no command is specified
-        print("No command specified, defaulting to 'find' mode...")
-        print("Use 'python main.py find --help' for more options\n")
-
-        # Create a mock args object with default find parameters
-        class MockArgs:
-            def __init__(self):
-                self.command = "find"
-                self.max_videos = 5
-                self.subreddits = None
-                self.sort = "hot"
-                self.time_filter = "day"
-                self.dry_run = False
-                self.no_cinematic = False
-                self.no_audio_ducking = False
-                self.no_ab_testing = False
-                self.project = None
-                self.reddit_url = None
-                self.resume = False
-                self.phase = None
-                self.gemini_report = None
-                self.no_upload = False
-
-        args = MockArgs()
+        # No implicit defaults - require explicit command
+        parser.print_help()
+        print("\nError: No command specified. Please choose a valid command.")
+        print("Common commands:")
+        print("  python main.py single <reddit_url>  # Process a single video")
+        print("  python main.py find                   # Find videos from Reddit")
+        print(
+            "  python main.py hybrid <project>       # Run hybrid documentary workflow"
+        )
+        print("  python main.py batch <file>           # Process multiple videos")
+        return 1
 
     # Initialize enhanced generator
     generator = EnhancedYouTubeGenerator()

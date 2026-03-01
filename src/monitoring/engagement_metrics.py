@@ -134,6 +134,9 @@ class EngagementMetricsDB:
     def _init_database(self):
         """Initialize the metrics database"""
         try:
+            # Ensure database directory exists
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.cursor()
 
