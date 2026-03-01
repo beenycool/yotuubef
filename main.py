@@ -171,6 +171,7 @@ class EnhancedYouTubeGenerator:
         phase_override: Optional[str] = None,
         gemini_report_path: Optional[str] = None,
         no_upload: bool = False,
+        no_auto_research: bool = False,
     ) -> Dict[str, Any]:
         """Run hybrid documentary workflow with pause/resume state."""
         try:
@@ -188,6 +189,7 @@ class EnhancedYouTubeGenerator:
                 phase_override=phase_override,
                 gemini_report_path=gemini_report_path,
                 no_upload=no_upload,
+                no_auto_research=no_auto_research,
             )
 
             phase = result.get("current_phase", "unknown")
@@ -728,6 +730,11 @@ Examples:
         action="store_true",
         help="Disable upload stage metadata for hybrid workflow",
     )
+    hybrid_parser.add_argument(
+        "--no-auto-research",
+        action="store_true",
+        help="Skip auto Gemini Deep Research; pause at WAIT_FOR_GEMINI_REPORT for manual report",
+    )
 
     # Proactive management
     manage_parser = subparsers.add_parser(
@@ -855,6 +862,7 @@ Examples:
                 phase_override=args.phase,
                 gemini_report_path=args.gemini_report,
                 no_upload=args.no_upload,
+                no_auto_research=args.no_auto_research,
             )
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

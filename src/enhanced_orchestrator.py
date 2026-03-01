@@ -51,6 +51,7 @@ from src.hybrid_documentary_state_machine import (
     summarize_if_needed,
     transcribe_media_file,
 )
+from src.utils.search_audit_logger import SearchAuditLogger
 
 
 class EnhancedVideoOrchestrator:
@@ -484,6 +485,7 @@ class EnhancedVideoOrchestrator:
         phase_override: Optional[str] = None,
         gemini_report_path: Optional[str] = None,
         no_upload: bool = False,
+        no_auto_research: bool = False,
     ) -> Dict[str, Any]:
         """Run opt-in hybrid documentary workflow with human pause/resume."""
         try:
@@ -509,6 +511,7 @@ class EnhancedVideoOrchestrator:
                     state.context_snapshot = f"Reddit URL: {reddit_url}"
 
             state.metadata["hybrid_no_upload"] = bool(no_upload)
+            state.metadata["hybrid_no_auto_research"] = bool(no_auto_research)
 
             if phase_override:
                 target_phase = self._coerce_hybrid_phase(phase_override)
@@ -521,11 +524,16 @@ class EnhancedVideoOrchestrator:
             workflow_result = await self._run_hybrid_state_machine(
                 state,
                 gemini_report_path=gemini_report_path,
+                no_auto_research=no_auto_research,
             )
             workflow_result["workspace_path"] = str(project_dir)
             workflow_result["state_path"] = str(
                 Path(project_dir) / "research" / "state.json"
             )
+            if state.metadata.get("search_audit_path"):
+                workflow_result["search_audit_path"] = state.metadata[
+                    "search_audit_path"
+                ]
             return workflow_result
         except Exception as exc:
             self.logger.error(
@@ -542,6 +550,7 @@ class EnhancedVideoOrchestrator:
         self,
         state,
         gemini_report_path: Optional[str] = None,
+        no_auto_research: bool = False,
     ) -> Dict[str, Any]:
         while True:
             phase = self._coerce_hybrid_phase(state.current_phase)
@@ -558,11 +567,8 @@ class EnhancedVideoOrchestrator:
             print(f"[Hybrid] Phase: {phase.value}", flush=True)
 
             if phase == PipelinePhase.IDEA_GENERATION:
-                idea_payload = await self._generate_hybrid_phase_payload(
+                idea_payload, audit_path = await self._run_idea_generation_search_first(
                     state,
-                    phase,
-                    state.context_snapshot
-                    or "Generate idea angles for a documentary short.",
                 )
                 idea_path = save_finding(
                     state.project_dir,
@@ -571,6 +577,8 @@ class EnhancedVideoOrchestrator:
                     idea_payload,
                 )
                 state.metadata["idea_generation_path"] = str(idea_path)
+                if audit_path:
+                    state.metadata["search_audit_path"] = str(audit_path)
                 state.context_snapshot = json.dumps(idea_payload, ensure_ascii=True)
                 save_run_state(state)
                 state = set_phase(
@@ -582,6 +590,13 @@ class EnhancedVideoOrchestrator:
 
             if phase == PipelinePhase.WAIT_FOR_GEMINI_REPORT:
                 report_candidate = gemini_report_path or state.gemini_report_path
+                if not report_candidate and not no_auto_research:
+                    report_candidate, audit_path = await self._run_auto_gemini_research(
+                        state,
+                    )
+                    if audit_path:
+                        state.metadata["search_audit_path"] = str(audit_path)
+
                 if not report_candidate:
                     state.status = "paused_waiting_for_gemini_report"
                     save_run_state(state)
@@ -818,6 +833,222 @@ class EnhancedVideoOrchestrator:
                     "final_script_path": str(final_script_path),
                 }
 
+    # Curated scouting queries for search-first idea discovery (avoid LLM inventing topics)
+    _SCOUTING_QUERIES = [
+        "removed speedrun world record controversy",
+        "deleted forum thread internet mystery",
+        "site:reddit.com obscure lore scandal",
+        "gaming community deleted evidence",
+        "internet mystery primary sources",
+        "controversy timeline key events",
+        "deleted world record receipts",
+    ]
+
+    async def _run_idea_generation_search_first(
+        self, state
+    ) -> tuple:
+        """Search-first IDEA_GENERATION: run searches, then LLM extracts angles with source_urls."""
+        api_key = (
+            os.getenv("HACKCLUB_SEARCH_API_KEY")
+            or os.getenv("HACKCLUB_SEARCH_KEY")
+            or os.getenv("BRAVE_SEARCH_API_KEY")
+            or ""
+        ).strip()
+
+        logs_dir = Path(state.project_dir) / "research" / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        audit_path = logs_dir / f"search_audit_{timestamp}.jsonl"
+        audit_logger = SearchAuditLogger(audit_path) if api_key else None
+
+        if not api_key:
+            self.logger.warning(
+                "No HACKCLUB_SEARCH_API_KEY or BRAVE_SEARCH_API_KEY. "
+                "Falling back to LLM-only idea generation (may invent content)."
+            )
+            idea_payload = await self._generate_hybrid_phase_payload(
+                state,
+                PipelinePhase.IDEA_GENERATION,
+                state.context_snapshot
+                or "Generate idea angles for a documentary short.",
+            )
+            self._ensure_source_urls_on_angles(idea_payload)
+            return idea_payload, None
+
+        print("[Hybrid] Searching for ideas (5-8 scouting queries)...", flush=True)
+        search_context = ""
+        async with HackclubMediaSearchClient(audit_logger=audit_logger) as client:
+            for q in self._SCOUTING_QUERIES[:8]:
+                hits = await client.search_web(q, count=4)
+                search_context += f"\n--- RESULTS FOR QUERY: {q} ---\n"
+                for hit in hits:
+                    search_context += f"TITLE: {hit.title}\nURL: {hit.url}\nSNIPPET: {hit.description}\n\n"
+
+        if not search_context.strip():
+            self.logger.warning("Search returned no results. Falling back to LLM-only.")
+            idea_payload = await self._generate_hybrid_phase_payload(
+                state,
+                PipelinePhase.IDEA_GENERATION,
+                state.context_snapshot
+                or "Generate idea angles for a documentary short.",
+            )
+            self._ensure_source_urls_on_angles(idea_payload)
+            return idea_payload, str(audit_path) if audit_logger else None
+
+        save_finding(
+            state.project_dir,
+            "ideas",
+            "raw_scout_data.txt",
+            search_context,
+        )
+
+        processed = summarize_if_needed(
+            search_context,
+            max_tokens=120000,
+        ).context
+
+        idea_payload = await self._extract_angles_from_search(processed, state)
+        self._validate_source_urls(idea_payload, search_context)
+        return idea_payload, str(audit_path) if audit_logger else None
+
+    def _ensure_source_urls_on_angles(self, payload: Dict[str, Any]) -> None:
+        """Ensure each angle has source_urls list (empty if none)."""
+        for angle in payload.get("angles", []):
+            if isinstance(angle, dict) and "source_urls" not in angle:
+                angle["source_urls"] = []
+
+    def _validate_source_urls(
+        self, payload: Dict[str, Any], raw_search_context: str
+    ) -> None:
+        """Flag angles whose source_urls are not present in raw search results."""
+        seen_urls = set()
+        for line in raw_search_context.split("\n"):
+            if line.startswith("URL: "):
+                seen_urls.add(line[5:].strip())
+        for angle in payload.get("angles", []):
+            if not isinstance(angle, dict):
+                continue
+            urls = angle.get("source_urls", [])
+            for u in urls:
+                if u and u not in seen_urls:
+                    self.logger.warning(
+                        "Angle '%s' cites URL not in search results: %s",
+                        angle.get("title", "?"),
+                        u[:80],
+                    )
+
+    async def _extract_angles_from_search(
+        self, search_context: str, state
+    ) -> Dict[str, Any]:
+        """LLM extraction: angles with source_urls from search results only."""
+        extract_prompt = f"""Below are search results. Extract up to 3 story angles that have concrete evidence in these results.
+
+CRITICAL: Do NOT invent any facts, dates, or sources. Every angle MUST cite source_urls (exact URLs from the results). If something is not in the results, omit it.
+
+Return strict JSON:
+{{
+  "phase": "IDEA_GENERATION",
+  "angles": [
+    {{"id": "A1", "title": "...", "hook": "...", "viability_score": 85, "source_urls": ["https://..."]}},
+    ...
+  ],
+  "gemini_deep_research_prompt": "Search for primary sources, court filings, exact dates, and archived links for the chosen angle. Omit anything not found.",
+  "next_phase": "WAIT_FOR_GEMINI_REPORT"
+}}
+
+Search results:
+{search_context}
+"""
+        active_client = getattr(self.ai_client, "active_client", None)
+        if active_client and hasattr(active_client, "_chat_completion_with_fallback"):
+            try:
+                response = await active_client._chat_completion_with_fallback(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Return strict JSON only. Extract from search results. Every angle must have source_urls from the results. Never invent.",
+                        },
+                        {"role": "user", "content": extract_prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=1800,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                parsed = json.loads(content)
+                if (
+                    isinstance(parsed, dict)
+                    and parsed.get("phase") == PipelinePhase.IDEA_GENERATION.value
+                    and isinstance(parsed.get("angles"), list)
+                ):
+                    self._ensure_source_urls_on_angles(parsed)
+                    return parsed
+            except Exception as exc:
+                self.logger.warning("Extract angles failed: %s", exc)
+
+        fallback = self._fallback_hybrid_phase_payload(
+            PipelinePhase.IDEA_GENERATION, search_context
+        )
+        self._ensure_source_urls_on_angles(fallback)
+        return fallback
+
+    async def _run_auto_gemini_research(self, state) -> tuple:
+        """Run AgenticResearcher or DeepResearchClient to produce gemini report."""
+        api_key_brave = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
+        api_key_hack = (
+            os.getenv("HACKCLUB_SEARCH_API_KEY") or os.getenv("HACKCLUB_SEARCH_KEY")
+        ).strip()
+
+        idea_path = Path(state.metadata.get("idea_generation_path", ""))
+        if not idea_path.exists():
+            self.logger.warning("idea_generation.json not found; cannot auto-research")
+            return None, None
+
+        try:
+            idea_payload = json.loads(idea_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            self.logger.warning("Failed to read idea_generation.json: %s", exc)
+            return None, None
+
+        prompt = idea_payload.get("gemini_deep_research_prompt", "")
+        angles = idea_payload.get("angles", [])
+        topic = angles[0].get("title", "") if angles else "research topic"
+
+        if not prompt:
+            prompt = f"Search for primary sources and key facts: {topic}"
+
+        logs_dir = Path(state.project_dir) / "research" / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        audit_path = logs_dir / f"search_audit_{timestamp}.jsonl"
+        audit_logger = SearchAuditLogger(audit_path)
+
+        if api_key_brave:
+            researcher = AgenticResearcher(audit_logger=audit_logger)
+            report_text = await researcher.deep_dive(
+                topic=topic,
+                initial_context=prompt,
+                max_turns=3,
+            )
+        elif api_key_hack:
+            client = DeepResearchClient(audit_logger=audit_logger)
+            report_text = await client.conduct_deep_research(prompt)
+            await client.close()
+        else:
+            self.logger.warning(
+                "No BRAVE_SEARCH_API_KEY or HACKCLUB_SEARCH_API_KEY for auto research"
+            )
+            return None, None
+
+        report_path = save_finding(
+            state.project_dir,
+            "reports",
+            "gemini_report.txt",
+            report_text,
+        )
+        self.logger.info("Auto research report saved: %s", report_path)
+        return str(report_path), str(audit_path)
+
     async def _generate_hybrid_phase_payload(
         self,
         state,
@@ -926,18 +1157,21 @@ class EnhancedVideoOrchestrator:
                         "title": "The deleted leaderboard record",
                         "hook": "A run disappeared after being called impossible.",
                         "viability_score": 86,
+                        "source_urls": [],
                     },
                     {
                         "id": "A2",
                         "title": "The forum post that changed a category",
                         "hook": "One rules thread rewrote years of speedrun history.",
                         "viability_score": 81,
+                        "source_urls": [],
                     },
                     {
                         "id": "A3",
                         "title": "The split-time contradiction",
                         "hook": "A timestamp mismatch exposed a hidden timing exploit.",
                         "viability_score": 79,
+                        "source_urls": [],
                     },
                 ],
                 "gemini_deep_research_prompt": (

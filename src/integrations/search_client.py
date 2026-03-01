@@ -1,17 +1,24 @@
+import asyncio
+import json
 import logging
 import os
-import asyncio
+import time
+from typing import TYPE_CHECKING, Optional
 
 import aiohttp
 
+if TYPE_CHECKING:
+    from src.utils.search_audit_logger import SearchAuditLogger
+
 
 class DeepResearchClient:
-    def __init__(self):
+    def __init__(self, audit_logger: Optional["SearchAuditLogger"] = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY") or os.getenv(
             "BRAVE_SEARCH_API_KEY"
         )
         self.base_url = "https://search.hackclub.com/res/v1/web/search"
+        self.audit_logger = audit_logger
         self._session = None
 
     async def _ensure_session(self):
@@ -32,23 +39,45 @@ class DeepResearchClient:
             "Accept": "application/json",
             "Authorization": f"Bearer {self.api_key}",
         }
+        params = {"q": query, "count": 3}
 
+        if self.audit_logger:
+            self.audit_logger.log_request("GET", self.base_url, params, headers)
+
+        start = time.perf_counter()
         try:
             session = await self._ensure_session()
             async with session.get(
                 self.base_url,
                 headers=headers,
-                params={"q": query, "count": 3},
+                params=params,
                 timeout=aiohttp.ClientTimeout(total=20),
             ) as response:
+                body = await response.text()
+                duration_ms = (time.perf_counter() - start) * 1000
+                if self.audit_logger:
+                    self.audit_logger.log_response(
+                        response.status,
+                        body,
+                        duration_ms,
+                        url=self.base_url,
+                    )
                 if response.status == 200:
-                    data = await response.json()
+                    try:
+                        data = json.loads(body)
+                    except json.JSONDecodeError:
+                        data = {}
                     return self._compile_report(data)
                 self.logger.warning(
                     "Brave search failed with status %s", response.status
                 )
                 return "Research failed."
         except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(
+                    500, str(e), duration_ms, url=self.base_url
+                )
             self.logger.error("Deep research error: %s", e)
             return "Research error."
 
@@ -68,10 +97,11 @@ class AgenticResearcher:
     Uses deterministic query expansion and executes searches in parallel.
     """
 
-    def __init__(self):
+    def __init__(self, audit_logger: Optional["SearchAuditLogger"] = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("BRAVE_SEARCH_API_KEY")
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
+        self.audit_logger = audit_logger
         self._session = None
 
         self.logger.info("AgenticResearcher initialized with deterministic planner")
@@ -93,16 +123,33 @@ class AgenticResearcher:
             return ""
 
         headers = {"Accept": "application/json", "X-Subscription-Token": self.api_key}
+        params = {"q": query, "count": 3}
 
+        if self.audit_logger:
+            self.audit_logger.log_request("GET", self.base_url, params, headers)
+
+        start = time.perf_counter()
         try:
             async with session.get(
                 self.base_url,
                 headers=headers,
-                params={"q": query, "count": 3},
+                params=params,
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as response:
+                body = await response.text()
+                duration_ms = (time.perf_counter() - start) * 1000
+                if self.audit_logger:
+                    self.audit_logger.log_response(
+                        response.status,
+                        body,
+                        duration_ms,
+                        url=self.base_url,
+                    )
                 if response.status == 200:
-                    data = await response.json()
+                    try:
+                        data = json.loads(body)
+                    except json.JSONDecodeError:
+                        return ""
                     results = data.get("web", {}).get("results", [])
                     return " ".join([r.get("description", "") for r in results])
                 self.logger.warning(
@@ -110,6 +157,11 @@ class AgenticResearcher:
                 )
                 return ""
         except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(
+                    500, str(e), duration_ms, url=self.base_url
+                )
             self.logger.error("Search error for '%s': %s", query, e)
             return ""
 

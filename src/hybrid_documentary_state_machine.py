@@ -6,14 +6,18 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 from uuid import uuid4
 
 import aiohttp
+
+if TYPE_CHECKING:
+    from src.utils.search_audit_logger import SearchAuditLogger
 from pydantic import BaseModel, ConfigDict, Field
 
 OpenAI = None
@@ -109,6 +113,7 @@ PHASE_JSON_CONTRACTS: Dict[PipelinePhase, str] = {
                     "title": "string",
                     "hook": "string",
                     "viability_score": 85,
+                    "source_urls": ["https://example.com/source1"],
                 }
             ],
             "gemini_deep_research_prompt": "string",
@@ -244,6 +249,7 @@ def setup_project_workspace(project_name: str) -> Path:
         "scripts",
         "transcripts",
         "summaries",
+        "logs",
         "media/web",
         "media/images",
         "media/videos",
@@ -340,10 +346,12 @@ class HackclubMediaSearchClient:
         api_key: Optional[str] = None,
         base_url: str = "https://search.hackclub.com/res/v1",
         timeout_seconds: int = 20,
+        audit_logger: Optional["SearchAuditLogger"] = None,
     ):
         self.api_key = api_key or os.getenv("HACKCLUB_SEARCH_API_KEY") or ""
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.audit_logger = audit_logger
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
@@ -396,10 +404,22 @@ class HackclubMediaSearchClient:
         params = {"q": query, "count": max(1, min(count, 50))}
         url = f"{self.base_url}/{endpoint.lstrip('/')}"
 
+        if self.audit_logger:
+            self.audit_logger.log_request("GET", url, params, headers)
+
+        start = time.perf_counter()
         try:
             async with session.get(url, headers=headers, params=params) as response:
+                body = await response.text()
+                duration_ms = (time.perf_counter() - start) * 1000
+                if self.audit_logger:
+                    self.audit_logger.log_response(
+                        response.status,
+                        body,
+                        duration_ms,
+                        url=url,
+                    )
                 if response.status >= 400:
-                    body = await response.text()
                     logger.warning(
                         "Hackclub search failed %s status=%s body=%s",
                         endpoint,
@@ -407,8 +427,14 @@ class HackclubMediaSearchClient:
                         body[:300],
                     )
                     return []
-                payload = await response.json(content_type=None)
+                try:
+                    payload = json.loads(body)
+                except json.JSONDecodeError:
+                    return []
         except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
             logger.error("Hackclub search request failed for %s: %s", endpoint, exc)
             return []
 
