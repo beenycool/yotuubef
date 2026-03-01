@@ -642,7 +642,7 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Get basic stats
+                # Get basic stats - SQL injection vulnerability fixed by parameterizing days_modifier
                 cursor.execute(
                     """
                     SELECT 
