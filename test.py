@@ -48,6 +48,7 @@ NVIDIA_CHAT_RETRIES = int(os.getenv("NVIDIA_CHAT_RETRIES", "3"))
 SEARCH_COUNT = int(os.getenv("SEARCH_COUNT", "6"))
 DOWNLOAD_MEDIA = os.getenv("DOWNLOAD_MEDIA", "1").strip() not in {"0", "false", "False"}
 MAX_MEDIA_DOWNLOADS = int(os.getenv("MAX_MEDIA_DOWNLOADS", "8"))
+MAX_MEDIA_FILE_SIZE_MB = int(os.getenv("MAX_MEDIA_FILE_SIZE_MB", "50"))
 MEDIA_DOWNLOAD_TIMEOUT = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT", "20"))
 TRANSCRIBE_LOCAL_MEDIA = os.getenv("TRANSCRIBE_LOCAL_MEDIA", "1").strip() not in {
     "0",
@@ -185,6 +186,7 @@ def nvidia_chat(
                 temperature=temperature,
                 max_tokens=2200,
                 timeout=120,
+                response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content or ""
             log_event(
@@ -452,6 +454,21 @@ def maybe_download_media(state: RunState, search_payload: Dict[str, Any]) -> Lis
             response = requests.get(url, timeout=MEDIA_DOWNLOAD_TIMEOUT, stream=True)
             if response.status_code >= 400:
                 continue
+
+            content_length = response.headers.get("content-length")
+            if content_length:
+                file_size_mb = int(content_length) / (1024 * 1024)
+                if file_size_mb > MAX_MEDIA_FILE_SIZE_MB:
+                    log_event(
+                        "MEDIA_SKIP_TOO_LARGE",
+                        {
+                            "url": url,
+                            "size_mb": round(file_size_mb, 2),
+                            "limit_mb": MAX_MEDIA_FILE_SIZE_MB,
+                        },
+                    )
+                    continue
+
             content_type = (response.headers.get("content-type") or "").lower()
             extension = infer_media_extension(url, content_type)
             if media_kind == "images" and not (
