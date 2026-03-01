@@ -11,6 +11,10 @@ from typing import Dict, List, Optional, Any
 import gc
 import importlib
 import numpy as np
+from moviepy import AudioFileClip
+from src.config.settings import get_config
+from src.models import NarrativeSegment, EmotionType, PacingType
+from src.utils.gpu_memory_manager import GPUMemoryManager
 
 _torch: Any = None
 _sf: Any = None
@@ -49,12 +53,6 @@ if TORCH_AVAILABLE and SOUNDFILE_AVAILABLE:
 else:
     _Qwen3TTSModel = None
     QWEN_TTS_AVAILABLE = False
-from moviepy import AudioFileClip
-
-from src.config.settings import get_config
-from src.models import NarrativeSegment, EmotionType, PacingType
-from src.utils.gpu_memory_manager import GPUMemoryManager
-
 
 class TTSService:
     """
