@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 import gc
 import importlib
+import numpy as np
 
 _torch: Any = None
 _sf: Any = None
+_librosa: Any = None
 _Qwen3TTSModel: Any = None
 
 try:
@@ -28,6 +30,13 @@ try:
 except ModuleNotFoundError:
     _sf = None
     SOUNDFILE_AVAILABLE = False
+
+try:
+    _librosa = importlib.import_module("librosa")
+    LIBROSA_AVAILABLE = True
+except ModuleNotFoundError:
+    _librosa = None
+    LIBROSA_AVAILABLE = False
 
 if TORCH_AVAILABLE and SOUNDFILE_AVAILABLE:
     try:
@@ -286,6 +295,8 @@ class TTSService:
                 }
 
                 if audio_path:
+                    self._trim_segment_silence(audio_path, segment_index=i)
+
                     # Get audio duration for timing validation
                     try:
                         clip = AudioFileClip(str(audio_path))
@@ -315,6 +326,138 @@ class TTSService:
         self.logger.info(f"Generated TTS for {successful}/{len(segments)} segments")
 
         return results
+
+    def _trim_segment_silence(self, audio_path: Path, segment_index: int = -1) -> None:
+        """Trim leading/trailing silence conservatively for generated speech."""
+        if not audio_path or not audio_path.exists():
+            return
+
+        try:
+            if (
+                LIBROSA_AVAILABLE
+                and SOUNDFILE_AVAILABLE
+                and _librosa is not None
+                and _sf is not None
+            ):
+                if self._trim_silence_with_librosa(audio_path):
+                    self.logger.debug(
+                        "Trimmed silence for segment %s using librosa", segment_index
+                    )
+                    return
+        except Exception as e:
+            self.logger.debug(
+                "Librosa silence trim unavailable for segment %s: %s",
+                segment_index,
+                e,
+            )
+
+        try:
+            if self._trim_silence_with_moviepy(audio_path):
+                self.logger.debug(
+                    "Trimmed silence for segment %s using moviepy fallback",
+                    segment_index,
+                )
+        except Exception as e:
+            self.logger.warning(
+                "Silence trim skipped for segment %s: %s", segment_index, e
+            )
+
+    def _trim_silence_with_librosa(self, audio_path: Path) -> bool:
+        """Trim silence via librosa/soundfile for best waveform control."""
+        if not (
+            LIBROSA_AVAILABLE
+            and SOUNDFILE_AVAILABLE
+            and _librosa is not None
+            and _sf is not None
+        ):
+            return False
+
+        audio_data, sample_rate = _librosa.load(str(audio_path), sr=None, mono=False)
+        if audio_data is None:
+            return False
+
+        _, trim_indices = _librosa.effects.trim(
+            audio_data,
+            top_db=28,
+            frame_length=2048,
+            hop_length=512,
+        )
+        start_idx, end_idx = int(trim_indices[0]), int(trim_indices[1])
+        total_samples = audio_data.shape[-1]
+
+        if end_idx <= start_idx:
+            return False
+
+        pad_samples = int(sample_rate * 0.04)
+        start_idx = max(0, start_idx - pad_samples)
+        end_idx = min(total_samples, end_idx + pad_samples)
+
+        if start_idx <= 0 and end_idx >= total_samples:
+            return False
+
+        trimmed_audio = audio_data[..., start_idx:end_idx]
+        if trimmed_audio.size == 0:
+            return False
+
+        if trimmed_audio.ndim > 1:
+            trimmed_to_write = trimmed_audio.T
+        else:
+            trimmed_to_write = trimmed_audio
+
+        _sf.write(str(audio_path), trimmed_to_write, int(sample_rate))
+        return True
+
+    def _trim_silence_with_moviepy(self, audio_path: Path) -> bool:
+        """Fallback silence trim using moviepy + numpy when librosa is unavailable."""
+        clip = AudioFileClip(str(audio_path))
+        array_clip: Optional[Any] = None
+
+        try:
+            sample_rate = int(getattr(clip, "fps", 22050) or 22050)
+            audio_array = clip.to_soundarray(fps=sample_rate)
+
+            if audio_array is None or len(audio_array) == 0:
+                return False
+
+            if audio_array.ndim == 1:
+                audio_array = audio_array.reshape(-1, 1)
+
+            amplitude = np.max(np.abs(audio_array), axis=1)
+            active = np.where(amplitude > 0.015)[0]
+            if active.size == 0:
+                return False
+
+            start_idx = int(active[0])
+            end_idx = int(active[-1]) + 1
+            pad_samples = int(sample_rate * 0.04)
+
+            start_idx = max(0, start_idx - pad_samples)
+            end_idx = min(audio_array.shape[0], end_idx + pad_samples)
+
+            if start_idx <= 0 and end_idx >= audio_array.shape[0]:
+                return False
+
+            trimmed = audio_array[start_idx:end_idx]
+            if trimmed.size == 0:
+                return False
+
+            from moviepy.audio.AudioClip import AudioArrayClip
+
+            array_clip = AudioArrayClip(trimmed.astype(np.float32), fps=sample_rate)
+            write_audiofile = getattr(array_clip, "write_audiofile", None)
+            if not callable(write_audiofile):
+                return False
+
+            write_audiofile(
+                str(audio_path), fps=sample_rate, codec="pcm_s16le", logger=None
+            )
+            return True
+        finally:
+            if array_clip is not None:
+                close_array = getattr(array_clip, "close", None)
+                if callable(close_array):
+                    close_array()
+            clip.close()
 
     def adjust_audio_speed(
         self,
@@ -358,16 +501,38 @@ class TTSService:
             else:
                 fx_method = getattr(clip, "fx", None)
                 if callable(fx_method):
-                    adjusted_clip = fx_method(
-                        lambda c: c.set_duration(c.duration / speed_factor)
-                    )
-                else:
-                    adjusted_clip = clip.with_duration(clip.duration / speed_factor)
 
-            adjusted_clip.write_audiofile(str(output_path), verbose=False, logger=None)
+                    def _speed_adjust_fallback(c):
+                        set_duration = getattr(c, "set_duration", None)
+                        if callable(set_duration):
+                            return set_duration(c.duration / speed_factor)
+                        with_duration = getattr(c, "with_duration", None)
+                        if callable(with_duration):
+                            return with_duration(c.duration / speed_factor)
+                        return c
+
+                    adjusted_clip = fx_method(_speed_adjust_fallback)
+                else:
+                    with_duration = getattr(clip, "with_duration", None)
+                    if callable(with_duration):
+                        adjusted_clip = with_duration(clip.duration / speed_factor)
+                    else:
+                        adjusted_clip = clip
+
+            write_audiofile = getattr(adjusted_clip, "write_audiofile", None)
+            if callable(write_audiofile):
+                write_audiofile(str(output_path), verbose=False, logger=None)
+            else:
+                self.logger.warning(
+                    "Adjusted clip missing write_audiofile, returning original audio"
+                )
+                clip.close()
+                return audio_path
 
             clip.close()
-            adjusted_clip.close()
+            close_adjusted = getattr(adjusted_clip, "close", None)
+            if callable(close_adjusted):
+                close_adjusted()
 
             self.logger.debug(
                 f"Adjusted audio {audio_path.name} speed by factor {speed_factor:.2f}"

@@ -73,6 +73,10 @@ class VisualCue(BaseModel):
         le=10.0,
         description="Effect duration in seconds (0.1-10.0)",
     )
+    visual_directive: Optional[str] = Field(
+        default=None,
+        description="Optional precise directive (e.g., callout coordinates) for receipt-style highlights",
+    )
 
     model_config = ConfigDict(use_enum_values=True)
 

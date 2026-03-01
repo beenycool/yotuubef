@@ -1,341 +1,110 @@
 #!/usr/bin/env python3
+import argparse
+import asyncio
+import json
+import logging
 import os
+import re
 import sys
 import time
-import json
-import textwrap
-from datetime import datetime
-from typing import List, Dict, Any, Tuple, cast
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 from openai import APITimeoutError, NotFoundError, OpenAI
 
-# -----------------------------
-# Config via env vars
-# -----------------------------
-NVIDIA_API_KEY = os.getenv(
-    "NVIDIA_API_KEY",
-    "",
+from src.hybrid_documentary_state_machine import (
+    DEFAULT_SUMMARY_MODEL,
+    HackclubMediaSearchClient,
+    PipelinePhase,
+    ResearchArtifact,
+    RunState,
+    load_run_state,
+    save_finding,
+    save_run_state,
+    set_phase,
+    setup_project_workspace,
+    summarize_if_needed,
+    transcribe_media_file,
 )
-HACKCLUB_SEARCH_KEY = os.getenv(
-    "HACKCLUB_SEARCH_KEY",
-    "",
-)
+
+# -----------------------------
+# Config
+# -----------------------------
+NVIDIA_API_KEY = (
+    os.getenv("NVIDIA_API_KEY") or os.getenv("NVIDIA_NIM_API_KEY") or ""
+).strip()
+HACKCLUB_SEARCH_KEY = (
+    os.getenv("HACKCLUB_SEARCH_KEY") or os.getenv("HACKCLUB_SEARCH_API_KEY") or ""
+).strip()
 
 NVIDIA_BASE_URL = os.getenv(
     "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
 ).rstrip("/")
-NVIDIA_CHAT_URL = f"{NVIDIA_BASE_URL}/chat/completions"
-
-# Model IDs: default to NVIDIA NIM-style IDs.
-MODEL_QWEN = os.getenv("MODEL_QWEN", "qwen/qwen3.5-397b-a17b")
-MODEL_KIMI = os.getenv("MODEL_KIMI", "moonshotai/kimi-k2.5")
-
-# Iteration / search tuning
-ROUNDS = int(os.getenv("ROUNDS", "10"))  # minimum 10 requested
-if ROUNDS < 10:
-    ROUNDS = 10
-
-SEARCH_COUNT = int(os.getenv("SEARCH_COUNT", "5"))  # results per query
-MAX_QUERIES_PER_ROUND = int(os.getenv("MAX_QUERIES_PER_ROUND", "3"))
-
-TIMEOUT = int(os.getenv("HTTP_TIMEOUT", "30"))
+MODEL_PRIMARY = os.getenv("MODEL_QWEN", "qwen/qwen3.5-397b-a17b")
+MODEL_FALLBACK = os.getenv("MODEL_KIMI", "moonshotai/kimi-k2.5")
 NVIDIA_CHAT_RETRIES = int(os.getenv("NVIDIA_CHAT_RETRIES", "3"))
-SLEEP_BETWEEN_CALLS = float(os.getenv("SLEEP_BETWEEN_CALLS", "0.5"))
+
+SEARCH_COUNT = int(os.getenv("SEARCH_COUNT", "6"))
+DOWNLOAD_MEDIA = os.getenv("DOWNLOAD_MEDIA", "1").strip() not in {"0", "false", "False"}
+MAX_MEDIA_DOWNLOADS = int(os.getenv("MAX_MEDIA_DOWNLOADS", "8"))
+MEDIA_DOWNLOAD_TIMEOUT = int(os.getenv("MEDIA_DOWNLOAD_TIMEOUT", "20"))
+TRANSCRIBE_LOCAL_MEDIA = os.getenv("TRANSCRIBE_LOCAL_MEDIA", "1").strip() not in {
+    "0",
+    "false",
+    "False",
+}
+MAX_TRANSCRIBE_FILES = int(os.getenv("MAX_TRANSCRIBE_FILES", "6"))
+MAX_SCRIPT_CONTEXT_TOKENS = int(os.getenv("MAX_SCRIPT_CONTEXT_TOKENS", "12000"))
+
 LOG_FILE = os.getenv("LOG_FILE", "run_log.txt")
 
 
-def log_event(title: str, payload: Any | None = None) -> None:
-    ts = datetime.utcnow().isoformat(timespec="seconds") + "Z"
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
-        f.write(f"[{ts}] {title}\n")
-        if payload is not None:
-            if isinstance(payload, str):
-                f.write(payload.rstrip() + "\n")
-            else:
-                f.write(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
-                f.write("\n")
-        f.write("\n")
+SCRIPT_SYSTEM_PROMPT = (
+    "You are an investigative YouTube Shorts writer. Return strict JSON only. "
+    "Do not invent facts. Use provided context only. Keep the script 45-60 seconds."
+)
 
 
-# -----------------------------
-# System prompt (the one you gave earlier)
-# -----------------------------
-SYSTEM_PROMPT = r"""
-You are an investigative YouTube Shorts scriptwriter who specializes in “mini internet mysteries” and surprising trivia explainers.
-
-GOAL
-Create a 45–60 second faceless narration script that feels like a fast, research-backed story:
-- Hook with a question or bold claim.
-- Immediately misdirect with “you might think…” then flip it.
-- Walk through 3–5 beats of evidence, each punchy and visual.
-- End with a final reveal AND a “perfect loop” line that naturally connects back to the first line, making rewatching feel seamless.
-
-TONE + STYLE
-- Fast, confident, curious. Slightly dramatic, never cringe.
-- Short sentences. Minimal filler. No rambling.
-- Write like a YouTuber who actually did the homework.
-- Use concrete details (names, dates, IDs, durations, counts) when available.
-- Do not invent sources, quotes, or specific facts. If a detail can’t be verified from the user-provided context, either:
-  (a) omit it, or
-  (b) label it clearly as unconfirmed/likely/speculated and keep it brief.
-
-CONTENT RULES (HARD)
-- No porn/sexual content, self-harm, hate, explicit gore, or instructions for wrongdoing.
-- Avoid medical/legal advice.
-- Avoid defamatory claims about private individuals.
-- If the topic is inherently sensitive (crime, tragedy, politics), keep it factual, non-sensational, and brand-safe.
-
-OUTPUT FORMAT (STRICT JSON ONLY)
-Return a single JSON object with these keys exactly:
-{
-  "title": string,
-  "hook": string,
-  "script_full": string,
-  "loop_line": string,
-  "segments": [
-    {
-      "time_seconds": number,
-      "intended_duration_seconds": number,
-      "narration": string,
-      "on_screen_text": string,
-      "b_roll_search_query": string,
-      "sfx_suggestion": string,
-      "pace": "fast" | "normal" | "slow",
-      "emotion": "excited" | "calm" | "dramatic" | "neutral"
-    }
-  ],
-  "sources_to_check": [string],
-  "hashtags": [string]
-}
-
-SEGMENT RULES
-- Total duration across segments must be 45–60 seconds.
-- 6–10 segments max.
-- Each narration field should be 1–2 spoken sentences.
-- on_screen_text must be 2–6 words, big and punchy (caption-style).
-- b_roll_search_query must be something a stock/image search could find.
-- sfx_suggestion should be simple (whoosh, hit, pop, boom, glitch, click).
-- The final segment must include the loop_line (verbatim) at the end of narration.
-
-STRUCTURE BLUEPRINT (FOLLOW THIS)
-1) 0–3s: Hook question / bold claim.
-2) 3–8s: “You might think…” + common assumption.
-3) 8–35s: Evidence beats (3–5 beats). Each beat includes one concrete detail + one visualizable moment.
-4) 35–52s: Twist/reveal: the answer, the weird detail, or the “most people missed this” moment.
-5) 52–60s: Loop ending: a line that re-frames the hook and tees up rewatch without saying “rewatch.”
-
-QUALITY CHECK BEFORE YOU OUTPUT
-- Is the hook attention-grabbing in the first sentence?
-- Does every beat advance the mystery?
-- Is the final line a clean loop back to the start?
-- Are you accidentally guessing facts? If yes, remove or mark as unconfirmed.
-- Is the output valid JSON with no extra text?
-""".strip()
+def setup_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.FileHandler(LOG_FILE, mode="a", encoding="utf-8"),
+            logging.StreamHandler(sys.stderr),
+        ],
+    )
 
 
-# -----------------------------
-# Helpers
-# -----------------------------
-def die(msg: str, code: int = 2) -> None:
-    log_event("FATAL", {"message": msg, "exit_code": code})
-    print(f"ERROR: {msg}", file=sys.stderr)
+def log_event(title: str, payload: Optional[Any] = None) -> None:
+    logger = logging.getLogger("hybrid_test")
+    if payload is None:
+        logger.info(title)
+        return
+    if isinstance(payload, str):
+        logger.info("%s %s", title, payload)
+        return
+    try:
+        logger.info("%s %s", title, json.dumps(payload, ensure_ascii=True, default=str))
+    except Exception:
+        logger.info("%s %s", title, str(payload))
+
+
+def die(message: str, code: int = 2) -> None:
+    log_event("FATAL", {"message": message, "exit_code": code})
+    print(f"ERROR: {message}", file=sys.stderr)
     sys.exit(code)
 
 
-def http_json(
-    method: str,
-    url: str,
-    headers: Dict[str, str],
-    params: Dict[str, Any] | None = None,
-    body: Dict[str, Any] | None = None,
-    timeout: int = TIMEOUT,
-    retries: int = 4,
-) -> Dict[str, Any]:
-    last_err = None
-    for attempt in range(retries):
-        try:
-            log_event(
-                "HTTP_REQUEST",
-                {
-                    "attempt": attempt + 1,
-                    "method": method.upper(),
-                    "url": url,
-                    "params": params,
-                    "body": body,
-                    "timeout_seconds": timeout,
-                },
-            )
-            if method.upper() == "GET":
-                r = requests.get(url, headers=headers, params=params, timeout=timeout)
-            else:
-                r = requests.post(url, headers=headers, json=body, timeout=timeout)
-            log_event(
-                "HTTP_RESPONSE",
-                {
-                    "attempt": attempt + 1,
-                    "status_code": r.status_code,
-                    "url": str(r.url),
-                    "body_preview": r.text[:5000],
-                },
-            )
-            if r.status_code >= 400:
-                # retry on rate limit / transient
-                if r.status_code in (429, 500, 502, 503, 504) and attempt < retries - 1:
-                    time.sleep(1.5 * (attempt + 1))
-                    continue
-                raise RuntimeError(f"{r.status_code} {r.text[:500]}")
-            return r.json()
-        except Exception as e:
-            log_event(
-                "HTTP_ERROR",
-                {
-                    "attempt": attempt + 1,
-                    "method": method.upper(),
-                    "url": url,
-                    "error": str(e),
-                },
-            )
-            last_err = e
-            if attempt < retries - 1:
-                time.sleep(1.5 * (attempt + 1))
-                continue
-            break
-    raise RuntimeError(f"Request failed after retries: {last_err}")
-
-
-def hackclub_web_search(query: str, count: int = SEARCH_COUNT) -> List[Dict[str, str]]:
-    """
-    Hack Club Search is a Brave Search API proxy.
-    Docs show: /res/v1/web/search?q=...
-    """
-    url = "https://search.hackclub.com/res/v1/web/search"
-    headers = {
-        "Authorization": f"Bearer {HACKCLUB_SEARCH_KEY}",
-        "Accept": "application/json",
-        "User-Agent": "speedrun-scriptmaker/1.0",
-    }
-    params = {"q": query, "count": str(count)}
-    data = http_json("GET", url, headers=headers, params=params)
-
-    results = []
-    web = data.get("web", {}) or {}
-    for item in (web.get("results", []) or [])[:count]:
-        results.append(
-            {
-                "title": (item.get("title") or "").strip(),
-                "url": (item.get("url") or "").strip(),
-                "description": (item.get("description") or "").strip(),
-            }
-        )
-    return results
-
-
-def nvidia_chat(
-    model: str, messages: List[Dict[str, str]], temperature: float = 0.6
-) -> str:
-    client = OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=NVIDIA_API_KEY,
-    )
-    retries = max(1, NVIDIA_CHAT_RETRIES)
-    last_err: Exception | None = None
-    for attempt in range(retries):
-        try:
-            log_event(
-                "NVIDIA_CHAT_REQUEST",
-                {
-                    "attempt": attempt + 1,
-                    "model": model,
-                    "temperature": temperature,
-                    "max_tokens": 1800,
-                    "timeout_seconds": 120,
-                    "messages": messages,
-                },
-            )
-            response = client.chat.completions.create(
-                model=model,
-                messages=cast(Any, messages),
-                temperature=temperature,
-                max_tokens=1800,
-                timeout=120,
-            )
-            content = response.choices[0].message.content or ""
-            log_event(
-                "NVIDIA_CHAT_RESPONSE",
-                {"attempt": attempt + 1, "model": model, "response": content},
-            )
-            return content
-        except APITimeoutError as e:
-            log_event(
-                "NVIDIA_CHAT_TIMEOUT",
-                {"attempt": attempt + 1, "model": model, "error": str(e)},
-            )
-            last_err = e
-            if attempt < retries - 1:
-                time.sleep(1.5 * (attempt + 1))
-                continue
-            break
-        except NotFoundError as e:
-            log_event(
-                "NVIDIA_CHAT_NOT_FOUND",
-                {"attempt": attempt + 1, "model": model, "error": str(e)},
-            )
-            raise RuntimeError(
-                f"OpenAI API call failed for model '{model}': {e}"
-            ) from e
-        except Exception as e:
-            log_event(
-                "NVIDIA_CHAT_ERROR",
-                {"attempt": attempt + 1, "model": model, "error": str(e)},
-            )
-            raise RuntimeError(
-                f"OpenAI API call failed for model '{model}': {e}"
-            ) from e
-    raise RuntimeError(
-        f"OpenAI API call failed for model '{model}': {last_err}"
-    ) from last_err
-
-
-def chat_with_model_fallback(
-    model: str,
-    fallback_model: str,
-    messages: List[Dict[str, str]],
-    temperature: float,
-) -> str:
-    try:
-        return nvidia_chat(model, messages, temperature=temperature)
-    except RuntimeError as first_err:
-        first_msg = str(first_err)
-        should_fallback = ("404" in first_msg) or ("timed out" in first_msg.lower())
-        if not should_fallback or not fallback_model or fallback_model == model:
-            raise
-        print(
-            f"WARN: model '{model}' failed ({first_msg}). Falling back to '{fallback_model}'.",
-            file=sys.stderr,
-        )
-        log_event(
-            "MODEL_FALLBACK",
-            {
-                "from_model": model,
-                "to_model": fallback_model,
-                "reason": first_msg,
-            },
-        )
-        return nvidia_chat(fallback_model, messages, temperature=temperature)
-
-
 def safe_json_extract(text: str) -> Any | None:
-    """
-    If the model "accidentally" wraps JSON in text, try to recover.
-    """
     text = text.strip()
     if text.startswith("{") and text.endswith("}"):
         try:
             return json.loads(text)
         except Exception:
             return None
-    # crude extraction: find first { ... last }
+
     start = text.find("{")
     end = text.rfind("}")
     if start != -1 and end != -1 and end > start:
@@ -347,228 +116,736 @@ def safe_json_extract(text: str) -> Any | None:
     return None
 
 
-def clamp_queries(qs: List[str], max_n: int) -> List[str]:
-    clean = []
-    for q in qs:
-        q = " ".join(q.split()).strip()
-        if q and q.lower() not in [x.lower() for x in clean]:
-            clean.append(q)
-    return clean[:max_n]
+def require_keys(payload: Dict[str, Any], required: List[str], context: str) -> None:
+    missing = [key for key in required if key not in payload]
+    if missing:
+        raise ValueError(f"{context}: missing keys: {missing}")
 
 
-# -----------------------------
-# Main iterative loop
-# -----------------------------
+def sanitize_filename(value: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", value).strip("-._")
+    return cleaned or "file"
+
+
+def infer_media_extension(url: str, content_type: str) -> str:
+    lower_url = url.lower()
+    if ".jpg" in lower_url or ".jpeg" in lower_url:
+        return ".jpg"
+    if ".png" in lower_url:
+        return ".png"
+    if ".gif" in lower_url:
+        return ".gif"
+    if ".webp" in lower_url:
+        return ".webp"
+    if ".mp4" in lower_url:
+        return ".mp4"
+    if ".webm" in lower_url:
+        return ".webm"
+    if ".mov" in lower_url:
+        return ".mov"
+    if content_type.startswith("image/"):
+        subtype = content_type.split("/", 1)[1].split(";", 1)[0]
+        return f".{subtype or 'jpg'}"
+    if content_type.startswith("video/"):
+        subtype = content_type.split("/", 1)[1].split(";", 1)[0]
+        return f".{subtype or 'mp4'}"
+    return ".bin"
+
+
+def as_phase(value: str) -> PipelinePhase:
+    try:
+        return PipelinePhase(value)
+    except ValueError as exc:
+        valid = ", ".join(phase.value for phase in PipelinePhase)
+        raise argparse.ArgumentTypeError(
+            f"Invalid phase '{value}'. Use one of: {valid}"
+        ) from exc
+
+
+def nvidia_chat(
+    model: str, messages: List[Dict[str, str]], temperature: float = 0.4
+) -> str:
+    client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=NVIDIA_API_KEY)
+    retries = max(1, NVIDIA_CHAT_RETRIES)
+    last_err: Exception | None = None
+    for attempt in range(retries):
+        try:
+            log_event(
+                "NVIDIA_CHAT_REQUEST",
+                {
+                    "attempt": attempt + 1,
+                    "model": model,
+                    "temperature": temperature,
+                    "messages": messages,
+                },
+            )
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,  # type: ignore[arg-type]
+                temperature=temperature,
+                max_tokens=2200,
+                timeout=120,
+            )
+            content = response.choices[0].message.content or ""
+            log_event(
+                "NVIDIA_CHAT_RESPONSE",
+                {"attempt": attempt + 1, "model": model, "length": len(content)},
+            )
+            return content
+        except APITimeoutError as exc:
+            last_err = exc
+            log_event(
+                "NVIDIA_CHAT_TIMEOUT", {"attempt": attempt + 1, "error": str(exc)}
+            )
+        except NotFoundError as exc:
+            raise RuntimeError(f"Model not found: {model}: {exc}") from exc
+        except Exception as exc:
+            last_err = exc
+            log_event("NVIDIA_CHAT_ERROR", {"attempt": attempt + 1, "error": str(exc)})
+        time.sleep(1.5 * (attempt + 1))
+    raise RuntimeError(f"NVIDIA chat failed for model {model}: {last_err}")
+
+
+def chat_with_fallback(
+    model: str,
+    fallback_model: str,
+    messages: List[Dict[str, str]],
+    temperature: float,
+) -> str:
+    try:
+        return nvidia_chat(model, messages, temperature=temperature)
+    except Exception as first_err:
+        if not fallback_model or fallback_model == model:
+            raise
+        log_event(
+            "MODEL_FALLBACK",
+            {"from_model": model, "to_model": fallback_model, "reason": str(first_err)},
+        )
+        return nvidia_chat(fallback_model, messages, temperature=temperature)
+
+
+def chat_json(
+    user_prompt: str,
+    *,
+    validator: Callable[[Dict[str, Any]], None],
+    temperature: float = 0.4,
+) -> Dict[str, Any]:
+    messages = [
+        {"role": "system", "content": SCRIPT_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    raw = chat_with_fallback(MODEL_PRIMARY, MODEL_FALLBACK, messages, temperature)
+    payload = safe_json_extract(raw)
+    if not isinstance(payload, dict):
+        raise RuntimeError("Model did not return valid JSON object")
+    validator(payload)
+    return payload
+
+
+def add_artifact_to_state(state: RunState, path: Path, folder: str) -> None:
+    relative = path.relative_to(Path(state.project_dir))
+    artifact = ResearchArtifact(
+        folder=folder,
+        filename=path.name,
+        relative_path=str(relative),
+        created_at=str(int(path.stat().st_mtime)),
+        byte_size=path.stat().st_size,
+    )
+    state.findings.append(artifact)
+    save_run_state(state)
+
+
+def phase_idea_generation(state: RunState) -> None:
+    prompt = (
+        "Phase: IDEA_GENERATION\n"
+        "Generate exactly 3 documentary angles for a 45-60 second speedrunning mystery short.\n"
+        "Return strict JSON with keys:\n"
+        "{\n"
+        '  "phase": "IDEA_GENERATION",\n'
+        '  "angles": [{"id": "A1", "title": "...", "hypothesis": "...", "why_it_might_work": "..."}],\n'
+        '  "gemini_deep_research_prompt": "...",\n'
+        '  "next_phase": "WAIT_FOR_GEMINI_REPORT"\n'
+        "}\n"
+        "Rules: angles array must contain exactly 3 objects with ids A1, A2, A3."
+    )
+
+    def _validate(payload: Dict[str, Any]) -> None:
+        require_keys(
+            payload,
+            ["phase", "angles", "gemini_deep_research_prompt", "next_phase"],
+            "IDEA",
+        )
+        if payload.get("phase") != "IDEA_GENERATION":
+            raise ValueError("IDEA: phase must be IDEA_GENERATION")
+        angles = payload.get("angles")
+        if not isinstance(angles, list) or len(angles) != 3:
+            raise ValueError("IDEA: angles must contain exactly 3 entries")
+        expected_ids = {"A1", "A2", "A3"}
+        ids = {str(item.get("id", "")) for item in angles if isinstance(item, dict)}
+        if ids != expected_ids:
+            raise ValueError("IDEA: angle ids must be A1, A2, A3")
+        if not isinstance(payload.get("gemini_deep_research_prompt"), str):
+            raise ValueError("IDEA: gemini_deep_research_prompt must be a string")
+
+    payload = chat_json(prompt, validator=_validate, temperature=0.5)
+    saved_path = save_finding(
+        state.project_dir, "ideas", "idea_generation.json", payload
+    )
+    add_artifact_to_state(state, saved_path, "ideas")
+    state.metadata["idea_generation_path"] = str(saved_path)
+    state.context_snapshot = payload.get("gemini_deep_research_prompt", "")
+    save_run_state(state)
+    set_phase(state, PipelinePhase.WAIT_FOR_GEMINI_REPORT, "Idea package generated")
+    log_event("IDEA_GENERATION_DONE", {"path": str(saved_path)})
+
+
+def print_waiting_instructions(project_dir: Path, state: RunState) -> None:
+    report_dir = project_dir / "research" / "reports"
+    print("\n=== WAIT_FOR_GEMINI_REPORT ===")
+    print("1) Run Gemini Deep Research using prompt from:")
+    print(f"   {project_dir / 'research' / 'ideas' / 'idea_generation.json'}")
+    print("2) Save Gemini report as plain text or markdown under:")
+    print(f"   {report_dir}")
+    print("3) Resume with:")
+    print(
+        f'   python3 test.py --project "{state.project_name}" --resume --gemini-report "{report_dir / "gemini_report.txt"}"'
+    )
+
+
+def phase_wait_for_gemini_report(
+    state: RunState, gemini_report_path: Optional[str]
+) -> bool:
+    report_path = gemini_report_path or state.gemini_report_path
+    if not report_path:
+        save_run_state(state)
+        print_waiting_instructions(Path(state.project_dir), state)
+        return False
+
+    report_file = Path(report_path)
+    if not report_file.exists() or not report_file.is_file():
+        save_run_state(state)
+        print_waiting_instructions(Path(state.project_dir), state)
+        print(f"\nProvided report path not found: {report_file}", file=sys.stderr)
+        return False
+
+    text = report_file.read_text(encoding="utf-8", errors="replace")
+    copied = save_finding(state.project_dir, "reports", "gemini_report.txt", text)
+    add_artifact_to_state(state, copied, "reports")
+    state.gemini_report_path = str(copied)
+    save_run_state(state)
+    set_phase(state, PipelinePhase.SYNTHESIS, "Gemini report supplied")
+    log_event("GEMINI_REPORT_READY", {"path": str(copied), "chars": len(text)})
+    return True
+
+
+def phase_synthesis(state: RunState) -> None:
+    if not state.gemini_report_path:
+        set_phase(state, PipelinePhase.WAIT_FOR_GEMINI_REPORT, "Missing report path")
+        return
+
+    report_text = Path(state.gemini_report_path).read_text(
+        encoding="utf-8", errors="replace"
+    )
+    ideas_path = state.metadata.get("idea_generation_path", "")
+    ideas_text = ""
+    if ideas_path and Path(ideas_path).exists():
+        ideas_text = Path(ideas_path).read_text(encoding="utf-8", errors="replace")
+
+    prompt = (
+        "Phase: SYNTHESIS\n"
+        "Choose one idea angle and convert Gemini report into concrete evidence/search plan.\n"
+        "Return strict JSON with keys:\n"
+        "{\n"
+        '  "phase": "SYNTHESIS",\n'
+        '  "chosen_angle_id": "A1|A2|A3",\n'
+        '  "chosen_angle_title": "...",\n'
+        '  "reason": "...",\n'
+        '  "image_queries": ["..."],\n'
+        '  "video_queries": ["..."],\n'
+        '  "evidence_questions": ["..."],\n'
+        '  "next_phase": "EVIDENCE_GATHERING"\n'
+        "}\n"
+        "Provide at least 3 image queries and 3 video queries.\n\n"
+        f"Idea JSON:\n{ideas_text}\n\nGemini report raw text:\n{report_text}"
+    )
+
+    def _validate(payload: Dict[str, Any]) -> None:
+        require_keys(
+            payload,
+            [
+                "phase",
+                "chosen_angle_id",
+                "chosen_angle_title",
+                "reason",
+                "image_queries",
+                "video_queries",
+                "evidence_questions",
+                "next_phase",
+            ],
+            "SYNTHESIS",
+        )
+        if payload.get("phase") != "SYNTHESIS":
+            raise ValueError("SYNTHESIS: invalid phase")
+        if payload.get("chosen_angle_id") not in {"A1", "A2", "A3"}:
+            raise ValueError("SYNTHESIS: chosen_angle_id must be A1/A2/A3")
+        image_queries = payload.get("image_queries")
+        video_queries = payload.get("video_queries")
+        if not isinstance(image_queries, list) or len(image_queries) < 3:
+            raise ValueError("SYNTHESIS: image_queries must have at least 3 entries")
+        if not isinstance(video_queries, list) or len(video_queries) < 3:
+            raise ValueError("SYNTHESIS: video_queries must have at least 3 entries")
+
+    payload = chat_json(prompt, validator=_validate, temperature=0.3)
+    saved_path = save_finding(state.project_dir, "synthesis", "synthesis.json", payload)
+    add_artifact_to_state(state, saved_path, "synthesis")
+    state.metadata["synthesis_path"] = str(saved_path)
+    save_run_state(state)
+    set_phase(
+        state, PipelinePhase.EVIDENCE_GATHERING, "Synthesis produced media queries"
+    )
+    log_event("SYNTHESIS_DONE", {"path": str(saved_path)})
+
+
+async def run_media_queries(
+    image_queries: List[str],
+    video_queries: List[str],
+) -> Dict[str, Any]:
+    results: Dict[str, Any] = {"image": {}, "video": {}, "web": {}}
+    async with HackclubMediaSearchClient(api_key=HACKCLUB_SEARCH_KEY) as client:
+        for query in image_queries:
+            image_hits = await client.search_images(query, count=SEARCH_COUNT)
+            web_hits = await client.search_web(query, count=min(SEARCH_COUNT, 4))
+            results["image"][query] = [hit.__dict__ for hit in image_hits]
+            results["web"][query] = [hit.__dict__ for hit in web_hits]
+        for query in video_queries:
+            video_hits = await client.search_videos(query, count=SEARCH_COUNT)
+            web_hits = await client.search_web(query, count=min(SEARCH_COUNT, 4))
+            results["video"][query] = [hit.__dict__ for hit in video_hits]
+            if query in results["web"]:
+                results["web"][query].extend([hit.__dict__ for hit in web_hits])
+            else:
+                results["web"][query] = [hit.__dict__ for hit in web_hits]
+    return results
+
+
+def maybe_download_media(state: RunState, search_payload: Dict[str, Any]) -> List[str]:
+    if not DOWNLOAD_MEDIA:
+        return []
+
+    download_targets: List[tuple[str, str]] = []
+    for query, hits in (search_payload.get("image", {}) or {}).items():
+        if isinstance(hits, list):
+            for item in hits[:2]:
+                if isinstance(item, dict) and item.get("url"):
+                    download_targets.append((str(item["url"]), "images"))
+    for query, hits in (search_payload.get("video", {}) or {}).items():
+        if isinstance(hits, list):
+            for item in hits[:2]:
+                if isinstance(item, dict) and item.get("url"):
+                    download_targets.append((str(item["url"]), "videos"))
+
+    downloaded_paths: List[str] = []
+    for idx, (url, media_kind) in enumerate(
+        download_targets[:MAX_MEDIA_DOWNLOADS], start=1
+    ):
+        try:
+            response = requests.get(url, timeout=MEDIA_DOWNLOAD_TIMEOUT, stream=True)
+            if response.status_code >= 400:
+                continue
+            content_type = (response.headers.get("content-type") or "").lower()
+            extension = infer_media_extension(url, content_type)
+            if media_kind == "images" and not (
+                extension in {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+                or content_type.startswith("image/")
+            ):
+                continue
+            if media_kind == "videos" and not (
+                extension in {".mp4", ".webm", ".mov"}
+                or content_type.startswith("video/")
+            ):
+                continue
+
+            filename = f"{idx:03d}-{sanitize_filename(media_kind)}{extension}"
+            target = (
+                Path(state.project_dir) / "research" / "media" / media_kind / filename
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("wb") as handle:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        handle.write(chunk)
+            add_artifact_to_state(state, target, f"media/{media_kind}")
+            downloaded_paths.append(str(target.relative_to(Path(state.project_dir))))
+        except Exception as exc:
+            log_event("MEDIA_DOWNLOAD_ERROR", {"url": url, "error": str(exc)})
+    return downloaded_paths
+
+
+def maybe_transcribe_local_media(state: RunState) -> List[Dict[str, Any]]:
+    if not TRANSCRIBE_LOCAL_MEDIA:
+        return []
+    if not NVIDIA_API_KEY:
+        log_event("TRANSCRIBE_SKIPPED", "Missing NVIDIA API key")
+        return []
+
+    media_root = Path(state.project_dir) / "research" / "media"
+    if not media_root.exists():
+        return []
+
+    candidates: List[Path] = []
+    extensions = {".mp3", ".wav", ".m4a", ".mp4", ".webm", ".mov", ".mkv"}
+    for path in media_root.rglob("*"):
+        if path.is_file() and path.suffix.lower() in extensions:
+            candidates.append(path)
+
+    outputs: List[Dict[str, Any]] = []
+    for media_path in candidates[:MAX_TRANSCRIBE_FILES]:
+        try:
+            transcript = transcribe_media_file(
+                media_path, state.project_dir, api_key=NVIDIA_API_KEY
+            )
+            outputs.append(
+                {
+                    "media": str(media_path.relative_to(Path(state.project_dir))),
+                    "transcript_text_path": transcript.transcript_text_path,
+                    "transcript_json_path": transcript.transcript_json_path,
+                    "transcript_srt_path": transcript.transcript_srt_path,
+                }
+            )
+            add_artifact_to_state(
+                state, Path(transcript.transcript_text_path), "transcripts"
+            )
+            add_artifact_to_state(
+                state, Path(transcript.transcript_json_path), "transcripts"
+            )
+            if transcript.transcript_srt_path:
+                add_artifact_to_state(
+                    state, Path(transcript.transcript_srt_path), "transcripts"
+                )
+        except Exception as exc:
+            log_event("TRANSCRIBE_ERROR", {"media": str(media_path), "error": str(exc)})
+    return outputs
+
+
+def phase_evidence_gathering(state: RunState) -> None:
+    synthesis_path = state.metadata.get("synthesis_path", "")
+    if not synthesis_path or not Path(synthesis_path).exists():
+        raise RuntimeError("Synthesis artifact missing; cannot run evidence phase")
+
+    synthesis_payload = json.loads(Path(synthesis_path).read_text(encoding="utf-8"))
+    image_queries = [
+        str(item).strip()
+        for item in synthesis_payload.get("image_queries", [])
+        if str(item).strip()
+    ]
+    video_queries = [
+        str(item).strip()
+        for item in synthesis_payload.get("video_queries", [])
+        if str(item).strip()
+    ]
+    if not image_queries and not video_queries:
+        raise RuntimeError("No queries found in synthesis payload")
+
+    search_payload = asyncio.run(run_media_queries(image_queries, video_queries))
+    search_path = save_finding(
+        state.project_dir, "evidence", "media_search_results.json", search_payload
+    )
+    add_artifact_to_state(state, search_path, "evidence")
+
+    downloaded = maybe_download_media(state, search_payload)
+    transcripts = maybe_transcribe_local_media(state)
+
+    evidence_index = {
+        "phase": "EVIDENCE_GATHERING",
+        "media_search_results_path": str(search_path),
+        "downloaded_media": downloaded,
+        "transcripts": transcripts,
+    }
+    evidence_index_path = save_finding(
+        state.project_dir, "evidence", "evidence_index.json", evidence_index
+    )
+    add_artifact_to_state(state, evidence_index_path, "evidence")
+
+    state.metadata["evidence_search_path"] = str(search_path)
+    state.metadata["evidence_index_path"] = str(evidence_index_path)
+    save_run_state(state)
+    set_phase(state, PipelinePhase.SCRIPTING, "Evidence artifacts captured")
+    log_event("EVIDENCE_GATHERING_DONE", {"index": str(evidence_index_path)})
+
+
+def gather_workspace_assets(state: RunState) -> List[str]:
+    base = Path(state.project_dir)
+    assets: List[str] = []
+    for sub in [
+        "research/media/images",
+        "research/media/videos",
+        "research/transcripts",
+        "research/evidence",
+    ]:
+        root = base / sub
+        if not root.exists():
+            continue
+        for path in root.rglob("*"):
+            if path.is_file():
+                assets.append(str(path.relative_to(base)))
+    assets.sort()
+    return assets
+
+
+def remap_visual_asset_paths(script_payload: Dict[str, Any], assets: List[str]) -> None:
+    if not assets:
+        return
+    segments = script_payload.get("segments", [])
+    if not isinstance(segments, list):
+        return
+    for idx, segment in enumerate(segments):
+        if not isinstance(segment, dict):
+            continue
+        path = str(segment.get("visual_asset_path", "")).strip()
+        if path and path in assets:
+            continue
+        segment["visual_asset_path"] = assets[idx % len(assets)]
+
+
+def phase_scripting(state: RunState) -> Dict[str, Any]:
+    idea_path = state.metadata.get("idea_generation_path", "")
+    synthesis_path = state.metadata.get("synthesis_path", "")
+    evidence_path = state.metadata.get("evidence_search_path", "")
+    report_path = state.gemini_report_path or ""
+
+    blocks: List[str] = []
+    for label, path in [
+        ("IDEAS", idea_path),
+        ("GEMINI_REPORT", report_path),
+        ("SYNTHESIS", synthesis_path),
+        ("EVIDENCE", evidence_path),
+    ]:
+        if path and Path(path).exists():
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+            blocks.append(f"[{label}]\n{text}")
+    context = "\n\n".join(blocks)
+
+    summary_result = summarize_if_needed(
+        context,
+        max_tokens=MAX_SCRIPT_CONTEXT_TOKENS,
+        api_key=NVIDIA_API_KEY or None,
+        model=DEFAULT_SUMMARY_MODEL,
+    )
+    summary_path = save_finding(
+        state.project_dir, "summaries", "script_context.txt", summary_result.context
+    )
+    add_artifact_to_state(state, summary_path, "summaries")
+
+    assets = gather_workspace_assets(state)
+    assets_json = json.dumps(assets, indent=2, ensure_ascii=True)
+    prompt = (
+        "Phase: SCRIPTING\n"
+        "Write final 45-60 second investigative speedrunning short script from context.\n"
+        "Return strict JSON with keys:\n"
+        "{\n"
+        '  "phase": "SCRIPTING",\n'
+        '  "title": "...",\n'
+        '  "hook": "...",\n'
+        '  "script_full": "...",\n'
+        '  "loop_line": "...",\n'
+        '  "segments": [\n'
+        "    {\n"
+        '      "segment_id": "S1",\n'
+        '      "time_seconds": 0,\n'
+        '      "intended_duration_seconds": 8,\n'
+        '      "narration": "...",\n'
+        '      "on_screen_text": "...",\n'
+        '      "visual_search_query": "...",\n'
+        '      "visual_asset_path": "research/media/...",\n'
+        '      "evidence_refs": ["..."],\n'
+        '      "pace": "fast|normal|slow",\n'
+        '      "emotion": "excited|calm|dramatic|neutral"\n'
+        "    }\n"
+        "  ],\n"
+        '  "sources_to_check": ["..."],\n'
+        '  "hashtags": ["..."]\n'
+        "}\n"
+        "Constraints: 6-10 segments, total intended duration 45-60 seconds.\n"
+        "visual_asset_path must reference one of these existing findings workspace paths:\n"
+        f"{assets_json}\n\n"
+        f"Context:\n{summary_result.context}"
+    )
+
+    def _validate(payload: Dict[str, Any]) -> None:
+        require_keys(
+            payload,
+            [
+                "phase",
+                "title",
+                "hook",
+                "script_full",
+                "loop_line",
+                "segments",
+                "sources_to_check",
+                "hashtags",
+            ],
+            "SCRIPTING",
+        )
+        if payload.get("phase") != "SCRIPTING":
+            raise ValueError("SCRIPTING: invalid phase")
+        segments = payload.get("segments")
+        if not isinstance(segments, list) or not (6 <= len(segments) <= 10):
+            raise ValueError("SCRIPTING: segments must contain 6-10 entries")
+        duration = 0.0
+        for segment in segments:
+            if not isinstance(segment, dict):
+                raise ValueError("SCRIPTING: each segment must be an object")
+            require_keys(
+                segment,
+                [
+                    "segment_id",
+                    "time_seconds",
+                    "intended_duration_seconds",
+                    "narration",
+                    "on_screen_text",
+                    "visual_search_query",
+                    "visual_asset_path",
+                    "evidence_refs",
+                    "pace",
+                    "emotion",
+                ],
+                "SCRIPTING.segment",
+            )
+            duration += float(segment.get("intended_duration_seconds", 0))
+        if duration < 45 or duration > 60:
+            raise ValueError("SCRIPTING: segment durations must total 45-60 seconds")
+
+    payload = chat_json(prompt, validator=_validate, temperature=0.4)
+    remap_visual_asset_paths(payload, assets)
+
+    script_path = save_finding(
+        state.project_dir, "scripts", "final_script.json", payload
+    )
+    add_artifact_to_state(state, script_path, "scripts")
+
+    state.metadata["final_script_path"] = str(script_path)
+    state.metadata["summary_result"] = summary_result.model_dump()
+    state.status = "completed"
+    save_run_state(state)
+    log_event("SCRIPTING_DONE", {"final_script_path": str(script_path)})
+    return payload
+
+
+def resolve_project_name(args: argparse.Namespace) -> str:
+    candidate = (
+        args.project
+        or args.project_positional
+        or os.getenv("PROJECT_NAME")
+        or os.getenv("PROJECT_ID")
+    )
+    if not candidate:
+        die("Project not provided. Use --project or set PROJECT_NAME/PROJECT_ID.")
+    return candidate.strip()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Hybrid pause/resume documentary workflow driver"
+    )
+    parser.add_argument(
+        "project_positional", nargs="?", help="Project name/id (optional positional)"
+    )
+    parser.add_argument("--project", help="Project name/id")
+    parser.add_argument("--resume", action="store_true", help="Resume from state.json")
+    parser.add_argument(
+        "--phase",
+        type=as_phase,
+        help="Optional phase override",
+    )
+    parser.add_argument("--gemini-report", help="Path to Gemini report text/markdown")
+    return parser.parse_args()
+
+
+def initialize_state(project_name: str, resume: bool) -> RunState:
+    project_dir = setup_project_workspace(project_name)
+    state = load_run_state(project_dir)
+    if not resume and state.status == "completed":
+        state.status = "active"
+        state.current_phase = PipelinePhase.IDEA_GENERATION
+        save_run_state(state)
+        log_event(
+            "STATE_RESET",
+            {"project": project_name, "reason": "completed run reset without --resume"},
+        )
+    return state
+
+
+def run_workflow(
+    state: RunState, gemini_report_path: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    while True:
+        phase = state.current_phase
+        log_event("PHASE_START", {"phase": phase, "project": state.project_name})
+
+        if phase == PipelinePhase.IDEA_GENERATION:
+            phase_idea_generation(state)
+            continue
+
+        if phase == PipelinePhase.WAIT_FOR_GEMINI_REPORT:
+            is_ready = phase_wait_for_gemini_report(state, gemini_report_path)
+            if not is_ready:
+                return None
+            gemini_report_path = None
+            continue
+
+        if phase == PipelinePhase.SYNTHESIS:
+            phase_synthesis(state)
+            continue
+
+        if phase == PipelinePhase.EVIDENCE_GATHERING:
+            phase_evidence_gathering(state)
+            continue
+
+        if phase == PipelinePhase.SCRIPTING:
+            return phase_scripting(state)
+
+        raise RuntimeError(f"Unhandled phase: {phase}")
+
+
 def main() -> None:
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        f.write(
-            f"Run started at {datetime.utcnow().isoformat(timespec='seconds')}Z\n\n"
+    setup_logging()
+    args = parse_args()
+
+    project_name = resolve_project_name(args)
+    state = initialize_state(project_name, resume=args.resume)
+
+    if args.phase and args.phase != state.current_phase:
+        state = set_phase(state, args.phase, "Manual phase override from CLI")
+
+    if not NVIDIA_API_KEY:
+        die("Set NVIDIA_API_KEY or NVIDIA_NIM_API_KEY.")
+
+    if not HACKCLUB_SEARCH_KEY:
+        log_event(
+            "WARN",
+            "HACKCLUB_SEARCH_KEY/HACKCLUB_SEARCH_API_KEY missing: evidence search may be empty",
         )
 
     log_event(
         "RUN_CONFIG",
         {
-            "rounds": ROUNDS,
+            "project": project_name,
+            "resume": args.resume,
+            "phase_override": args.phase.value if args.phase else None,
+            "gemini_report": args.gemini_report,
+            "nvidia_base_url": NVIDIA_BASE_URL,
+            "model_primary": MODEL_PRIMARY,
+            "model_fallback": MODEL_FALLBACK,
             "search_count": SEARCH_COUNT,
-            "max_queries_per_round": MAX_QUERIES_PER_ROUND,
-            "http_timeout_seconds": TIMEOUT,
-            "chat_retries": NVIDIA_CHAT_RETRIES,
-            "model_qwen": MODEL_QWEN,
-            "model_kimi": MODEL_KIMI,
+            "download_media": DOWNLOAD_MEDIA,
+            "transcribe_local_media": TRANSCRIBE_LOCAL_MEDIA,
             "log_file": LOG_FILE,
         },
     )
 
-    if not NVIDIA_API_KEY:
-        die(
-            "Set NVIDIA_API_KEY (NVIDIA NIM / Build key, typically starts with nvapi-)."
-        )
-    if not HACKCLUB_SEARCH_KEY:
-        die("Set HACKCLUB_SEARCH_KEY (Hack Club Search API key).")
-
-    # Base instruction to keep it speedrunning-focused.
-    user_goal = (
-        "We are making a 45–60s investigative YouTube Shorts script in the SPEEDRUNNING niche. "
-        "Find a real mini-mystery or surprising, verifiable speedrunning story. "
-        "Use web search results I provide as your evidence pool. "
-        "Each round: propose up to 3 specific search queries that would reduce uncertainty, "
-        "and briefly explain what each query is trying to confirm. "
-        "Do NOT write the final script until the last round."
-    )
-
-    # Conversation state
-    notes: List[str] = []
-    source_urls: List[str] = []
-    chosen_angle: str | None = None
-
-    # Prime messages (system prompt is your strict JSON script generator)
-    base_messages: List[Dict[str, str]] = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": user_goal},
-    ]
-
-    for round_i in range(1, ROUNDS + 1):
-        model = MODEL_QWEN if round_i % 2 == 1 else MODEL_KIMI
-
-        round_header = f"ROUND {round_i}/{ROUNDS}"
-        print(f"\n=== {round_header} | model={model} ===", file=sys.stderr)
-        log_event("ROUND_START", {"round": round_i, "model": model})
-
-        # Ask the model what to search next (or finalize on last round)
-        if round_i < ROUNDS:
-            prompt = {
-                "role": "user",
-                "content": textwrap.dedent(f"""
-                Current notes (may be messy, that's life):
-                {json.dumps(notes[-10:], indent=2)}
-
-                Known source URLs so far:
-                {json.dumps(source_urls[-20:], indent=2)}
-
-                If we don't have a chosen angle yet, propose 2–3 candidate angles in speedrunning.
-                Then output JSON with keys:
-                {{
-                  "chosen_angle": string,
-                  "queries": [string, ...],
-                  "why": [string, ...]
-                }}
-                Rules:
-                - queries must be web-searchable
-                - prefer primary sources (leaderboards, wikis, speedrun.com pages, event vods, official posts)
-                - max {MAX_QUERIES_PER_ROUND} queries
-                """).strip(),
-            }
-            messages = (
-                base_messages
-                + (
-                    [{"role": "assistant", "content": "\n".join(notes[-6:])}]
-                    if notes
-                    else []
-                )
-                + [prompt]
-            )
-            backup_model = MODEL_KIMI if model == MODEL_QWEN else MODEL_QWEN
-            raw = chat_with_model_fallback(
-                model,
-                backup_model,
-                messages,
-                temperature=0.5,
-            )
-            plan = safe_json_extract(raw)
-            log_event("ROUND_PLAN_RAW", {"round": round_i, "model": model, "raw": raw})
-            if not isinstance(plan, dict):
-                # If model refuses to behave, force it back on track.
-                plan = {
-                    "chosen_angle": chosen_angle or "Unclear",
-                    "queries": [
-                        "speedrunning controversy removed run evidence",
-                        "speedrun.com moderator removed run explanation",
-                        "fastest time disqualified proof video",
-                    ],
-                    "why": ["fallback", "fallback", "fallback"],
-                }
-
-            chosen_angle = (plan.get("chosen_angle") or chosen_angle or "").strip()
-            queries = clamp_queries(plan.get("queries") or [], MAX_QUERIES_PER_ROUND)
-            log_event(
-                "ROUND_PLAN_PARSED",
-                {
-                    "round": round_i,
-                    "chosen_angle": chosen_angle,
-                    "queries": queries,
-                    "why": plan.get("why") or [],
-                },
-            )
-
-            if not queries:
-                queries = [
-                    "speedrun.com world record disqualified evidence",
-                    "speedrunning hidden technique discovered first",
-                    "fastest speedrun controversy timeline",
-                ][:MAX_QUERIES_PER_ROUND]
-
-            # Perform searches
-            round_results: List[Tuple[str, List[Dict[str, str]]]] = []
-            for q in queries:
-                try:
-                    results = hackclub_web_search(q, count=SEARCH_COUNT)
-                except Exception as e:
-                    results = [
-                        {"title": "SEARCH_ERROR", "url": "", "description": str(e)}
-                    ]
-                log_event(
-                    "SEARCH_RESULTS",
-                    {"round": round_i, "query": q, "results": results},
-                )
-                round_results.append((q, results))
-                time.sleep(SLEEP_BETWEEN_CALLS)
-
-            # Summarize results back into notes
-            snippet_block = []
-            for q, results in round_results:
-                snippet_block.append(f"QUERY: {q}")
-                for r in results:
-                    if r.get("url"):
-                        source_urls.append(r["url"])
-                    snippet_block.append(
-                        f"- {r.get('title', '').strip()} | {r.get('url', '').strip()} | {r.get('description', '').strip()}"
-                    )
-                snippet_block.append("")
-
-            notes.append(
-                f"[{round_header}] angle={chosen_angle}\n" + "\n".join(snippet_block)
-            )
-            log_event(
-                "ROUND_NOTES_APPENDED",
-                {
-                    "round": round_i,
-                    "chosen_angle": chosen_angle,
-                    "note_preview": notes[-1][:4000],
-                },
-            )
-
-        else:
-            # Final round: generate the actual script JSON (STRICT)
-            final_prompt = {
-                "role": "user",
-                "content": textwrap.dedent(f"""
-                FINAL ROUND. Produce the finished script JSON now.
-                Topic/angle: {chosen_angle or "Pick the strongest verified speedrunning mini-mystery from notes."}
-
-                Evidence notes:
-                {json.dumps(notes, indent=2)}
-
-                Source URLs (dedupe mentally, but include the best in sources_to_check):
-                {json.dumps(source_urls[-60:], indent=2)}
-
-                Requirements:
-                - MUST output STRICT JSON only, no extra commentary.
-                - Must be speedrunning niche.
-                - Do not invent facts. If uncertain, label as unconfirmed and keep it minimal.
-                - 45–60 seconds total across segments; 6–10 segments.
-                """).strip(),
-            }
-            messages = base_messages + [final_prompt]
-            backup_model = MODEL_KIMI if model == MODEL_QWEN else MODEL_QWEN
-            raw = chat_with_model_fallback(
-                model,
-                backup_model,
-                messages,
-                temperature=0.6,
-            )
-            log_event("FINAL_RAW", {"round": round_i, "model": model, "raw": raw})
-
-            # Print only the final JSON to stdout
-            extracted = safe_json_extract(raw)
-            if extracted is None:
-                # If model output isn't valid JSON, still output raw as last resort
-                log_event("FINAL_OUTPUT", {"valid_json": False, "output": raw.strip()})
-                print(raw.strip())
-            else:
-                log_event("FINAL_OUTPUT", {"valid_json": True, "output": extracted})
-                print(json.dumps(extracted, indent=2, ensure_ascii=False))
-
-    # done
+    final_payload = run_workflow(state, args.gemini_report)
+    if final_payload is not None:
+        print(json.dumps(final_payload, indent=2, ensure_ascii=True))
 
 
 if __name__ == "__main__":

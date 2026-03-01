@@ -7,6 +7,7 @@ Optimized for GPU memory usage with FFmpeg GPU acceleration.
 import gc
 import logging
 import math
+import re
 import tempfile
 import shutil
 from pathlib import Path
@@ -692,10 +693,15 @@ class VideoEffects:
             clips_to_composite = [clip]
 
             for cue in visual_cues:
+                directive = cue.visual_directive or cue.description
                 if cue.effect_type == "zoom":
                     # Create zoom highlight effect
                     zoom_clip = self._create_zoom_highlight(
-                        clip, cue.timestamp_seconds, cue.duration, cue.intensity
+                        clip,
+                        cue.timestamp_seconds,
+                        cue.duration,
+                        cue.intensity,
+                        directive,
                     )
                     if zoom_clip:
                         clips_to_composite.append(zoom_clip)
@@ -703,7 +709,11 @@ class VideoEffects:
                 elif cue.effect_type == "highlight":
                     # Create highlight effect
                     highlight_clip = self._create_highlight_effect(
-                        clip, cue.timestamp_seconds, cue.duration
+                        clip,
+                        cue.timestamp_seconds,
+                        cue.duration,
+                        cue.intensity,
+                        directive,
                     )
                     if highlight_clip:
                         clips_to_composite.append(highlight_clip)
@@ -718,10 +728,26 @@ class VideoEffects:
             return clip
 
     def _create_zoom_highlight(
-        self, clip: VideoFileClip, timestamp: float, duration: float, intensity: float
+        self,
+        clip: VideoFileClip,
+        timestamp: float,
+        duration: float,
+        intensity: float,
+        directive: Optional[str] = None,
     ) -> Optional[VideoFileClip]:
         """Create a zoom highlight effect"""
         try:
+            target_box = self._parse_callout_coordinates(directive, clip.size)
+            if target_box:
+                return self._create_receipt_callout_effect(
+                    clip,
+                    timestamp,
+                    duration,
+                    target_box,
+                    intensity=intensity,
+                    apply_zoom=True,
+                )
+
             # Create a subtle overlay to indicate zoom focus
             w, h = clip.size
 
@@ -736,6 +762,189 @@ class VideoEffects:
 
         except Exception as e:
             self.logger.warning(f"Error creating zoom highlight: {e}")
+            return None
+
+    def _parse_callout_coordinates(
+        self, directive: Optional[str], clip_size: Tuple[int, int]
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Parse x1,y1,x2,y2 style coordinates from a cue directive."""
+        if not directive:
+            return None
+
+        try:
+            lowered = directive.lower()
+            labelled_pattern = (
+                r"x1\s*[:=]\s*(-?\d+(?:\.\d+)?)"
+                r".*?y1\s*[:=]\s*(-?\d+(?:\.\d+)?)"
+                r".*?x2\s*[:=]\s*(-?\d+(?:\.\d+)?)"
+                r".*?y2\s*[:=]\s*(-?\d+(?:\.\d+)?)"
+            )
+            labelled_match = re.search(labelled_pattern, lowered)
+            if labelled_match:
+                raw_values = [float(v) for v in labelled_match.groups()]
+                return self._normalize_callout_box(raw_values, clip_size)
+
+            comma_match = re.search(
+                r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)",
+                directive,
+            )
+            if comma_match:
+                raw_values = [float(v) for v in comma_match.groups()]
+                return self._normalize_callout_box(raw_values, clip_size)
+        except Exception as e:
+            self.logger.debug(
+                f"Failed parsing visual cue coordinates '{directive}': {e}"
+            )
+
+        return None
+
+    def _normalize_callout_box(
+        self, raw_values: List[float], clip_size: Tuple[int, int]
+    ) -> Optional[Tuple[int, int, int, int]]:
+        """Normalize parsed coordinates into bounded pixel rectangle."""
+        if len(raw_values) != 4:
+            return None
+
+        width, height = clip_size
+        x1, y1, x2, y2 = raw_values
+
+        if all(0.0 <= value <= 1.0 for value in raw_values):
+            x1, x2 = x1 * width, x2 * width
+            y1, y2 = y1 * height, y2 * height
+
+        x1_i = int(max(0, min(width - 1, min(x1, x2))))
+        y1_i = int(max(0, min(height - 1, min(y1, y2))))
+        x2_i = int(max(0, min(width, max(x1, x2))))
+        y2_i = int(max(0, min(height, max(y1, y2))))
+
+        if x2_i <= x1_i or y2_i <= y1_i:
+            return None
+
+        self.logger.debug(
+            "Using callout rectangle x1=%s y1=%s x2=%s y2=%s",
+            x1_i,
+            y1_i,
+            x2_i,
+            y2_i,
+        )
+        return (x1_i, y1_i, x2_i, y2_i)
+
+    def _draw_rectangle_rgb(
+        self,
+        frame: np.ndarray,
+        x1: int,
+        y1: int,
+        x2: int,
+        y2: int,
+        color: Tuple[int, int, int],
+        thickness: int,
+    ) -> np.ndarray:
+        """Draw a rectangle directly on RGB frame data."""
+        height, width = frame.shape[:2]
+        x1 = max(0, min(width - 1, x1))
+        y1 = max(0, min(height - 1, y1))
+        x2 = max(0, min(width, x2))
+        y2 = max(0, min(height, y2))
+
+        if x2 <= x1 or y2 <= y1:
+            return frame
+
+        thickness = max(1, thickness)
+        color_arr = np.array(color, dtype=np.uint8)
+
+        frame[y1 : min(y1 + thickness, y2), x1:x2] = color_arr
+        frame[max(y2 - thickness, y1) : y2, x1:x2] = color_arr
+        frame[y1:y2, x1 : min(x1 + thickness, x2)] = color_arr
+        frame[y1:y2, max(x2 - thickness, x1) : x2] = color_arr
+        return frame
+
+    def _create_receipt_callout_effect(
+        self,
+        clip: VideoFileClip,
+        timestamp: float,
+        duration: float,
+        target_box: Tuple[int, int, int, int],
+        intensity: float = 1.0,
+        apply_zoom: bool = True,
+    ) -> Optional[VideoFileClip]:
+        """Create a receipt-style callout with darken, yellow box, and zoom."""
+        try:
+            if duration <= 0:
+                return None
+
+            end_time = min(float(clip.duration), timestamp + duration)
+            if end_time <= timestamp:
+                return None
+
+            callout_segment = MoviePyCompat.subclip(clip, timestamp, end_time)
+            segment_duration = max(0.001, float(callout_segment.duration))
+
+            base_x1, base_y1, base_x2, base_y2 = target_box
+            target_cx = int((base_x1 + base_x2) / 2)
+            target_cy = int((base_y1 + base_y2) / 2)
+
+            max_zoom = 1.08 + (min(max(float(intensity), 0.1), 2.0) * 0.08)
+            darken_strength = min(0.32, 0.18 + (float(intensity) * 0.05))
+
+            def callout_transform(get_frame, t):
+                frame = get_frame(t)
+                h, w = frame.shape[:2]
+
+                progress = min(max(t / segment_duration, 0.0), 1.0)
+                eased_progress = 0.5 - 0.5 * math.cos(math.pi * progress)
+                zoom_factor = 1.0 + ((max_zoom - 1.0) * eased_progress)
+
+                crop_x1, crop_y1, crop_x2, crop_y2 = 0, 0, w, h
+                transformed = frame
+
+                if apply_zoom and zoom_factor > 1.001:
+                    crop_w = max(32, int(w / zoom_factor))
+                    crop_h = max(32, int(h / zoom_factor))
+                    crop_x1, crop_y1, crop_x2, crop_y2 = self._calculate_crop_window(
+                        w,
+                        h,
+                        int(target_cx * (w / max(1, clip.w))),
+                        int(target_cy * (h / max(1, clip.h))),
+                        crop_w,
+                        crop_h,
+                    )
+                    cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+                    if cropped.size > 0:
+                        transformed = cv2.resize(cropped, (w, h))
+
+                darkened = np.clip(
+                    transformed.astype(np.float32) * (1.0 - darken_strength), 0, 255
+                ).astype(np.uint8)
+
+                draw_x1 = int((base_x1 - crop_x1) * w / max(1, crop_x2 - crop_x1))
+                draw_y1 = int((base_y1 - crop_y1) * h / max(1, crop_y2 - crop_y1))
+                draw_x2 = int((base_x2 - crop_x1) * w / max(1, crop_x2 - crop_x1))
+                draw_y2 = int((base_y2 - crop_y1) * h / max(1, crop_y2 - crop_y1))
+
+                border_thickness = max(3, int(min(w, h) * 0.007))
+                return self._draw_rectangle_rgb(
+                    darkened,
+                    draw_x1,
+                    draw_y1,
+                    draw_x2,
+                    draw_y2,
+                    color=(255, 255, 0),
+                    thickness=border_thickness,
+                )
+
+            callout_segment = MoviePyCompat.apply_effect(
+                callout_segment, callout_transform
+            )
+            callout_segment = MoviePyCompat.with_start(callout_segment, timestamp)
+            self.logger.info(
+                "Applied receipt-style visual callout at %.2fs for %.2fs",
+                timestamp,
+                duration,
+            )
+            return callout_segment
+
+        except Exception as e:
+            self.logger.warning(f"Error creating receipt callout effect: {e}")
             return None
 
     def apply_dynamic_pan_zoom(
@@ -1052,10 +1261,26 @@ class VideoEffects:
             return None
 
     def _create_highlight_effect(
-        self, clip: VideoFileClip, timestamp: float, duration: float
+        self,
+        clip: VideoFileClip,
+        timestamp: float,
+        duration: float,
+        intensity: float = 1.0,
+        directive: Optional[str] = None,
     ) -> Optional[VideoFileClip]:
         """Create a highlight effect"""
         try:
+            target_box = self._parse_callout_coordinates(directive, clip.size)
+            if target_box:
+                return self._create_receipt_callout_effect(
+                    clip,
+                    timestamp,
+                    duration,
+                    target_box,
+                    intensity=intensity,
+                    apply_zoom=True,
+                )
+
             w, h = clip.size
 
             # Create border highlight
@@ -2255,6 +2480,15 @@ class VideoProcessor:
                     final_audio = self.cta_processor.add_auditory_ctas(
                         composite_audio, analysis, final_visuals.duration
                     )
+                    pre_blend_audio = final_audio
+                    final_audio = self._blend_audio_loop_edges(final_audio)
+                    if final_audio is not pre_blend_audio:
+                        close_old = getattr(pre_blend_audio, "close", None)
+                        if callable(close_old):
+                            try:
+                                close_old()
+                            except Exception:
+                                pass
                     resource_manager.register_clip(final_audio)
                 else:
                     final_audio = composite_audio
@@ -2483,7 +2717,7 @@ class VideoProcessor:
                 )
                 # Try to create fallback background music from available files
                 try:
-                    video_duration = getattr(source_clip, "duration", 60.0)
+                    video_duration = getattr(source_audio, "duration", 60.0)
                     fallback_audio = self._create_fallback_audio(
                         video_duration, resource_manager
                     )
@@ -3009,6 +3243,15 @@ class VideoProcessor:
             )
 
             if final_audio:
+                pre_blend_audio = final_audio
+                final_audio = self._blend_audio_loop_edges(final_audio)
+                if final_audio is not pre_blend_audio:
+                    close_old = getattr(pre_blend_audio, "close", None)
+                    if callable(close_old):
+                        try:
+                            close_old()
+                        except Exception:
+                            pass
                 audio_clip = MoviePyCompat.with_audio(video_clip, final_audio)
                 resource_manager.register_clip(final_audio)
                 resource_manager.register_clip(audio_clip)
@@ -3023,6 +3266,52 @@ class VideoProcessor:
             self.logger.error(f"Audio processing failed: {e}")
             # Fallback to original audio
             return video_clip
+
+    def _blend_audio_loop_edges(
+        self, audio_clip: Optional[AudioFileClip], blend_seconds: float = 0.5
+    ) -> Optional[AudioFileClip]:
+        """Blend leading audio into trailing audio to reduce replay seam pops."""
+        if audio_clip is None:
+            return None
+
+        try:
+            duration = float(getattr(audio_clip, "duration", 0.0) or 0.0)
+            if duration <= 0:
+                return audio_clip
+
+            safe_blend = min(max(float(blend_seconds), 0.0), duration * 0.25)
+            if safe_blend < 0.1:
+                return audio_clip
+
+            sample_rate = int(getattr(audio_clip, "fps", 44100) or 44100)
+            audio_array = audio_clip.to_soundarray(fps=sample_rate)
+            if audio_array is None or len(audio_array) == 0:
+                return audio_clip
+
+            if audio_array.ndim == 1:
+                audio_array = audio_array.reshape(-1, 1)
+
+            blend_samples = int(sample_rate * safe_blend)
+            if blend_samples < 32 or audio_array.shape[0] <= (blend_samples * 2):
+                return audio_clip
+
+            blended_array = audio_array.astype(np.float32).copy()
+            fade_out = np.linspace(1.0, 0.0, blend_samples, dtype=np.float32)[:, None]
+            fade_in = np.linspace(0.0, 1.0, blend_samples, dtype=np.float32)[:, None]
+
+            tail = blended_array[-blend_samples:].copy()
+            head = blended_array[:blend_samples].copy()
+            blended_array[-blend_samples:] = (tail * fade_out) + (head * fade_in)
+
+            from moviepy.audio.AudioClip import AudioArrayClip
+
+            blended_clip = AudioArrayClip(blended_array, fps=sample_rate)
+            self.logger.info("Applied loop-edge audio blend over %.2fs", safe_blend)
+            return blended_clip
+
+        except Exception as e:
+            self.logger.debug(f"Skipping loop-edge audio blend: {e}")
+            return audio_clip
 
     def _apply_duration_constraints(self, video_clip: VideoFileClip) -> VideoFileClip:
         """Apply duration constraints with error handling"""

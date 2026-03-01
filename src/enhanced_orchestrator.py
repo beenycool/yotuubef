@@ -5,11 +5,16 @@ performance tracking, and proactive channel management.
 """
 
 import asyncio
+import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+from urllib.parse import urlparse
 
+import aiohttp
 from moviepy import AudioFileClip, CompositeAudioClip, concatenate_audioclips
 
 import asyncprawcore.exceptions
@@ -33,6 +38,19 @@ from src.processing.video_processor_fixes import MoviePyCompat
 from src.processing.image_search_client import BraveImageClient
 from src.processing.caption_generator import CaptionGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
+from src.hybrid_documentary_state_machine import (
+    HackclubMediaSearchClient,
+    PipelinePhase,
+    build_state_machine_prompt,
+    estimate_tokens_conservative,
+    load_run_state,
+    save_finding,
+    save_run_state,
+    set_phase,
+    setup_project_workspace,
+    summarize_if_needed,
+    transcribe_media_file,
+)
 
 
 class EnhancedVideoOrchestrator:
@@ -457,6 +475,913 @@ class EnhancedVideoOrchestrator:
             self.logger.error("AI Production Studio failed: %s", e, exc_info=True)
             self.gpu_manager.clear_gpu_cache()
             return {"success": False, "error": str(e), "stage": "ai_production_studio"}
+
+    async def process_hybrid_documentary_studio(
+        self,
+        project_name: str,
+        reddit_url: Optional[str] = None,
+        resume: bool = False,
+        phase_override: Optional[str] = None,
+        gemini_report_path: Optional[str] = None,
+        no_upload: bool = False,
+    ) -> Dict[str, Any]:
+        """Run opt-in hybrid documentary workflow with human pause/resume."""
+        try:
+            self.logger.info(
+                "Starting hybrid documentary workflow project=%s resume=%s",
+                project_name,
+                resume,
+            )
+            project_dir = setup_project_workspace(project_name)
+            state = load_run_state(project_dir)
+
+            if not resume and state.status == "completed":
+                self.logger.info(
+                    "Resetting completed hybrid run for project=%s", project_name
+                )
+                state.status = "active"
+                state.current_phase = PipelinePhase.IDEA_GENERATION
+                save_run_state(state)
+
+            if reddit_url:
+                state.metadata["reddit_url"] = reddit_url
+                if not state.context_snapshot:
+                    state.context_snapshot = f"Reddit URL: {reddit_url}"
+
+            state.metadata["hybrid_no_upload"] = bool(no_upload)
+
+            if phase_override:
+                target_phase = self._coerce_hybrid_phase(phase_override)
+                current_phase = self._coerce_hybrid_phase(state.current_phase)
+                if target_phase and target_phase != current_phase:
+                    state = set_phase(
+                        state, target_phase, "Manual hybrid phase override"
+                    )
+
+            workflow_result = await self._run_hybrid_state_machine(
+                state,
+                gemini_report_path=gemini_report_path,
+            )
+            workflow_result["workspace_path"] = str(project_dir)
+            workflow_result["state_path"] = str(
+                Path(project_dir) / "research" / "state.json"
+            )
+            return workflow_result
+        except Exception as exc:
+            self.logger.error(
+                "Hybrid documentary workflow failed: %s", exc, exc_info=True
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "pipeline": "hybrid_documentary_studio",
+                "project_name": project_name,
+            }
+
+    async def _run_hybrid_state_machine(
+        self,
+        state,
+        gemini_report_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        while True:
+            phase = self._coerce_hybrid_phase(state.current_phase)
+            if phase is None:
+                return {
+                    "success": False,
+                    "error": f"Unsupported phase: {state.current_phase}",
+                    "current_phase": str(state.current_phase),
+                    "project_name": state.project_name,
+                    "pipeline": "hybrid_documentary_studio",
+                }
+
+            self.logger.info("Hybrid phase start: %s", phase.value)
+
+            if phase == PipelinePhase.IDEA_GENERATION:
+                idea_payload = await self._generate_hybrid_phase_payload(
+                    state,
+                    phase,
+                    state.context_snapshot
+                    or "Generate idea angles for a documentary short.",
+                )
+                idea_path = save_finding(
+                    state.project_dir,
+                    "ideas",
+                    "idea_generation.json",
+                    idea_payload,
+                )
+                state.metadata["idea_generation_path"] = str(idea_path)
+                state.context_snapshot = json.dumps(idea_payload, ensure_ascii=True)
+                save_run_state(state)
+                state = set_phase(
+                    state,
+                    PipelinePhase.WAIT_FOR_GEMINI_REPORT,
+                    "Idea package generated",
+                )
+                continue
+
+            if phase == PipelinePhase.WAIT_FOR_GEMINI_REPORT:
+                report_candidate = gemini_report_path or state.gemini_report_path
+                if not report_candidate:
+                    state.status = "paused_waiting_for_gemini_report"
+                    save_run_state(state)
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                        "message": "Waiting for Gemini report. Resume with --gemini-report.",
+                    }
+
+                report_file = Path(report_candidate)
+                if not report_file.exists() or not report_file.is_file():
+                    state.status = "paused_waiting_for_gemini_report"
+                    save_run_state(state)
+                    return {
+                        "success": False,
+                        "paused": True,
+                        "error": f"Gemini report not found: {report_file}",
+                        "status": state.status,
+                        "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                    }
+
+                report_text = report_file.read_text(encoding="utf-8", errors="replace")
+                copied_report = save_finding(
+                    state.project_dir,
+                    "reports",
+                    "gemini_report.txt",
+                    report_text,
+                )
+                state.gemini_report_path = str(copied_report)
+                state.status = "active"
+                save_run_state(state)
+                state = set_phase(
+                    state, PipelinePhase.SYNTHESIS, "Gemini report supplied"
+                )
+                gemini_report_path = None
+                continue
+
+            if phase == PipelinePhase.SYNTHESIS:
+                report_path = Path(state.gemini_report_path or "")
+                if not report_path.exists():
+                    state = set_phase(
+                        state,
+                        PipelinePhase.WAIT_FOR_GEMINI_REPORT,
+                        "Gemini report missing during synthesis",
+                    )
+                    continue
+
+                idea_text = self._read_hybrid_artifact_text(
+                    state.metadata.get("idea_generation_path")
+                )
+                report_text = report_path.read_text(encoding="utf-8", errors="replace")
+                synthesis_context = (
+                    f"Idea artifact:\n{idea_text}\n\nGemini report:\n{report_text}"
+                )
+                synthesis_payload = await self._generate_hybrid_phase_payload(
+                    state,
+                    phase,
+                    synthesis_context,
+                )
+                synthesis_payload["image_queries"] = self._normalize_query_list(
+                    synthesis_payload.get("image_queries"), minimum_count=3
+                )
+                synthesis_payload["video_queries"] = self._normalize_query_list(
+                    synthesis_payload.get("video_queries"), minimum_count=3
+                )
+                synthesis_path = save_finding(
+                    state.project_dir,
+                    "synthesis",
+                    "synthesis.json",
+                    synthesis_payload,
+                )
+                state.metadata["synthesis_path"] = str(synthesis_path)
+                save_run_state(state)
+                state = set_phase(
+                    state,
+                    PipelinePhase.EVIDENCE_GATHERING,
+                    "Synthesis prepared",
+                )
+                continue
+
+            if phase == PipelinePhase.EVIDENCE_GATHERING:
+                synthesis_path = state.metadata.get("synthesis_path")
+                synthesis_payload: Dict[str, Any] = {}
+                if synthesis_path and Path(synthesis_path).exists():
+                    try:
+                        synthesis_payload = json.loads(
+                            Path(synthesis_path).read_text(encoding="utf-8")
+                        )
+                    except Exception:
+                        synthesis_payload = {}
+
+                image_queries = self._normalize_query_list(
+                    synthesis_payload.get("image_queries"), minimum_count=0
+                )
+                video_queries = self._normalize_query_list(
+                    synthesis_payload.get("video_queries"), minimum_count=0
+                )
+
+                search_payload = await self._run_hybrid_media_queries(
+                    image_queries=image_queries,
+                    video_queries=video_queries,
+                    count=6,
+                )
+                search_path = save_finding(
+                    state.project_dir,
+                    "evidence",
+                    "media_search_results.json",
+                    search_payload,
+                )
+
+                downloaded_media = await self._download_hybrid_media_assets(
+                    state,
+                    search_payload,
+                )
+                transcripts = await self._transcribe_hybrid_media_assets(
+                    state,
+                    downloaded_media,
+                )
+
+                evidence_index = {
+                    "phase": PipelinePhase.EVIDENCE_GATHERING.value,
+                    "created_at": datetime.now().isoformat(),
+                    "image_queries": image_queries,
+                    "video_queries": video_queries,
+                    "search_results_path": str(search_path),
+                    "downloaded_media": downloaded_media,
+                    "transcripts": transcripts,
+                }
+                evidence_path = save_finding(
+                    state.project_dir,
+                    "evidence",
+                    "evidence_index.json",
+                    evidence_index,
+                )
+                state.metadata["evidence_index_path"] = str(evidence_path)
+                state.metadata["evidence_search_path"] = str(search_path)
+                state.metadata["raw_media_dir"] = str(
+                    Path(state.project_dir) / "raw_media"
+                )
+                save_run_state(state)
+                state = set_phase(
+                    state,
+                    PipelinePhase.SCRIPTING,
+                    "Evidence artifacts captured",
+                )
+                continue
+
+            if phase == PipelinePhase.SCRIPTING:
+                context_parts: List[str] = []
+                for key in (
+                    "idea_generation_path",
+                    "synthesis_path",
+                    "evidence_search_path",
+                    "evidence_index_path",
+                ):
+                    context_parts.append(
+                        self._read_hybrid_artifact_text(state.metadata.get(key))
+                    )
+                if state.gemini_report_path:
+                    context_parts.append(
+                        self._read_hybrid_artifact_text(state.gemini_report_path)
+                    )
+                raw_context = "\n\n".join(
+                    [item for item in context_parts if item]
+                ).strip()
+
+                workspace_assets = self._collect_hybrid_workspace_assets(state)
+                assets_json = json.dumps(workspace_assets, indent=2, ensure_ascii=True)
+                raw_context = (
+                    f"{raw_context}\n\n[AVAILABLE_WORKSPACE_ASSETS]\n{assets_json}"
+                    if raw_context
+                    else f"[AVAILABLE_WORKSPACE_ASSETS]\n{assets_json}"
+                )
+
+                max_tokens = int(
+                    os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000")
+                )
+
+                summary_result = summarize_if_needed(
+                    raw_context,
+                    max_tokens=max_tokens,
+                    api_key=getattr(self.config.api, "nvidia_nim_api_key", None),
+                    base_url=getattr(
+                        self.config.api,
+                        "nvidia_nim_base_url",
+                        "https://integrate.api.nvidia.com/v1",
+                    ),
+                )
+                summary_path = save_finding(
+                    state.project_dir,
+                    "summaries",
+                    "script_context.txt",
+                    summary_result.context,
+                )
+                state.metadata["script_context_path"] = str(summary_path)
+
+                script_payload = await self._generate_hybrid_phase_payload(
+                    state,
+                    phase,
+                    summary_result.context or raw_context,
+                )
+                self._enforce_script_asset_mapping(script_payload, workspace_assets)
+                final_script_path = save_finding(
+                    state.project_dir,
+                    "scripts",
+                    "final_script.json",
+                    script_payload,
+                )
+                state.metadata["final_script_path"] = str(final_script_path)
+                state.status = "completed"
+                save_run_state(state)
+
+                return {
+                    "success": True,
+                    "paused": False,
+                    "status": state.status,
+                    "current_phase": PipelinePhase.SCRIPTING.value,
+                    "project_name": state.project_name,
+                    "pipeline": "hybrid_documentary_studio",
+                    "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
+                    "final_script_path": str(final_script_path),
+                }
+
+    async def _generate_hybrid_phase_payload(
+        self,
+        state,
+        phase: PipelinePhase,
+        context: str,
+    ) -> Dict[str, Any]:
+        prompt = build_state_machine_prompt(state, context)
+        active_client = getattr(self.ai_client, "active_client", None)
+
+        if active_client and hasattr(active_client, "_chat_completion_with_fallback"):
+            try:
+                response = await active_client._chat_completion_with_fallback(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Return strict JSON for the provided phase contract only.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.3,
+                    max_tokens=1800,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                parsed = json.loads(content)
+                if isinstance(parsed, dict) and self._is_valid_hybrid_phase_payload(
+                    phase, parsed
+                ):
+                    return parsed
+                self.logger.warning(
+                    "Hybrid phase payload failed contract validation for %s",
+                    phase.value,
+                )
+            except Exception as exc:
+                self.logger.warning(
+                    "Hybrid phase model call failed for %s, using fallback: %s",
+                    phase.value,
+                    exc,
+                )
+
+        return self._fallback_hybrid_phase_payload(phase, context)
+
+    @staticmethod
+    def _is_valid_hybrid_phase_payload(
+        phase: PipelinePhase,
+        payload: Dict[str, Any],
+    ) -> bool:
+        expected_keys_map = {
+            PipelinePhase.IDEA_GENERATION: {
+                "phase",
+                "angles",
+                "gemini_deep_research_prompt",
+                "next_phase",
+            },
+            PipelinePhase.SYNTHESIS: {
+                "phase",
+                "chosen_angle",
+                "reasoning",
+                "image_queries",
+                "video_queries",
+                "evidence_questions",
+                "next_phase",
+            },
+            PipelinePhase.EVIDENCE_GATHERING: {
+                "phase",
+                "evidence_plan",
+                "media_queries",
+                "next_phase",
+            },
+            PipelinePhase.SCRIPTING: {
+                "phase",
+                "title",
+                "hook",
+                "loop_bridge",
+                "segments",
+                "sources_to_check",
+                "hashtags",
+            },
+        }
+
+        expected_keys = expected_keys_map.get(phase)
+        if not expected_keys:
+            return False
+        if payload.get("phase") != phase.value:
+            return False
+
+        actual_keys = set(payload.keys())
+        if actual_keys != expected_keys:
+            return False
+
+        return True
+
+    def _fallback_hybrid_phase_payload(
+        self,
+        phase: PipelinePhase,
+        context: str,
+    ) -> Dict[str, Any]:
+        _ = context
+        if phase == PipelinePhase.IDEA_GENERATION:
+            return {
+                "phase": PipelinePhase.IDEA_GENERATION.value,
+                "angles": [
+                    {
+                        "id": "A1",
+                        "title": "The deleted leaderboard record",
+                        "hook": "A run disappeared after being called impossible.",
+                        "viability_score": 86,
+                    },
+                    {
+                        "id": "A2",
+                        "title": "The forum post that changed a category",
+                        "hook": "One rules thread rewrote years of speedrun history.",
+                        "viability_score": 81,
+                    },
+                    {
+                        "id": "A3",
+                        "title": "The split-time contradiction",
+                        "hook": "A timestamp mismatch exposed a hidden timing exploit.",
+                        "viability_score": 79,
+                    },
+                ],
+                "gemini_deep_research_prompt": (
+                    "Act as a forensic web researcher. Investigate all three angles, "
+                    "and return exact dates, primary-source URLs, archived forum posts, "
+                    "leaderboard snapshots, and video evidence with timestamps."
+                ),
+                "next_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
+            }
+        if phase == PipelinePhase.SYNTHESIS:
+            return {
+                "phase": PipelinePhase.SYNTHESIS.value,
+                "chosen_angle": "The deleted leaderboard record",
+                "reasoning": "It has the strongest source density and verifiable timeline.",
+                "image_queries": [
+                    "site:speedrun.com archived leaderboard history",
+                    "web archive speedrunning forum thread removed",
+                    "speedrun rules change screenshot date",
+                ],
+                "video_queries": [
+                    "speedrun world record progression with timestamps",
+                    "category dispute vod evidence",
+                    "community investigation video source",
+                ],
+                "evidence_questions": [
+                    "Who posted the first verified dispute?",
+                    "Which date proves the leaderboard deletion happened?",
+                    "Which clip contains direct quote evidence?",
+                ],
+                "next_phase": PipelinePhase.EVIDENCE_GATHERING.value,
+            }
+        if phase == PipelinePhase.EVIDENCE_GATHERING:
+            return {
+                "phase": PipelinePhase.EVIDENCE_GATHERING.value,
+                "evidence_plan": [
+                    {
+                        "claim": "Main narrative has unresolved factual gaps.",
+                        "evidence_needed": [
+                            "Primary source citation",
+                            "Timeline artifact",
+                        ],
+                        "priority": "high",
+                    }
+                ],
+                "media_queries": [
+                    "event timeline document",
+                    "supporting visual evidence",
+                ],
+                "next_phase": PipelinePhase.SCRIPTING.value,
+            }
+        if phase == PipelinePhase.SCRIPTING:
+            return {
+                "phase": PipelinePhase.SCRIPTING.value,
+                "title": "The Record That Vanished",
+                "hook": "A world record was deleted, but the receipts stayed online.",
+                "loop_bridge": "...which is exactly why that deleted record still matters.",
+                "segments": [
+                    {
+                        "time_seconds": 0.0,
+                        "intended_duration_seconds": 8.0,
+                        "narration": "In 2014, a top run vanished from the leaderboard overnight.",
+                        "visual_asset_path": "research/evidence/media_search_results.json",
+                        "visual_directive": "Zoom into the date and highlight the removed entry.",
+                        "text_overlay": "RECORD REMOVED",
+                        "evidence_refs": [
+                            "research/evidence/media_search_results.json"
+                        ],
+                        "pace": "fast",
+                        "emotion": "dramatic",
+                    },
+                    {
+                        "time_seconds": 8.0,
+                        "intended_duration_seconds": 8.0,
+                        "narration": "Then a forum thread surfaced with exact split-time contradictions.",
+                        "visual_asset_path": "research/evidence/evidence_index.json",
+                        "visual_directive": "Highlight timestamp row and pan to contradiction.",
+                        "text_overlay": "TIMESTAMP MISMATCH",
+                        "evidence_refs": ["research/evidence/evidence_index.json"],
+                        "pace": "fast",
+                        "emotion": "dramatic",
+                    },
+                ],
+                "sources_to_check": [
+                    "Archive snapshots",
+                    "Forum URLs",
+                    "Video timestamps",
+                ],
+                "hashtags": ["#speedrun", "#gaminghistory", "#documentary"],
+            }
+        raise ValueError(f"No fallback payload available for phase {phase.value}")
+
+    @staticmethod
+    def _coerce_hybrid_phase(phase_value: Any) -> Optional[PipelinePhase]:
+        if isinstance(phase_value, PipelinePhase):
+            return phase_value
+        if isinstance(phase_value, str):
+            try:
+                return PipelinePhase(phase_value)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _read_hybrid_artifact_text(path_value: Optional[str]) -> str:
+        if not path_value:
+            return ""
+        path = Path(path_value)
+        if not path.exists() or not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")
+
+    @staticmethod
+    def _normalize_query_list(value: Any, minimum_count: int = 0) -> List[str]:
+        normalized: List[str] = []
+        if isinstance(value, list):
+            for item in value:
+                text = str(item).strip()
+                if text and text not in normalized:
+                    normalized.append(text)
+
+        while len(normalized) < minimum_count:
+            normalized.append(f"primary source evidence {len(normalized) + 1}")
+        return normalized
+
+    async def _run_hybrid_media_queries(
+        self,
+        image_queries: List[str],
+        video_queries: List[str],
+        count: int = 6,
+    ) -> Dict[str, Any]:
+        api_key = (
+            os.getenv("HACKCLUB_SEARCH_KEY")
+            or os.getenv("HACKCLUB_SEARCH_API_KEY")
+            or ""
+        ).strip()
+        results: Dict[str, Any] = {"image": {}, "video": {}, "web": {}}
+        if not api_key:
+            return results
+
+        async with HackclubMediaSearchClient(api_key=api_key) as client:
+            for query in image_queries:
+                image_hits = await client.search_images(query, count=count)
+                web_hits = await client.search_web(query, count=min(count, 4))
+                results["image"][query] = [hit.__dict__ for hit in image_hits]
+                results["web"][query] = [hit.__dict__ for hit in web_hits]
+
+            for query in video_queries:
+                video_hits = await client.search_videos(query, count=count)
+                web_hits = await client.search_web(query, count=min(count, 4))
+                results["video"][query] = [hit.__dict__ for hit in video_hits]
+                existing = results["web"].get(query, [])
+                existing.extend([hit.__dict__ for hit in web_hits])
+                results["web"][query] = existing
+
+        return results
+
+    async def _download_hybrid_media_assets(
+        self,
+        state,
+        search_payload: Dict[str, Any],
+    ) -> List[Dict[str, str]]:
+        project_dir = Path(state.project_dir)
+        raw_media_dir = project_dir / "raw_media"
+        image_dir = project_dir / "research" / "media" / "images"
+        raw_media_dir.mkdir(parents=True, exist_ok=True)
+        image_dir.mkdir(parents=True, exist_ok=True)
+
+        max_video_downloads = int(os.getenv("HYBRID_MAX_VIDEO_DOWNLOADS", "8"))
+        max_image_downloads = int(os.getenv("HYBRID_MAX_IMAGE_DOWNLOADS", "10"))
+
+        downloaded: List[Dict[str, str]] = []
+        video_targets: List[Dict[str, str]] = []
+        image_targets: List[Dict[str, str]] = []
+
+        for query, hits in (search_payload.get("video", {}) or {}).items():
+            if not isinstance(hits, list):
+                continue
+            for item in hits[:2]:
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url", "")).strip()
+                if not url:
+                    continue
+                video_targets.append(
+                    {
+                        "query": query,
+                        "url": url,
+                        "title": str(item.get("title") or "video_evidence"),
+                    }
+                )
+
+        for query, hits in (search_payload.get("image", {}) or {}).items():
+            if not isinstance(hits, list):
+                continue
+            for item in hits[:2]:
+                if not isinstance(item, dict):
+                    continue
+                url = str(item.get("url", "")).strip()
+                if not url:
+                    continue
+                image_targets.append(
+                    {
+                        "query": query,
+                        "url": url,
+                        "title": str(item.get("title") or "image_evidence"),
+                    }
+                )
+
+        for idx, target in enumerate(video_targets[:max_video_downloads], start=1):
+            downloaded_path = await asyncio.to_thread(
+                self._download_hybrid_video_hit,
+                target["url"],
+                raw_media_dir,
+                idx,
+            )
+            if downloaded_path is None:
+                continue
+            downloaded.append(
+                {
+                    "media_type": "video",
+                    "source_url": target["url"],
+                    "query": target["query"],
+                    "title": target["title"],
+                    "local_path": str(downloaded_path.relative_to(project_dir)),
+                }
+            )
+
+        if image_targets[:max_image_downloads]:
+            timeout = aiohttp.ClientTimeout(total=25)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                for idx, target in enumerate(
+                    image_targets[:max_image_downloads], start=1
+                ):
+                    downloaded_path = await self._download_hybrid_image_hit(
+                        session,
+                        target["url"],
+                        image_dir,
+                        idx,
+                    )
+                    if downloaded_path is None:
+                        continue
+                    downloaded.append(
+                        {
+                            "media_type": "image",
+                            "source_url": target["url"],
+                            "query": target["query"],
+                            "title": target["title"],
+                            "local_path": str(downloaded_path.relative_to(project_dir)),
+                        }
+                    )
+
+        return downloaded
+
+    def _download_hybrid_video_hit(
+        self,
+        url: str,
+        raw_media_dir: Path,
+        index: int,
+    ) -> Optional[Path]:
+        safe_host = self._slugify_for_filename(urlparse(url).netloc or "web")
+        output_base = raw_media_dir / f"video_{index:03d}_{safe_host}"
+        success = self.video_processor.downloader.download_video(url, output_base)
+        if not success:
+            return None
+
+        for candidate in output_base.parent.glob(f"{output_base.stem}.*"):
+            if candidate.suffix.lower() in {".mp4", ".webm", ".mkv", ".avi", ".mov"}:
+                return candidate
+        return None
+
+    async def _download_hybrid_image_hit(
+        self,
+        session: aiohttp.ClientSession,
+        url: str,
+        image_dir: Path,
+        index: int,
+    ) -> Optional[Path]:
+        try:
+            async with session.get(url) as response:
+                if response.status >= 400:
+                    return None
+                content_type = str(response.headers.get("content-type", "")).lower()
+                if not content_type.startswith("image/"):
+                    return None
+                payload = await response.read()
+                if not payload:
+                    return None
+
+                extension = ".jpg"
+                if "png" in content_type:
+                    extension = ".png"
+                elif "webp" in content_type:
+                    extension = ".webp"
+                elif "gif" in content_type:
+                    extension = ".gif"
+
+                filename = f"image_{index:03d}{extension}"
+                out_path = image_dir / filename
+                out_path.write_bytes(payload)
+                return out_path
+        except Exception:
+            return None
+
+    async def _transcribe_hybrid_media_assets(
+        self,
+        state,
+        downloaded_media: List[Dict[str, str]],
+    ) -> List[Dict[str, str]]:
+        api_key = (
+            getattr(self.config.api, "nvidia_nim_api_key", None)
+            or os.getenv("NVIDIA_API_KEY")
+            or os.getenv("NVIDIA_NIM_API_KEY")
+        )
+        if not api_key:
+            return []
+
+        max_files = int(os.getenv("HYBRID_MAX_TRANSCRIBE_FILES", "6"))
+        outputs: List[Dict[str, str]] = []
+        project_dir = Path(state.project_dir)
+
+        eligible = [
+            item
+            for item in downloaded_media
+            if item.get("media_type") == "video"
+            and item.get("local_path", "")
+            .lower()
+            .endswith((".mp4", ".webm", ".mkv", ".mov", ".avi"))
+        ]
+
+        for item in eligible[:max_files]:
+            local_path = project_dir / item["local_path"]
+            try:
+                transcript = await asyncio.to_thread(
+                    transcribe_media_file,
+                    local_path,
+                    state.project_dir,
+                    api_key=api_key,
+                )
+            except Exception:
+                continue
+
+            outputs.append(
+                {
+                    "media": item["local_path"],
+                    "transcript_text_path": str(
+                        Path(transcript.transcript_text_path).relative_to(project_dir)
+                    ),
+                    "transcript_json_path": str(
+                        Path(transcript.transcript_json_path).relative_to(project_dir)
+                    ),
+                    "transcript_srt_path": (
+                        str(
+                            Path(transcript.transcript_srt_path).relative_to(
+                                project_dir
+                            )
+                        )
+                        if transcript.transcript_srt_path
+                        else ""
+                    ),
+                }
+            )
+
+        return outputs
+
+    def _collect_hybrid_workspace_assets(self, state) -> List[str]:
+        base = Path(state.project_dir)
+        assets: List[str] = []
+        for subdir in [
+            "raw_media",
+            "research/media/images",
+            "research/media/videos",
+            "research/transcripts",
+            "research/evidence",
+        ]:
+            root = base / subdir
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                if path.is_file():
+                    assets.append(str(path.relative_to(base)))
+        assets.sort()
+        return assets
+
+    @staticmethod
+    def _slugify_for_filename(text: str) -> str:
+        cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", text.strip())
+        cleaned = cleaned.strip("-._")
+        return cleaned or "asset"
+
+    def _enforce_script_asset_mapping(
+        self,
+        script_payload: Dict[str, Any],
+        assets: List[str],
+    ) -> None:
+        script_payload["phase"] = PipelinePhase.SCRIPTING.value
+        segments = script_payload.get("segments")
+        if not isinstance(segments, list):
+            script_payload["segments"] = []
+            segments = script_payload["segments"]
+
+        total_duration = 0.0
+
+        if not assets:
+            for segment in segments:
+                if isinstance(segment, dict):
+                    segment["visual_asset_path"] = ""
+                duration = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
+                total_duration += max(0.0, duration)
+            return
+
+        for idx, segment in enumerate(segments):
+            if not isinstance(segment, dict):
+                continue
+            segment.setdefault("time_seconds", total_duration)
+            segment.setdefault("intended_duration_seconds", 6.0)
+            segment.setdefault("narration", "")
+            segment.setdefault("visual_directive", "")
+            segment.setdefault("text_overlay", "")
+            segment.setdefault("evidence_refs", [])
+            segment.setdefault("pace", "fast")
+            segment.setdefault("emotion", "dramatic")
+
+            duration = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
+            total_duration += max(0.0, duration)
+
+            existing = str(segment.get("visual_asset_path", "")).strip()
+            if existing and existing in assets:
+                continue
+            segment["visual_asset_path"] = assets[idx % len(assets)]
+
+        if total_duration < 45.0 and segments:
+            last_segment = segments[-1]
+            if isinstance(last_segment, dict):
+                pad = 45.0 - total_duration
+                last_duration = float(
+                    last_segment.get("intended_duration_seconds", 6.0) or 6.0
+                )
+                last_segment["intended_duration_seconds"] = max(
+                    1.0, last_duration + pad
+                )
+
+    @staticmethod
+    def _estimate_tokens_or_default(text: str) -> int:
+        try:
+            return estimate_tokens_conservative(text)
+        except Exception:
+            return max(1, int((len(text) / 3.5) + 32))
 
     async def _download_and_analyze_video(self, reddit_url: str) -> Dict[str, Any]:
         """Download video and perform base analysis"""

@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 
 from src.enhanced_orchestrator import EnhancedVideoOrchestrator
+from src.hybrid_documentary_state_machine import PipelinePhase
 from src.management.channel_manager import ChannelManager
 from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.integrations.reddit_client import RedditClient
@@ -160,6 +161,49 @@ class EnhancedYouTubeGenerator:
 
         except Exception as e:
             self.logger.error(f"Batch processing failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def process_hybrid_workflow(
+        self,
+        project_name: str,
+        reddit_url: Optional[str] = None,
+        resume: bool = False,
+        phase_override: Optional[str] = None,
+        gemini_report_path: Optional[str] = None,
+        no_upload: bool = False,
+    ) -> Dict[str, Any]:
+        """Run hybrid documentary workflow with pause/resume state."""
+        try:
+            self.logger.info(
+                "Starting hybrid workflow project=%s resume=%s phase_override=%s",
+                project_name,
+                resume,
+                phase_override,
+            )
+            result = await self.orchestrator.process_hybrid_documentary_studio(
+                project_name=project_name,
+                reddit_url=reddit_url,
+                resume=resume,
+                phase_override=phase_override,
+                gemini_report_path=gemini_report_path,
+                no_upload=no_upload,
+            )
+
+            phase = result.get("current_phase", "unknown")
+            workspace = result.get("workspace_path", "")
+            if result.get("success"):
+                if result.get("paused"):
+                    print(f"Hybrid workflow paused at phase: {phase}")
+                else:
+                    print(f"Hybrid workflow complete at phase: {phase}")
+                if workspace:
+                    print(f"Workspace: {workspace}")
+            else:
+                self.logger.error("Hybrid workflow failed: %s", result.get("error"))
+
+            return result
+        except Exception as e:
+            self.logger.error(f"Hybrid workflow failed: {e}")
             return {"success": False, "error": str(e)}
 
     async def find_and_process_videos(
@@ -654,6 +698,36 @@ Examples:
         help="Maximum concurrent video processing",
     )
 
+    # Hybrid documentary processing (opt-in)
+    hybrid_parser = subparsers.add_parser(
+        "hybrid",
+        help="Run hybrid documentary workflow with pause/resume",
+    )
+    hybrid_parser.add_argument("project", help="Hybrid project name")
+    hybrid_parser.add_argument(
+        "--reddit-url",
+        help="Optional Reddit URL to seed project context",
+    )
+    hybrid_parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Resume from the saved hybrid phase state",
+    )
+    hybrid_parser.add_argument(
+        "--phase",
+        choices=[phase.value for phase in PipelinePhase],
+        help="Override current hybrid phase before processing",
+    )
+    hybrid_parser.add_argument(
+        "--gemini-report",
+        help="Path to Gemini report text/markdown file",
+    )
+    hybrid_parser.add_argument(
+        "--no-upload",
+        action="store_true",
+        help="Disable upload stage metadata for hybrid workflow",
+    )
+
     # Proactive management
     manage_parser = subparsers.add_parser(
         "manage", help="Start proactive channel management"
@@ -698,6 +772,12 @@ Examples:
                 self.no_cinematic = False
                 self.no_audio_ducking = False
                 self.no_ab_testing = False
+                self.project = None
+                self.reddit_url = None
+                self.resume = False
+                self.phase = None
+                self.gemini_report = None
+                self.no_upload = False
 
         args = MockArgs()
 
@@ -778,6 +858,23 @@ Examples:
                 with open(result_file, "w") as f:
                     json.dump(result, f, indent=2)
                 print(f"Results saved to: {result_file}")
+
+        elif args.command == "hybrid":
+            result = await generator.process_hybrid_workflow(
+                project_name=args.project,
+                reddit_url=args.reddit_url,
+                resume=args.resume,
+                phase_override=args.phase,
+                gemini_report_path=args.gemini_report,
+                no_upload=args.no_upload,
+            )
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
+            result_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(result_file, "w") as f:
+                json.dump(result, f, indent=2)
+            print(f"Results saved to: {result_file}")
 
         elif args.command == "manage":
             # Start proactive management
