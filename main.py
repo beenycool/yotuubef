@@ -174,6 +174,7 @@ class EnhancedYouTubeGenerator:
     ) -> Dict[str, Any]:
         """Run hybrid documentary workflow with pause/resume state."""
         try:
+            print(f"Starting hybrid documentary workflow: {project_name}...", flush=True)
             self.logger.info(
                 "Starting hybrid workflow project=%s resume=%s phase_override=%s",
                 project_name,

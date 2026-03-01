@@ -555,6 +555,7 @@ class EnhancedVideoOrchestrator:
                 }
 
             self.logger.info("Hybrid phase start: %s", phase.value)
+            print(f"[Hybrid] Phase: {phase.value}", flush=True)
 
             if phase == PipelinePhase.IDEA_GENERATION:
                 idea_payload = await self._generate_hybrid_phase_payload(
@@ -691,6 +692,7 @@ class EnhancedVideoOrchestrator:
                     synthesis_payload.get("video_queries"), minimum_count=0
                 )
 
+                print("[Hybrid] Searching for images and videos...", flush=True)
                 search_payload = await self._run_hybrid_media_queries(
                     image_queries=image_queries,
                     video_queries=video_queries,
@@ -822,6 +824,7 @@ class EnhancedVideoOrchestrator:
         phase: PipelinePhase,
         context: str,
     ) -> Dict[str, Any]:
+        print(f"[Hybrid] Calling AI for {phase.value}... (may take 1-2 min)", flush=True)
         prompt = build_state_machine_prompt(state, context)
         active_client = getattr(self.ai_client, "active_client", None)
 
@@ -1143,7 +1146,9 @@ class EnhancedVideoOrchestrator:
                     }
                 )
 
+        video_total = len(video_targets[:max_video_downloads])
         for idx, target in enumerate(video_targets[:max_video_downloads], start=1):
+            print(f"[Hybrid] Downloading video {idx}/{video_total}...", flush=True)
             downloaded_path = await asyncio.to_thread(
                 self._download_hybrid_video_hit,
                 target["url"],
@@ -1163,11 +1168,13 @@ class EnhancedVideoOrchestrator:
             )
 
         if image_targets[:max_image_downloads]:
+            image_total = len(image_targets[:max_image_downloads])
             timeout = aiohttp.ClientTimeout(total=25)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 for idx, target in enumerate(
                     image_targets[:max_image_downloads], start=1
                 ):
+                    print(f"[Hybrid] Downloading image {idx}/{image_total}...", flush=True)
                     downloaded_path = await self._download_hybrid_image_hit(
                         session,
                         target["url"],
@@ -1263,8 +1270,10 @@ class EnhancedVideoOrchestrator:
             .lower()
             .endswith((".mp4", ".webm", ".mkv", ".mov", ".avi"))
         ]
+        transcribe_total = len(eligible[:max_files])
 
-        for item in eligible[:max_files]:
+        for idx, item in enumerate(eligible[:max_files], start=1):
+            print(f"[Hybrid] Transcribing {idx}/{transcribe_total}...", flush=True)
             local_path = project_dir / item["local_path"]
             try:
                 transcript = await asyncio.to_thread(
