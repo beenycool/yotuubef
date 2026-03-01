@@ -1,3 +1,12 @@
+from unittest.mock import MagicMock
+from src.utils.common_utils import (
+    select_and_validate_segments,
+    get_safe_filename,
+    calculate_video_metrics,
+    format_duration,
+    validate_analysis_completeness
+)
+
 import pytest
 from pathlib import Path
 from src.utils.common_utils import validate_file_paths
@@ -69,14 +78,6 @@ def test_validate_file_paths_exception(tmp_path, monkeypatch):
     assert is_valid is False
     assert "Path validation error: Mocked exception" in msg
 
-from unittest.mock import MagicMock
-from src.utils.common_utils import (
-    select_and_validate_segments,
-    get_safe_filename,
-    calculate_video_metrics,
-    format_duration,
-    validate_analysis_completeness
-)
 
 def test_get_safe_filename():
     assert get_safe_filename("Normal Title") == "Normal_Title"
