@@ -133,7 +133,9 @@ class EnhancedVideoOrchestrator:
 
             bg_manager = BackgroundManager()
             video_clip = bg_manager.get_sliced_background(
-                target_duration=audio_clip.duration
+                target_duration=audio_clip.duration,
+                subreddit=reddit_post.subreddit,
+                text_content=reddit_post.selftext,
             )
             if analysis.text_overlays:
                 video_clip = self.video_processor.text_processor.add_text_overlays(
@@ -302,7 +304,9 @@ class EnhancedVideoOrchestrator:
             self.logger.info("Step 5: Background Video")
             bg_manager = BackgroundManager()
             video_clip = bg_manager.get_sliced_background(
-                target_duration=main_audio.duration
+                target_duration=main_audio.duration,
+                subreddit=reddit_post.subreddit,
+                text_content=reddit_post.selftext,
             )
 
             # Step 6: Apply B-roll images
@@ -324,9 +328,9 @@ class EnhancedVideoOrchestrator:
                     video_clip, analysis.text_overlays
                 )
 
-            # Step 8: Add word-level captions (Improvement 4) - optional
+            # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
             combined_audio_path = None
-            if options.get("enable_word_captions", False):
+            if options.get("enable_word_captions", True):
                 self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
                 caption_gen = CaptionGenerator()
                 # Combine all TTS paths for transcription
@@ -357,12 +361,12 @@ class EnhancedVideoOrchestrator:
                     )
                     audio_layers.append(whoosh_clip)
 
-            # Add boom for hook
+            # Add boom for hook (increased volume to 0.8 for high-impact 0-3s retention)
             boom_path = sfx_manager.get_boom_sound()
             if boom_path and analysis.narrative_script_segments:
                 hook_time = analysis.narrative_script_segments[0].time_seconds
                 boom_clip = (
-                    AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.5)
+                    AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
                 )
                 audio_layers.append(boom_clip)
 
@@ -439,7 +443,7 @@ class EnhancedVideoOrchestrator:
                         "perfect_loop",
                         "broll_injection",
                         "word_captions"
-                        if options.get("enable_word_captions")
+                        if options.get("enable_word_captions", True)
                         else None,
                         "sound_design",
                     ]

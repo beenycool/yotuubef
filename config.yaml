@@ -20,9 +20,13 @@ api:
   youtube_client_secrets_file: youtube_credentials.json
 content:
   curated_subreddits:
+  - Eve
+  - HobbyDrama
+  - speedrun
+  - speedrun_drama
   - lostmedia
+  - InternetMysteries
   - Defunctland
-  - stunfisk
   hard_disallowed:
   - porn
   - pornographic
@@ -112,8 +116,8 @@ cinematic_editing:
   rule_of_thirds_weight: 0.3
   symmetry_weight: 0.2
   transition_duration_range:
+  - 0.2
   - 0.5
-  - 1.5
   visual_complexity_weight: 0.4
 database:
   ab_test_retention_days: 30

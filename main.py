@@ -106,8 +106,10 @@ class EnhancedYouTubeGenerator:
         try:
             self.logger.info(f"Processing single video: {reddit_url}")
 
-            # Enhanced processing with all features
-            result = await self.orchestrator.process_enhanced_video(reddit_url, options)
+            # Use AI Production Studio for all single video processing
+            result = await self.orchestrator.process_ai_production_studio(
+                reddit_url, options
+            )
 
             # Log results
             if result.get("success"):
@@ -201,9 +203,15 @@ class EnhancedYouTubeGenerator:
                     "error": "Reddit client not connected. Please check your Reddit API credentials.",
                 }
 
+            # Fetch 3x the max_videos so we have a pool to evaluate
+            fetch_pool = max_videos * 3
+            self.logger.info(
+                f"Fetching {fetch_pool} posts to evaluate top {max_videos} by AI story potential"
+            )
+
             reddit_posts = await self.reddit_client.get_lore_text_posts(
                 subreddit_names=subreddit_names,
-                max_posts=max_videos,
+                max_posts=fetch_pool,
             )
 
             if not reddit_posts:
@@ -213,18 +221,39 @@ class EnhancedYouTubeGenerator:
                     "posts_found": 0,
                 }
 
-            self.logger.info(f"Found {len(reddit_posts)} suitable lore text posts")
+            self.logger.info(
+                f"Found {len(reddit_posts)} raw posts. Evaluating narrative potential via AI..."
+            )
 
-            # Print found videos summary
-            # Create result dict for summary
-            result_summary = {"success": True, "posts": reddit_posts}
+            # Iterate and score all found posts
+            scored_posts = []
+            for post in reddit_posts:
+                context = {
+                    "title": post.title,
+                    "subreddit": post.subreddit,
+                    "selftext": post.selftext,
+                }
+                score = await self.orchestrator.ai_client.score_story_potential(context)
+                scored_posts.append((score, post))
+                self.logger.debug(f"Story Score {score}/100: {post.title[:40]}...")
+
+            # Sort by score descending and take the best ones
+            scored_posts.sort(key=lambda x: x[0], reverse=True)
+            best_posts = [post for score, post in scored_posts[:max_videos]]
+
+            self.logger.info(
+                f"Selected the top {len(best_posts)} highest potential stories."
+            )
+
+            # Create result dict for summary (using best_posts)
+            result_summary = {"success": True, "posts": best_posts}
             self._print_found_videos_summary(result_summary)
 
             if dry_run:
                 return {
                     "success": True,
                     "dry_run": True,
-                    "posts_found": len(reddit_posts),
+                    "posts_found": len(best_posts),
                     "found_posts": [
                         {
                             "title": post.title,
@@ -233,12 +262,12 @@ class EnhancedYouTubeGenerator:
                             "score": post.score,
                             "duration": post.duration,
                         }
-                        for post in reddit_posts
+                        for post in best_posts
                     ],
                 }
 
             # Convert Reddit posts to proper submission URLs for processing
-            reddit_urls = [post.reddit_url for post in reddit_posts if post.reddit_url]
+            reddit_urls = [post.reddit_url for post in best_posts if post.reddit_url]
 
             # Process the found videos using batch processing
             result = await self.process_batch_videos(reddit_urls, options)
@@ -247,6 +276,7 @@ class EnhancedYouTubeGenerator:
             if result.get("success"):
                 result["reddit_discovery"] = {
                     "posts_found": len(reddit_posts),
+                    "posts_evaluated": len(scored_posts),
                     "sort_method": sort_method,
                     "time_filter": time_filter if sort_method == "top" else None,
                     "subreddits_searched": subreddit_names or "default_curated_list",
@@ -256,8 +286,9 @@ class EnhancedYouTubeGenerator:
                             "subreddit": post.subreddit,
                             "score": post.score,
                             "url": post.url,
+                            "story_score": score,
                         }
-                        for post in reddit_posts
+                        for score, post in scored_posts[:max_videos]
                     ],
                 }
 

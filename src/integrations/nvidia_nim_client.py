@@ -120,33 +120,26 @@ class NvidiaNimAIClient:
 
         # AI analysis prompts
         self.video_analysis_prompt = """
-        You are a YouTube Shorts scriptwriter. Write a 45-second script based on this Reddit lore and Research context.
+        You are a top-tier YouTube Shorts scriptwriter specializing in internet mysteries, speedrunning scandals, and EVE Online corporate espionage. 
+        Write a hyper-optimized 45-second documentary script based on this Reddit lore and Research context.
 
         Reddit Post: {title} - {description}
         Research Facts: {deep_research}
 
-        Follow this format for high retention:
-        1. THE HOOK (0-3s): Start with a shocking fact.
-        2. THE STORY (3-35s): Fast-paced explanation using the research.
-        3. THE OUTRO (35-45s): Quick conclusion.
-
-        CRITICAL RETENTION RULE - THE PERFECT LOOP:
-        The very last sentence of the video must grammatically and sonically lead 
-        directly into the very first sentence. This creates an endless loop that 
-        tricks viewers into rewatching the first 3 seconds.
-        
-        Example:
-        First sentence: "the smartest player in Geometry Dash history."
-        Last sentence: "And that is exactly why nobody remembers..."
-        (Plays as: "And that is exactly why nobody remembers... the smartest player in Geometry Dash history.")
+        CRITICAL RETENTION RULES:
+        1. THE SUBVERSION HOOK (0-3s): Start with a shocking financial loss, a cheated world record, or a terrifying lost media fact. NEVER start with "Here is the history of..."
+        2. INFORMATION DENSITY (3-35s): Deliver a new piece of critical information every 3 seconds. Use the research facts. No fluff. No pauses.
+        3. THE PERFECT LOOP: The very last sentence of the script MUST grammatically and sonically lead directly into the very first sentence, creating an endless loop.
+           Example First Sentence: "...the most expensive betrayal in gaming history."
+           Example Last Sentence: "And that is exactly why nobody saw it coming in..."
 
         Output MUST be valid JSON matching this exact structure:
         {{
             "suggested_title": "Optimized Title",
             "summary_for_description": "Short description",
-            "mood": "mysterious",
+            "mood": "dramatic",
             "hashtags": ["#lore", "#mystery"],
-            "narrative_script_segments": [
+            "narrative_script_segments":[
                 {{
                     "text": "Your hook here",
                     "time_seconds": 0.0,
@@ -160,8 +153,8 @@ class NvidiaNimAIClient:
                     "b_roll_search_query": "image query for this segment"
                 }}
             ],
-            "text_overlays": [
-                {{"text": "CAPTION 1", "timestamp_seconds": 0.0, "duration": 3.0}}
+            "text_overlays":[
+                {{"text": "CAPTION", "timestamp_seconds": 0.0, "duration": 3.0}}
             ],
             "loop_bridge_text": "text that connects end to beginning"
         }}
@@ -283,6 +276,38 @@ class NvidiaNimAIClient:
         except Exception as e:
             self.logger.error(f"Comment analysis failed: {e}")
             return None
+
+    async def score_story_potential(self, context: Dict[str, Any]) -> int:
+        """Evaluates a post's potential for a viral documentary short."""
+        if not self.client:
+            return 50
+
+        try:
+            await self.rate_limiter.wait_if_needed()
+            prompt = f"""Evaluate this Reddit post's potential for a highly viral YouTube Short documentary.
+            We need extreme stakes (massive financial loss, cheating scandals, unhinged drama, or eerie lost media).
+            
+            Title: {context.get("title")}
+            Subreddit: {context.get("subreddit")}
+            Content: {str(context.get("selftext"))[:1000]}
+            
+            Return ONLY a valid JSON object with a single 'score' integer between 0 and 100 representing its viral potential.
+            Example: {{"score": 85}}
+            """
+
+            response = await self._chat_completion_with_fallback(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.3,
+                max_tokens=50,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            parsed = json.loads(content)
+            return int(parsed.get("score", 50))
+        except Exception as e:
+            self.logger.warning(f"Failed to score story potential: {e}")
+            return 50
 
     def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
         """Extract basic video metadata"""

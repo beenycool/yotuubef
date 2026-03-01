@@ -113,6 +113,12 @@ class AIClient:
             self.logger.error(f"Comment analysis failed: {e}")
             return None
 
+    async def score_story_potential(self, context: Dict[str, Any]) -> int:
+        """Proxy method to score story potential."""
+        if hasattr(self.active_client, "score_story_potential"):
+            return await self.active_client.score_story_potential(context)
+        return 50
+
     def is_available(self) -> bool:
         """
         Check if AI services are available
