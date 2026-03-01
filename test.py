@@ -62,8 +62,13 @@ LOG_FILE = os.getenv("LOG_FILE", "run_log.txt")
 
 
 SCRIPT_SYSTEM_PROMPT = (
-    "You are an investigative YouTube Shorts writer. Return strict JSON only. "
-    "Do not invent facts. Use provided context only. Keep the script 45-60 seconds."
+    "You are an elite YouTube Shorts Documentary Editor specializing in hyper-niche internet/gaming history. "
+    "Your guiding principle is INFORMATION DENSITY. "
+    "1. Every sentence must introduce a new concrete fact (a date, a name, an exact number, a specific forum post). "
+    "2. Zero fluff. No 'Have you ever wondered...' or 'Let\'s dive in'. "
+    "3. Visuals dictate the script: map every sentence to a specific piece of evidence in the provided context. "
+    "4. Create a Perfect Loop: the final sentence must grammatically and seamlessly flow directly into the first sentence. "
+    "Return strict JSON only. Do not invent facts."
 )
 
 
@@ -257,48 +262,88 @@ def add_artifact_to_state(state: RunState, path: Path, folder: str) -> None:
     save_run_state(state)
 
 
-def phase_idea_generation(state: RunState) -> None:
-    prompt = (
-        "Phase: IDEA_GENERATION\n"
-        "Generate exactly 3 documentary angles for a 45-60 second speedrunning mystery short.\n"
-        "Return strict JSON with keys:\n"
-        "{\n"
-        '  "phase": "IDEA_GENERATION",\n'
-        '  "angles": [{"id": "A1", "title": "...", "hypothesis": "...", "why_it_might_work": "..."}],\n'
-        '  "gemini_deep_research_prompt": "...",\n'
-        '  "next_phase": "WAIT_FOR_GEMINI_REPORT"\n'
-        "}\n"
-        "Rules: angles array must contain exactly 3 objects with ids A1, A2, A3."
-    )
+async def phase_idea_generation(state: RunState) -> None:
+    print("AI is planning a scouting mission for niche lore...")
 
-    def _validate(payload: Dict[str, Any]) -> None:
-        require_keys(
-            payload,
-            ["phase", "angles", "gemini_deep_research_prompt", "next_phase"],
-            "IDEA",
-        )
-        if payload.get("phase") != "IDEA_GENERATION":
-            raise ValueError("IDEA: phase must be IDEA_GENERATION")
-        angles = payload.get("angles")
-        if not isinstance(angles, list) or len(angles) != 3:
-            raise ValueError("IDEA: angles must contain exactly 3 entries")
-        expected_ids = {"A1", "A2", "A3"}
-        ids = {str(item.get("id", "")) for item in angles if isinstance(item, dict)}
-        if ids != expected_ids:
-            raise ValueError("IDEA: angle ids must be A1, A2, A3")
-        if not isinstance(payload.get("gemini_deep_research_prompt"), str):
-            raise ValueError("IDEA: gemini_deep_research_prompt must be a string")
+    # STEP 1: AI generates its own search queries
+    planning_prompt = """
+    You are a Niche Lore Scout. Your goal is to find obscure, high-stakes internet mysteries
+    or gaming scandals that have "receipts" (archived forum posts, player IDs, specific dates).
 
-    payload = chat_json(prompt, validator=_validate, temperature=0.5)
-    saved_path = save_finding(
-        state.project_dir, "ideas", "idea_generation.json", payload
-    )
+    Generate 5 search queries that target specific places where "lore" is documented but not widely known.
+    Think: "removed speedrun world record", "Geometry Dash impossible level controversy",
+    "deleted forum threads internet mystery", "site:speedrun.com/forums controversy".
+
+    Return strict JSON: {"scouting_queries": ["query 1", "query 2", ...]}
+    """
+
+    planning_raw = chat_json(planning_prompt, validator=lambda x: "scouting_queries" in x)
+    scouting_queries = planning_raw["scouting_queries"]
+    log_event("AI_PLANNED_QUERIES", scouting_queries)
+
+    # STEP 2: Execute the AI's queries
+    search_context = ""
+    async with HackclubMediaSearchClient() as client:
+        for q in scouting_queries:
+            print(f"Searching: {q}")
+            hits = await client.search_web(q, count=4)
+            search_context += f"\n--- RESULTS FOR QUERY: {q} ---\n"
+            for hit in hits:
+                search_context += f"TITLE: {hit.title}\nURL: {hit.url}\nSNIPPET: {hit.description}\n\n"
+
+    # Save the raw data for reference
+    save_finding(state.project_dir, "ideas", "raw_scout_data.txt", search_context)
+
+    # STEP 3: Summarize Context if it's huge (using your 120k threshold)
+    # Note: summarize_if_needed is imported from your state machine
+    processed_context = summarize_if_needed(
+        search_context,
+        max_tokens=120000,
+        api_key=NVIDIA_API_KEY,
+        model="qwen/qwen3.5-397b-a17b" # Or your gpt-oss-120b equivalent
+    ).context
+
+    # STEP 4: Generate the 3 Mid-Tier Angles + the Master Gemini Prompt
+    ideation_prompt = f"""
+    Based on this scouted web data, find 3 HIGH-STAKES, NICHE story angles.
+
+    CONTEXT DATA:
+    {processed_context}
+
+    CRITICAL:
+    1. Avoid mainstream topics.
+    2. Focus on "The First X", "The Deleted Y", "The Impossible Z".
+    3. For the 'gemini_deep_research_prompt', write a prompt that forces Gemini to
+       be a forensic archivist. It must find the EXACT timestamps, forum post authors,
+       and archived links in the provided context to build a bulletproof timeline.
+
+    Return strict JSON:
+    {{
+      "phase": "IDEA_GENERATION",
+      "angles": [
+        {{"id": "A1", "title": "...", "hook": "...", "scouted_evidence_summary": "..."}}
+      ],
+      "gemini_deep_research_prompt": "..."
+    }}
+    """
+
+    def _validate_ideation(payload):
+        if len(payload.get("angles", [])) != 3: raise ValueError("Need 3 angles")
+
+    final_ideas = chat_json(ideation_prompt, validator=_validate_ideation)
+
+    # Save results to project folder
+    saved_path = save_finding(state.project_dir, "ideas", "idea_generation.json", final_ideas)
     add_artifact_to_state(state, saved_path, "ideas")
+
+    # Update State
     state.metadata["idea_generation_path"] = str(saved_path)
-    state.context_snapshot = payload.get("gemini_deep_research_prompt", "")
+    state.context_snapshot = final_ideas.get("gemini_deep_research_prompt", "")
     save_run_state(state)
     set_phase(state, PipelinePhase.WAIT_FOR_GEMINI_REPORT, "Idea package generated")
     log_event("IDEA_GENERATION_DONE", {"path": str(saved_path)})
+
+    print(f"Scouting complete. Ideas saved to {saved_path}. Check the Gemini prompt!")
 
 
 def print_waiting_instructions(project_dir: Path, state: RunState) -> None:
@@ -800,7 +845,7 @@ def run_workflow(
         log_event("PHASE_START", {"phase": phase, "project": state.project_name})
 
         if phase == PipelinePhase.IDEA_GENERATION:
-            phase_idea_generation(state)
+            asyncio.run(phase_idea_generation(state))
             continue
 
         if phase == PipelinePhase.WAIT_FOR_GEMINI_REPORT:
