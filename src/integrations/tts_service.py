@@ -36,12 +36,12 @@ except ImportError:
     except ImportError:
         DIA_AVAILABLE = False
 
-import numpy as np
-from moviepy import AudioFileClip
+import numpy as np  # noqa: E402
+from moviepy import AudioFileClip  # noqa: E402
 
-from src.config.settings import get_config
-from src.models import NarrativeSegment, EmotionType, PacingType
-from src.utils.gpu_memory_manager import GPUMemoryManager
+from src.config.settings import get_config  # noqa: E402
+from src.models import NarrativeSegment, EmotionType, PacingType  # noqa: E402
+from src.utils.gpu_memory_manager import GPUMemoryManager  # noqa: E402
 
 
 class TTSService:
