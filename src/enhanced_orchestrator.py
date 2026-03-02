@@ -15,7 +15,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import aiohttp
 from moviepy import (
@@ -837,15 +837,10 @@ class EnhancedVideoOrchestrator:
                 )
                 state.metadata["script_context_path"] = str(summary_path)
 
-                script_payload = await self._generate_hybrid_phase_payload(
+                script_payload = await self._run_agentic_scripting_with_visual_loop(
                     state,
                     phase,
                     summary_result.context or raw_context,
-                )
-                await self._apply_hybrid_image_relevance_mapping(
-                    state,
-                    script_payload,
-                    workspace_assets,
                 )
                 final_script_path = save_finding(
                     state.project_dir,
@@ -1266,9 +1261,7 @@ Search results:
         if not active_client or not hasattr(
             active_client, "_chat_completion_with_fallback"
         ):
-            raise RuntimeError(
-                f"No AI client available for hybrid phase {phase.value}"
-            )
+            raise RuntimeError(f"No AI client available for hybrid phase {phase.value}")
 
         max_tokens = 4000 if phase == PipelinePhase.SCRIPTING else 1800
         response = await active_client._chat_completion_with_fallback(
@@ -1294,6 +1287,236 @@ Search results:
                 f"Hybrid phase {phase.value}: AI payload failed contract validation"
             )
         return parsed
+
+    async def _generate_supplementary_image_queries(
+        self,
+        state: Any,
+        script_payload: Dict[str, Any],
+        *,
+        segment_indexes: List[int],
+        existing_queries: Optional[List[str]] = None,
+        max_per_segment: int = 3,
+    ) -> List[str]:
+        segments = script_payload.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return []
+
+        requested_indexes = [
+            idx
+            for idx in segment_indexes
+            if isinstance(idx, int) and 0 <= idx < len(segments)
+        ]
+        if not requested_indexes:
+            return []
+
+        max_per_segment = max(1, min(6, int(max_per_segment or 3)))
+        existing_set = {
+            str(item).strip().lower()
+            for item in (existing_queries or [])
+            if str(item).strip()
+        }
+
+        segment_blocks: List[str] = []
+        for idx in requested_indexes:
+            segment = segments[idx]
+            if not isinstance(segment, dict):
+                continue
+            narration = str(segment.get("narration", "") or "").strip()
+            visual_directive = str(segment.get("visual_directive", "") or "").strip()
+            evidence_refs = segment.get("evidence_refs", [])
+            if isinstance(evidence_refs, list):
+                evidence_text = ", ".join(
+                    [str(item).strip() for item in evidence_refs if str(item).strip()]
+                )
+            else:
+                evidence_text = str(evidence_refs or "").strip()
+
+            segment_blocks.append(
+                "\n".join(
+                    [
+                        f"SEGMENT_INDEX: {idx}",
+                        f"NARRATION: {narration}",
+                        f"VISUAL_DIRECTIVE: {visual_directive}",
+                        f"EVIDENCE_REFS: {evidence_text}",
+                    ]
+                )
+            )
+
+        if not segment_blocks:
+            return []
+
+        prompt = (
+            "You are generating Brave/Hackclub image search queries to find documentary-grade visual receipts.\n"
+            f"Generate up to {max_per_segment} image search queries per segment below.\n\n"
+            "Rules:\n"
+            "- Queries must be specific (names, dates, handles, document titles, leaderboard names).\n"
+            "- Prefer evidence visuals: screenshots, PDFs, tweets, statements, forum posts, leaderboards.\n"
+            "- Avoid generic b-roll queries like 'minecraft gameplay' unless the segment is explicitly about generic gameplay.\n"
+            "- Do not include any query already present in the existing set.\n"
+            '- Return strict JSON only: {"image_queries": ["..."]}.\n\n'
+            f"EXISTING_QUERIES (do not repeat): {json.dumps(sorted(existing_set)[:80], ensure_ascii=True)}\n\n"
+            "SEGMENTS:\n" + "\n\n".join(segment_blocks)
+        )
+
+        active_client = getattr(self.ai_client, "active_client", None)
+        if active_client and hasattr(active_client, "_chat_completion_with_fallback"):
+            try:
+                response = await active_client._chat_completion_with_fallback(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Return strict JSON only.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=600,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                parsed = self._safe_parse_phase_json(content) or {}
+                raw_queries = parsed.get("image_queries", [])
+                if isinstance(raw_queries, list):
+                    cleaned: List[str] = []
+                    for item in raw_queries:
+                        text = str(item or "").strip()
+                        lowered = text.lower()
+                        if not text or lowered in existing_set:
+                            continue
+                        if len(text) < 4 or len(text) > 140:
+                            continue
+                        if text not in cleaned:
+                            cleaned.append(text)
+                    if cleaned:
+                        return cleaned[: max_per_segment * len(requested_indexes)]
+            except Exception:
+                pass
+
+        # Heuristic fallback: build evidence-oriented variants from segment tokens.
+        fallback_queries: List[str] = []
+        for idx in requested_indexes:
+            segment = segments[idx]
+            if not isinstance(segment, dict):
+                continue
+            narration = str(segment.get("narration", "") or "").strip()
+            visual_directive = str(segment.get("visual_directive", "") or "").strip()
+            tokens = self._tokenize_relevance_text(f"{narration} {visual_directive}")
+            core = " ".join(tokens[:8]).strip()
+            if not core:
+                continue
+            variants = [
+                f"{core} screenshot",
+                f"{core} leaderboard",
+                f"{core} pdf",
+                f"{core} tweet",
+                f"{core} forum post",
+            ]
+            for query in variants:
+                lowered = query.lower().strip()
+                if lowered in existing_set:
+                    continue
+                if query not in fallback_queries:
+                    fallback_queries.append(query)
+        return fallback_queries[: max_per_segment * len(requested_indexes)]
+
+    async def _run_visual_feedback_agent(
+        self,
+        state: Any,
+        script_payload: Dict[str, Any],
+        visual_catalog: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        segments = script_payload.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return {}
+
+        active_client = getattr(self.ai_client, "active_client", None)
+        if not active_client or not hasattr(
+            active_client, "_chat_completion_with_fallback"
+        ):
+            return {}
+
+        segments_json = json.dumps(segments, ensure_ascii=True)
+        visuals_json = json.dumps(visual_catalog, ensure_ascii=True)
+
+        prompt = (
+            "You are a visual supervisor for a short documentary script.\n"
+            "You will receive:\n"
+            "1) narrative script segments (with index, narration, visual_directive)\n"
+            "2) a catalog of available images (with local_path, query, title, source_url)\n\n"
+            "For each segment, decide whether its visuals are satisfactory, need more images, or need narration revision to better match available visuals.\n\n"
+            'Return strict JSON ONLY. The top-level object must have a key "segments" '
+            "mapping to a list of objects with fields: "
+            '"segment_index" (int), "status" ("satisfied" | "needs_images" | "needs_revision"), '
+            '"preferred_assets" (list of strings), "new_image_queries" (list of strings), '
+            'and "revised_narration" (string).\n\n'
+            "Constraints:\n"
+            "- Maintain all factual details (names, dates, URLs) in any revised_narration.\n"
+            "- Use preferred_assets only from the provided visual catalog local_path values.\n"
+            '- new_image_queries should be specific evidence-style queries when status == "needs_images".\n'
+            '- If a segment is already well-served visually, mark it as "satisfied" and leave revised_narration empty.\n\n'
+            f"SCRIPT_SEGMENTS_JSON:\n{segments_json}\n\n"
+            f"VISUAL_CATALOG_JSON:\n{visuals_json}\n"
+        )
+
+        try:
+            response = await active_client._chat_completion_with_fallback(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Return strict JSON only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.25,
+                max_tokens=1200,
+                response_format={"type": "json_object"},
+            )
+        except Exception:
+            return {}
+
+        content = response.choices[0].message.content or "{}"
+        parsed = self._safe_parse_phase_json(content) or {}
+        if not isinstance(parsed, dict):
+            return {}
+        segments_feedback = parsed.get("segments")
+        if not isinstance(segments_feedback, list):
+            return {}
+        return parsed
+
+    @staticmethod
+    def _apply_visual_feedback_to_script(
+        script_payload: Dict[str, Any],
+        feedback: Dict[str, Any],
+        *,
+        allow_revisions: bool,
+    ) -> None:
+        segments = script_payload.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return
+        fb_segments = feedback.get("segments")
+        if not isinstance(fb_segments, list):
+            return
+
+        for entry in fb_segments:
+            if not isinstance(entry, dict):
+                continue
+            idx = entry.get("segment_index")
+            if not isinstance(idx, int) or idx < 0 or idx >= len(segments):
+                continue
+
+            segment = segments[idx]
+
+            if allow_revisions:
+                revised = str(entry.get("revised_narration", "") or "").strip()
+                # Require a bit of substance to avoid trivial/no-op changes.
+                if revised and len(revised.split()) >= 3:
+                    segment["narration"] = revised
+
+            preferred_assets = entry.get("preferred_assets") or []
+            if isinstance(preferred_assets, list) and preferred_assets:
+                first_path = str(preferred_assets[0] or "").strip()
+                if first_path:
+                    segment["visual_asset_path"] = first_path
 
     @staticmethod
     def _is_valid_hybrid_phase_payload(
@@ -1678,7 +1901,30 @@ Search results:
         max_video_downloads = int(os.getenv("HYBRID_MAX_VIDEO_DOWNLOADS", "8"))
         max_image_downloads = int(os.getenv("HYBRID_MAX_IMAGE_DOWNLOADS", "10"))
 
+        def _next_index(folder: Path, pattern: str) -> int:
+            """Return next 1-based numeric index for files matching regex pattern."""
+            max_seen = 0
+            try:
+                for path in folder.glob("*"):
+                    if not path.is_file():
+                        continue
+                    match = re.search(pattern, path.name)
+                    if not match:
+                        continue
+                    try:
+                        max_seen = max(max_seen, int(match.group(1)))
+                    except (TypeError, ValueError):
+                        continue
+            except Exception:
+                return 1
+            return max_seen + 1
+
+        next_video_index = _next_index(raw_media_dir, r"^video_(\d{3})_")
+        next_image_index = _next_index(image_dir, r"^image_(\d{3})\.")
+
         downloaded: List[Dict[str, str]] = []
+        seen_source_urls = self._load_existing_downloaded_source_urls(state)
+        reserved_source_urls: set[str] = set()
         video_targets: List[Dict[str, str]] = []
         image_targets: List[Dict[str, Any]] = []
 
@@ -1695,6 +1941,12 @@ Search results:
                 url = str(item.get("url", "")).strip()
                 if not url:
                     continue
+                normalized_url = self._normalize_media_source_url(url)
+                if normalized_url and (
+                    normalized_url in seen_source_urls
+                    or normalized_url in reserved_source_urls
+                ):
+                    continue
                 video_targets.append(
                     {
                         "query": query,
@@ -1702,6 +1954,8 @@ Search results:
                         "title": str(item.get("title") or "video_evidence"),
                     }
                 )
+                if normalized_url:
+                    reserved_source_urls.add(normalized_url)
 
         for query, hits in (search_payload.get("image", {}) or {}).items():
             if not isinstance(hits, list):
@@ -1712,23 +1966,49 @@ Search results:
                 candidate_urls = self._extract_image_candidate_urls(item)
                 if not candidate_urls:
                     continue
+
+                filtered_candidates: List[str] = []
+                filtered_normalized: List[str] = []
+                for candidate_url in candidate_urls:
+                    candidate_text = str(candidate_url).strip()
+                    if not candidate_text:
+                        continue
+                    normalized_url = self._normalize_media_source_url(candidate_text)
+                    if normalized_url and (
+                        normalized_url in seen_source_urls
+                        or normalized_url in reserved_source_urls
+                    ):
+                        continue
+                    filtered_candidates.append(candidate_text)
+                    filtered_normalized.append(normalized_url)
+
+                if not filtered_candidates:
+                    continue
+
                 image_targets.append(
                     {
                         "query": query,
-                        "url": candidate_urls[0],
-                        "url_candidates": candidate_urls,
+                        "url": filtered_candidates[0],
+                        "url_candidates": filtered_candidates,
                         "title": str(item.get("title") or "image_evidence"),
                     }
                 )
+                for normalized_url in filtered_normalized:
+                    if normalized_url:
+                        reserved_source_urls.add(normalized_url)
 
-        video_total = len(video_targets[:max_video_downloads])
-        for idx, target in enumerate(video_targets[:max_video_downloads], start=1):
-            print(f"[Hybrid] Downloading video {idx}/{video_total}...", flush=True)
+        video_batch = video_targets[:max_video_downloads]
+        video_total = len(video_batch)
+        for batch_pos, target in enumerate(video_batch, start=1):
+            print(
+                f"[Hybrid] Downloading video {batch_pos}/{video_total}...", flush=True
+            )
+            index = next_video_index + batch_pos - 1
             downloaded_path = await asyncio.to_thread(
                 self._download_hybrid_video_hit,
                 target["url"],
                 raw_media_dir,
-                idx,
+                index,
             )
             if downloaded_path is None:
                 continue
@@ -1742,16 +2022,17 @@ Search results:
                 }
             )
 
-        if image_targets[:max_image_downloads]:
-            image_total = len(image_targets[:max_image_downloads])
+        image_batch = image_targets[:max_image_downloads]
+        if image_batch:
+            image_total = len(image_batch)
             timeout = aiohttp.ClientTimeout(total=25)
             async with aiohttp.ClientSession(timeout=timeout) as session:
-                for idx, target in enumerate(
-                    image_targets[:max_image_downloads], start=1
-                ):
+                for batch_pos, target in enumerate(image_batch, start=1):
                     print(
-                        f"[Hybrid] Downloading image {idx}/{image_total}...", flush=True
+                        f"[Hybrid] Downloading image {batch_pos}/{image_total}...",
+                        flush=True,
                     )
+                    index = next_image_index + batch_pos - 1
                     downloaded_path: Optional[Path] = None
                     selected_source_url = str(target.get("url", ""))
                     candidate_urls = target.get(
@@ -1768,7 +2049,7 @@ Search results:
                             session,
                             candidate_text,
                             image_dir,
-                            idx,
+                            index,
                         )
                         if downloaded_path is not None:
                             selected_source_url = candidate_text
@@ -1787,6 +2068,103 @@ Search results:
                     )
 
         return downloaded
+
+    @staticmethod
+    def _normalize_media_source_url(url: str) -> str:
+        text = str(url or "").strip()
+        if not text:
+            return ""
+        parsed = urlparse(text)
+        if not parsed.scheme or not parsed.netloc:
+            return text.lower().rstrip("/")
+        normalized_path = parsed.path.rstrip("/")
+        return urlunparse(
+            (
+                parsed.scheme.lower(),
+                parsed.netloc.lower(),
+                normalized_path,
+                "",
+                parsed.query,
+                "",
+            )
+        )
+
+    def _load_existing_downloaded_source_urls(self, state: Any) -> set[str]:
+        state_meta = getattr(state, "metadata", {})
+        evidence_index_path = str(
+            state_meta.get("evidence_index_path", "") or ""
+        ).strip()
+        if not evidence_index_path:
+            return set()
+
+        evidence_path = Path(evidence_index_path)
+        if not evidence_path.exists():
+            return set()
+
+        try:
+            payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+        except Exception:
+            return set()
+
+        downloaded_media = payload.get("downloaded_media", [])
+        if not isinstance(downloaded_media, list):
+            return set()
+
+        urls: set[str] = set()
+        for item in downloaded_media:
+            if not isinstance(item, dict):
+                continue
+            normalized_url = self._normalize_media_source_url(
+                str(item.get("source_url", "") or "")
+            )
+            if normalized_url:
+                urls.add(normalized_url)
+        return urls
+
+    def _downloaded_media_entry_key(self, entry: Any) -> str:
+        if not isinstance(entry, dict):
+            return ""
+        normalized_source = self._normalize_media_source_url(
+            str(entry.get("source_url", "") or "")
+        )
+        if normalized_source:
+            return f"url:{normalized_source}"
+        local_path = str(entry.get("local_path", "") or "").strip()
+        if local_path:
+            return f"path:{local_path}"
+        return ""
+
+    def _merge_downloaded_media_entries(
+        self,
+        existing_entries: Any,
+        new_entries: Any,
+    ) -> List[Dict[str, str]]:
+        merged: List[Dict[str, str]] = []
+        seen_keys: set[str] = set()
+
+        existing_list = existing_entries if isinstance(existing_entries, list) else []
+        for item in existing_list:
+            if not isinstance(item, dict):
+                continue
+            key = self._downloaded_media_entry_key(item)
+            if key and key in seen_keys:
+                continue
+            if key:
+                seen_keys.add(key)
+            merged.append(item)
+
+        new_list = new_entries if isinstance(new_entries, list) else []
+        for item in new_list:
+            if not isinstance(item, dict):
+                continue
+            key = self._downloaded_media_entry_key(item)
+            if key and key in seen_keys:
+                continue
+            if key:
+                seen_keys.add(key)
+            merged.append(item)
+
+        return merged
 
     def _download_hybrid_video_hit(
         self,
@@ -2003,16 +2381,16 @@ Search results:
         state: Any,
         script_payload: Dict[str, Any],
         assets: List[str],
-    ) -> None:
+    ) -> Dict[str, Any]:
         self._enforce_script_asset_mapping(script_payload, assets)
 
         segments = script_payload.get("segments")
         if not isinstance(segments, list) or not segments:
-            return
+            return {}
 
         visual_assets = self._filter_visual_assets(assets)
         if not visual_assets:
-            return
+            return {}
 
         min_score = self._read_env_int(
             "HYBRID_IMAGE_RELEVANCE_MIN_SCORE",
@@ -2032,12 +2410,18 @@ Search results:
             minimum=1,
             maximum=120,
         )
+        min_approved_images = self._read_env_int(
+            "HYBRID_IMAGE_RELEVANCE_MIN_APPROVED_PER_SEGMENT",
+            default=3,
+            minimum=1,
+            maximum=12,
+        )
         remaining_calls = max_calls
 
         media_metadata = self._load_hybrid_media_metadata(state)
         project_dir = Path(getattr(state, "project_dir", ""))
         if not project_dir:
-            return
+            return {}
 
         report_segments: List[Dict[str, Any]] = []
 
@@ -2057,6 +2441,7 @@ Search results:
 
             candidate_scores: List[Dict[str, Any]] = []
             approved_candidates: List[Dict[str, Any]] = []
+            approved_image_sources: set[str] = set()
             scanned_assets: set[str] = set()
 
             for candidate_asset in ranked_candidates:
@@ -2084,10 +2469,19 @@ Search results:
                     "score": score,
                     "relevant": relevant,
                     "reason": reason,
+                    "source_url": str(
+                        media_metadata.get(candidate_asset, {}).get("source_url", "")
+                        or ""
+                    ),
                 }
                 candidate_scores.append(row)
                 if score >= min_score and relevant:
                     approved_candidates.append(row)
+                    if row["media_type"] == "image":
+                        image_key = self._normalize_media_source_url(
+                            str(row.get("source_url", "") or "")
+                        )
+                        approved_image_sources.add(image_key or candidate_asset)
 
             selected_asset = str(segment.get("visual_asset_path", "") or "")
             selected_score: Optional[int] = None
@@ -2106,8 +2500,11 @@ Search results:
                     "segment_index": idx,
                     "narration": str(segment.get("narration", "") or ""),
                     "min_score": min_score,
+                    "min_approved_images": min_approved_images,
                     "selected_asset_path": selected_asset,
                     "selected_score": selected_score,
+                    "approved_count_total": len(approved_candidates),
+                    "approved_count_images": len(approved_image_sources),
                     "candidates": candidate_scores,
                 }
             )
@@ -2127,6 +2524,314 @@ Search results:
             "media_relevance_report.json",
             report_payload,
         )
+        return report_payload
+
+    async def _ensure_min_approved_images_per_segment(
+        self,
+        state: Any,
+        script_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Iteratively search/download more images until each segment has enough approved images."""
+        min_approved_images = self._read_env_int(
+            "HYBRID_IMAGE_RELEVANCE_MIN_APPROVED_PER_SEGMENT",
+            default=3,
+            minimum=1,
+            maximum=12,
+        )
+        max_retries = self._read_env_int(
+            "HYBRID_IMAGE_RELEVANCE_MAX_RETRIES",
+            default=2,
+            minimum=0,
+            maximum=8,
+        )
+
+        evidence_index_path = str(
+            getattr(state, "metadata", {}).get("evidence_index_path", "") or ""
+        ).strip()
+        evidence_payload: Dict[str, Any] = {}
+        if evidence_index_path and Path(evidence_index_path).exists():
+            try:
+                evidence_payload = json.loads(
+                    Path(evidence_index_path).read_text(encoding="utf-8")
+                )
+            except Exception:
+                evidence_payload = {}
+
+        def _list_from_payload(key: str) -> List[str]:
+            raw = evidence_payload.get(key, [])
+            if not isinstance(raw, list):
+                return []
+            return [str(item).strip() for item in raw if str(item).strip()]
+
+        existing_queries = _list_from_payload("image_queries")
+        existing_queries.extend(_list_from_payload("supplementary_image_queries"))
+
+        last_report: Dict[str, Any] = {}
+
+        for attempt in range(max_retries + 1):
+            workspace_assets = self._collect_hybrid_workspace_assets(state)
+            last_report = await self._apply_hybrid_image_relevance_mapping(
+                state,
+                script_payload,
+                workspace_assets,
+            )
+            segments_report = last_report.get("segments", [])
+            if not isinstance(segments_report, list):
+                return last_report
+
+            under_served: List[int] = []
+            for row in segments_report:
+                if not isinstance(row, dict):
+                    continue
+                idx = row.get("segment_index")
+                if not isinstance(idx, int) or idx < 0:
+                    continue
+                approved_images = int(row.get("approved_count_images", 0) or 0)
+                if approved_images < min_approved_images:
+                    under_served.append(idx)
+            if not under_served:
+                return last_report
+
+            if attempt >= max_retries:
+                return last_report
+
+            supplementary_queries = await self._generate_supplementary_image_queries(
+                state,
+                script_payload,
+                segment_indexes=sorted(set(under_served)),
+                existing_queries=existing_queries,
+                max_per_segment=3,
+            )
+            existing_lower = {x.lower() for x in existing_queries}
+            supplementary_queries = [
+                str(q).strip()
+                for q in supplementary_queries
+                if str(q).strip() and str(q).strip().lower() not in existing_lower
+            ]
+            if not supplementary_queries:
+                return last_report
+
+            search_payload = await self._run_hybrid_media_queries(
+                image_queries=supplementary_queries,
+                video_queries=[],
+                count=6,
+            )
+            if not isinstance(search_payload, dict) or not any(
+                (search_payload.get("image") or {}).values()
+            ):
+                return last_report
+
+            retry_search_path = save_finding(
+                state.project_dir,
+                "evidence",
+                f"media_search_results_retry_{attempt + 1}.json",
+                search_payload,
+            )
+
+            downloaded_media = await self._download_hybrid_media_assets(
+                state,
+                search_payload,
+            )
+            if not downloaded_media:
+                return last_report
+
+            evidence_payload["downloaded_media"] = self._merge_downloaded_media_entries(
+                evidence_payload.get("downloaded_media", []),
+                downloaded_media,
+            )
+
+            # Track supplementary queries + retry artifacts for traceability
+            supp_list = evidence_payload.get("supplementary_image_queries", [])
+            if not isinstance(supp_list, list):
+                supp_list = []
+            for q in supplementary_queries:
+                if q not in supp_list:
+                    supp_list.append(q)
+            evidence_payload["supplementary_image_queries"] = supp_list
+
+            retry_paths = evidence_payload.get("supplementary_search_results_paths", [])
+            if not isinstance(retry_paths, list):
+                retry_paths = []
+            retry_paths.append(
+                str(Path(retry_search_path).relative_to(Path(state.project_dir)))
+            )
+            evidence_payload["supplementary_search_results_paths"] = retry_paths
+
+            existing_queries.extend([q for q in supplementary_queries if q])
+            evidence_payload["updated_at"] = datetime.now().isoformat()
+
+            evidence_path = save_finding(
+                state.project_dir,
+                "evidence",
+                "evidence_index.json",
+                evidence_payload,
+            )
+            if not hasattr(state, "metadata") or not isinstance(state.metadata, dict):
+                state.metadata = {}
+            state.metadata["evidence_index_path"] = str(evidence_path)
+            save_run_state(state)
+
+        return last_report
+
+    async def _run_agentic_scripting_with_visual_loop(
+        self,
+        state: Any,
+        phase: PipelinePhase,
+        context: str,
+    ) -> Dict[str, Any]:
+        """Run SCRIPTING with a visual feedback loop before final relevance mapping."""
+        script_payload = await self._generate_hybrid_phase_payload(
+            state,
+            phase,
+            context,
+        )
+
+        max_rounds = self._read_env_int(
+            "HYBRID_VISUAL_FEEDBACK_MAX_ROUNDS",
+            default=0,
+            minimum=0,
+            maximum=8,
+        )
+        if max_rounds <= 0:
+            await self._ensure_min_approved_images_per_segment(state, script_payload)
+            return script_payload
+
+        flag_raw = (
+            str(os.getenv("HYBRID_VISUAL_REVISION_ENABLED", "true")).strip().lower()
+        )
+        allow_revisions = flag_raw not in {"0", "false", "no", "off"}
+
+        for _ in range(max_rounds):
+            visual_catalog = self._build_visual_catalog_for_script(state)
+            images = visual_catalog.get("images", [])
+            if not isinstance(images, list) or not images:
+                break
+
+            feedback = await self._run_visual_feedback_agent(
+                state,
+                script_payload,
+                visual_catalog,
+            )
+            if not isinstance(feedback, dict):
+                break
+            fb_segments = feedback.get("segments")
+            if not isinstance(fb_segments, list) or not fb_segments:
+                break
+
+            # Apply revisions and collect new image queries.
+            self._apply_visual_feedback_to_script(
+                script_payload,
+                feedback,
+                allow_revisions=allow_revisions,
+            )
+
+            new_image_queries: List[str] = []
+            needs_images = False
+            for entry in fb_segments:
+                if not isinstance(entry, dict):
+                    continue
+                status = str(entry.get("status", "") or "").strip().lower()
+                if status == "needs_images":
+                    needs_images = True
+                queries = entry.get("new_image_queries") or []
+                if isinstance(queries, list):
+                    for q in queries:
+                        text = str(q or "").strip()
+                        if text:
+                            new_image_queries.append(text)
+
+            if not needs_images or not new_image_queries:
+                break
+
+            # Deduplicate queries.
+            seen_queries: set[str] = set()
+            deduped_queries: List[str] = []
+            for q in new_image_queries:
+                lowered = q.lower()
+                if lowered in seen_queries:
+                    continue
+                seen_queries.add(lowered)
+                deduped_queries.append(q)
+            if not deduped_queries:
+                break
+
+            search_payload = await self._run_hybrid_media_queries(
+                image_queries=deduped_queries,
+                video_queries=[],
+                count=6,
+            )
+            if not isinstance(search_payload, dict) or not any(
+                (search_payload.get("image") or {}).values()
+            ):
+                break
+
+            evidence_index_path = str(
+                getattr(state, "metadata", {}).get("evidence_index_path", "") or ""
+            ).strip()
+            evidence_payload: Dict[str, Any] = {}
+            if evidence_index_path and Path(evidence_index_path).exists():
+                try:
+                    evidence_payload = json.loads(
+                        Path(evidence_index_path).read_text(encoding="utf-8")
+                    )
+                except Exception:
+                    evidence_payload = {}
+            if "downloaded_media" not in evidence_payload or not isinstance(
+                evidence_payload.get("downloaded_media"), list
+            ):
+                evidence_payload["downloaded_media"] = []
+
+            retry_search_path = save_finding(
+                state.project_dir,
+                "evidence",
+                "media_search_results_visual_feedback.json",
+                search_payload,
+            )
+
+            downloaded_media = await self._download_hybrid_media_assets(
+                state,
+                search_payload,
+            )
+            if not downloaded_media:
+                break
+
+            evidence_payload["downloaded_media"] = self._merge_downloaded_media_entries(
+                evidence_payload.get("downloaded_media", []),
+                downloaded_media,
+            )
+
+            # Track feedback-driven queries and search artifacts.
+            supp_list = evidence_payload.get("supplementary_image_queries", [])
+            if not isinstance(supp_list, list):
+                supp_list = []
+            for q in deduped_queries:
+                if q not in supp_list:
+                    supp_list.append(q)
+            evidence_payload["supplementary_image_queries"] = supp_list
+
+            retry_paths = evidence_payload.get("supplementary_search_results_paths", [])
+            if not isinstance(retry_paths, list):
+                retry_paths = []
+            retry_paths.append(
+                str(Path(retry_search_path).relative_to(Path(state.project_dir)))
+            )
+            evidence_payload["supplementary_search_results_paths"] = retry_paths
+
+            evidence_payload["updated_at"] = datetime.now().isoformat()
+
+            evidence_path = save_finding(
+                state.project_dir,
+                "evidence",
+                "evidence_index.json",
+                evidence_payload,
+            )
+            if not hasattr(state, "metadata") or not isinstance(state.metadata, dict):
+                state.metadata = {}
+            state.metadata["evidence_index_path"] = str(evidence_path)
+            save_run_state(state)
+
+        await self._ensure_min_approved_images_per_segment(state, script_payload)
+        return script_payload
 
     @staticmethod
     def _slugify_for_filename(text: str) -> str:
@@ -2197,6 +2902,26 @@ Search results:
                 "source_url": str(entry.get("source_url", "") or ""),
             }
         return metadata
+
+    def _build_visual_catalog_for_script(self, state: Any) -> Dict[str, Any]:
+        """Build a lightweight catalog of available images for SCRIPTING/feedback agents."""
+        media_metadata = self._load_hybrid_media_metadata(state)
+        images: List[Dict[str, Any]] = []
+        for idx, (local_path, meta) in enumerate(sorted(media_metadata.items())):
+            if not isinstance(meta, dict):
+                continue
+            if str(meta.get("media_type", "") or "").lower() != "image":
+                continue
+            images.append(
+                {
+                    "id": idx,
+                    "local_path": local_path,
+                    "query": str(meta.get("query", "") or ""),
+                    "title": str(meta.get("title", "") or ""),
+                    "source_url": str(meta.get("source_url", "") or ""),
+                }
+            )
+        return {"images": images}
 
     @staticmethod
     def _media_type_for_asset(asset_path: str) -> str:
