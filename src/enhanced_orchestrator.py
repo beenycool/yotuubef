@@ -20,14 +20,28 @@ from urllib.parse import urlparse, urlunparse
 import aiohttp
 from moviepy import (
     AudioFileClip,
+    ColorClip,
     CompositeAudioClip,
+    ImageClip,
+    VideoFileClip,
     concatenate_audioclips,
+    concatenate_videoclips,
 )
 
 import asyncprawcore.exceptions
 
 from src.config.settings import get_config
-from src.models import VideoAnalysis, VideoAnalysisEnhanced, PerformanceMetrics
+from src.models import (
+    EmotionType,
+    NarrativeSegment,
+    PacingType,
+    PerformanceMetrics,
+    PositionType,
+    TextOverlay,
+    TextStyle,
+    VideoAnalysis,
+    VideoAnalysisEnhanced,
+)
 from src.integrations.reddit_client import RedditClient
 from src.integrations.search_client import DeepResearchClient, AgenticResearcher
 from src.integrations.ai_client import AIClient
@@ -41,7 +55,7 @@ from src.monitoring.engagement_metrics import EngagementMonitor
 from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.video_processor import VideoProcessor
 from src.processing.background_manager import BackgroundManager
-from src.processing.video_processor_fixes import MoviePyCompat
+from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 from src.processing.image_search_client import BraveImageClient
 from src.processing.caption_generator import CaptionGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
@@ -849,6 +863,100 @@ class EnhancedVideoOrchestrator:
                     script_payload,
                 )
                 state.metadata["final_script_path"] = str(final_script_path)
+                save_run_state(state)
+                state = set_phase(
+                    state,
+                    PipelinePhase.VIDEO_RENDER,
+                    "Script finalized; ready for local render",
+                )
+                continue
+
+            if phase == PipelinePhase.VIDEO_RENDER:
+                final_script_path = str(
+                    state.metadata.get("final_script_path", "") or ""
+                )
+                if not final_script_path:
+                    state.status = "paused_render_failed"
+                    save_run_state(state)
+                    return {
+                        "success": False,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.VIDEO_RENDER.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                        "error": "Missing final_script_path in state metadata",
+                    }
+
+                script_path = Path(final_script_path)
+                if not script_path.exists() or not script_path.is_file():
+                    state.status = "paused_render_failed"
+                    save_run_state(state)
+                    return {
+                        "success": False,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.VIDEO_RENDER.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                        "final_script_path": final_script_path,
+                        "error": f"Final script not found: {script_path}",
+                    }
+
+                try:
+                    script_payload = json.loads(script_path.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    state.status = "paused_render_failed"
+                    save_run_state(state)
+                    return {
+                        "success": False,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.VIDEO_RENDER.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                        "final_script_path": final_script_path,
+                        "error": f"Failed to parse final script JSON: {exc}",
+                    }
+
+                render_result = await self._render_hybrid_local_video(
+                    state, script_payload
+                )
+                if not render_result.get("success"):
+                    state.status = "paused_render_failed"
+                    save_run_state(state)
+                    return {
+                        "success": False,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.VIDEO_RENDER.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                        "final_script_path": final_script_path,
+                        "error": str(
+                            render_result.get("error", "Hybrid render failed")
+                        ),
+                    }
+
+                final_video_path = str(render_result.get("video_path", "") or "")
+                render_manifest_path = str(
+                    render_result.get("render_manifest_path", "") or ""
+                )
+                state.metadata["final_video_path"] = final_video_path
+                if render_manifest_path:
+                    state.metadata["render_manifest_path"] = render_manifest_path
                 state.status = "completed"
                 save_run_state(state)
 
@@ -856,11 +964,13 @@ class EnhancedVideoOrchestrator:
                     "success": True,
                     "paused": False,
                     "status": state.status,
-                    "current_phase": PipelinePhase.SCRIPTING.value,
+                    "current_phase": PipelinePhase.VIDEO_RENDER.value,
                     "project_name": state.project_name,
                     "pipeline": "hybrid_documentary_studio",
                     "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                    "final_script_path": str(final_script_path),
+                    "final_script_path": final_script_path,
+                    "final_video_path": final_video_path,
+                    "render_manifest_path": render_manifest_path,
                 }
 
     # Curated scouting queries for search-first idea discovery (avoid LLM inventing topics)
@@ -2832,6 +2942,373 @@ Search results:
 
         await self._ensure_min_approved_images_per_segment(state, script_payload)
         return script_payload
+
+    async def _render_hybrid_local_video(
+        self,
+        state: Any,
+        script_payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        project_dir = Path(str(getattr(state, "project_dir", "") or "")).resolve()
+        if not project_dir.exists():
+            return {
+                "success": False,
+                "error": f"Project directory not found: {project_dir}",
+            }
+
+        segments = script_payload.get("segments")
+        if not isinstance(segments, list) or not segments:
+            return {
+                "success": False,
+                "error": "No script segments available for hybrid render",
+            }
+
+        min_segment_duration = self._read_env_float(
+            "HYBRID_MIN_SEGMENT_DURATION_SECONDS",
+            default=2.0,
+            minimum=0.8,
+            maximum=30.0,
+        )
+        max_segment_duration = self._read_env_float(
+            "HYBRID_MAX_SEGMENT_DURATION_SECONDS",
+            default=14.0,
+            minimum=3.0,
+            maximum=60.0,
+        )
+        narration_multiplier = self._read_env_float(
+            "HYBRID_NARRATION_DURATION_MULTIPLIER",
+            default=2.0,
+            minimum=1.0,
+            maximum=4.0,
+        )
+
+        created_clips: List[Any] = []
+        timeline_clips: List[Any] = []
+        tts_jobs: List[Dict[str, Any]] = []
+        overlays: List[TextOverlay] = []
+        timeline_manifest: List[Dict[str, Any]] = []
+
+        timeline_clip: Optional[Any] = None
+        rendered_clip: Optional[Any] = None
+        composite_audio: Optional[Any] = None
+
+        cursor = 0.0
+
+        def _register_clip(clip: Any) -> None:
+            if clip is not None:
+                created_clips.append(clip)
+
+        print("[Hybrid] Rendering final video locally...", flush=True)
+
+        try:
+            for idx, segment in enumerate(segments):
+                if not isinstance(segment, dict):
+                    continue
+
+                duration = self._normalize_segment_duration(
+                    segment,
+                    min_segment_duration=min_segment_duration,
+                    max_segment_duration=max_segment_duration,
+                    narration_multiplier=narration_multiplier,
+                )
+                start_time = round(cursor, 3)
+                cursor += duration
+
+                narration = str(segment.get("narration", "") or "").strip()
+                asset_rel = str(segment.get("visual_asset_path", "") or "").strip()
+                asset_abs = (project_dir / asset_rel) if asset_rel else None
+                source_type = "fallback"
+
+                segment_clip: Optional[Any] = None
+                if asset_abs and asset_abs.exists() and asset_abs.is_file():
+                    media_type = self._media_type_for_asset(asset_rel)
+                    if media_type == "video":
+                        try:
+                            source_video = VideoFileClip(str(asset_abs))
+                            _register_clip(source_video)
+                            clip_duration = float(
+                                getattr(source_video, "duration", 0.0) or 0.0
+                            )
+                            if clip_duration > 0 and clip_duration >= duration:
+                                segment_clip = MoviePyCompat.subclip(
+                                    source_video, 0, duration
+                                )
+                            elif clip_duration > 0:
+                                loop_fn = getattr(source_video, "loop", None)
+                                if callable(loop_fn):
+                                    segment_clip = loop_fn(duration=duration)
+                                else:
+                                    segment_clip = MoviePyCompat.with_duration(
+                                        source_video, duration
+                                    )
+                            if segment_clip is not None:
+                                source_type = "video"
+                        except Exception as exc:
+                            self.logger.warning(
+                                "Hybrid render video segment failed for %s: %s",
+                                asset_abs,
+                                exc,
+                            )
+                    elif media_type == "image":
+                        try:
+                            segment_clip = ImageClip(str(asset_abs))
+                            segment_clip = MoviePyCompat.with_duration(
+                                segment_clip, duration
+                            )
+                            source_type = "image"
+                        except Exception as exc:
+                            self.logger.warning(
+                                "Hybrid render image segment failed for %s: %s",
+                                asset_abs,
+                                exc,
+                            )
+
+                if segment_clip is None:
+                    try:
+                        background_clip = BackgroundManager().get_sliced_background(
+                            target_duration=duration,
+                            subreddit="hybrid",
+                            text_content=narration,
+                        )
+                        segment_clip = background_clip
+                        source_type = "background"
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Hybrid render background fallback failed for segment %s: %s",
+                            idx,
+                            exc,
+                        )
+                        segment_clip = ColorClip(
+                            size=(1080, 1920),
+                            color=(18, 18, 18),
+                            duration=duration,
+                        )
+                        source_type = "color"
+
+                segment_clip = ensure_shorts_format(
+                    segment_clip, target_duration=duration
+                )
+                _register_clip(segment_clip)
+                timeline_clips.append(segment_clip)
+
+                emotion_raw = str(segment.get("emotion", "") or "").strip().lower()
+                if emotion_raw not in {
+                    EmotionType.EXCITED.value,
+                    EmotionType.CALM.value,
+                    EmotionType.DRAMATIC.value,
+                    EmotionType.NEUTRAL.value,
+                }:
+                    emotion_raw = EmotionType.NEUTRAL.value
+
+                pace_raw = (
+                    str(segment.get("pace", segment.get("pacing", "")) or "")
+                    .strip()
+                    .lower()
+                )
+                if pace_raw not in {
+                    PacingType.FAST.value,
+                    PacingType.NORMAL.value,
+                    PacingType.SLOW.value,
+                }:
+                    pace_raw = PacingType.NORMAL.value
+
+                emotion_value = EmotionType.NEUTRAL
+                if emotion_raw == EmotionType.EXCITED.value:
+                    emotion_value = EmotionType.EXCITED
+                elif emotion_raw == EmotionType.CALM.value:
+                    emotion_value = EmotionType.CALM
+                elif emotion_raw == EmotionType.DRAMATIC.value:
+                    emotion_value = EmotionType.DRAMATIC
+
+                pace_value = PacingType.NORMAL
+                if pace_raw == PacingType.FAST.value:
+                    pace_value = PacingType.FAST
+                elif pace_raw == PacingType.SLOW.value:
+                    pace_value = PacingType.SLOW
+
+                if narration:
+                    try:
+                        tts_segment = NarrativeSegment(
+                            text=narration,
+                            time_seconds=start_time,
+                            intended_duration_seconds=duration,
+                            emotion=emotion_value,
+                            pacing=pace_value,
+                        )
+                        tts_jobs.append(
+                            {
+                                "index": idx,
+                                "start_time": start_time,
+                                "segment": tts_segment,
+                            }
+                        )
+                    except Exception:
+                        self.logger.debug(
+                            "Skipping invalid narration segment at index %s", idx
+                        )
+
+                text_overlay = str(segment.get("text_overlay", "") or "").strip()
+                if text_overlay:
+                    try:
+                        overlays.append(
+                            TextOverlay(
+                                text=text_overlay[:200],
+                                timestamp_seconds=start_time,
+                                duration=max(0.8, min(duration, 4.0)),
+                                position=PositionType.CENTER,
+                                style=TextStyle.HIGHLIGHT,
+                            )
+                        )
+                    except Exception:
+                        self.logger.debug(
+                            "Skipping invalid text overlay at segment index %s", idx
+                        )
+
+                timeline_manifest.append(
+                    {
+                        "segment_index": idx,
+                        "start_time": start_time,
+                        "duration": duration,
+                        "source_type": source_type,
+                        "visual_asset_path": asset_rel,
+                    }
+                )
+
+            if not timeline_clips:
+                return {
+                    "success": False,
+                    "error": "No valid timeline clips built from script segments",
+                }
+
+            timeline_clip = concatenate_videoclips(timeline_clips, method="compose")
+            _register_clip(timeline_clip)
+            rendered_clip = timeline_clip
+            if rendered_clip is None:
+                return {
+                    "success": False,
+                    "error": "Failed to build concatenated render timeline",
+                }
+
+            audio_layers: List[Any] = []
+            if tts_jobs:
+                tts_segments = [job["segment"] for job in tts_jobs]
+                tts_results = await asyncio.to_thread(
+                    self.advanced_audio_processor.tts_service.generate_multiple_segments,
+                    tts_segments,
+                )
+                for job, tts_result in zip(tts_jobs, tts_results):
+                    if not isinstance(tts_result, dict):
+                        continue
+                    if not tts_result.get("success"):
+                        continue
+                    audio_path = tts_result.get("audio_path")
+                    if not audio_path:
+                        continue
+                    try:
+                        clip = AudioFileClip(str(audio_path))
+                        clip = MoviePyCompat.with_start(clip, float(job["start_time"]))
+                        audio_layers.append(clip)
+                        _register_clip(clip)
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Failed to load TTS segment audio at %s: %s",
+                            audio_path,
+                            exc,
+                        )
+
+            if audio_layers:
+                composite_audio = CompositeAudioClip(audio_layers)
+                _register_clip(composite_audio)
+                rendered_clip = MoviePyCompat.with_audio(rendered_clip, composite_audio)
+
+            if rendered_clip is None:
+                return {
+                    "success": False,
+                    "error": "Render clip unexpectedly unavailable before overlays",
+                }
+
+            if overlays:
+                try:
+                    rendered_clip = (
+                        self.video_processor.text_processor.add_text_overlays(
+                            rendered_clip,
+                            overlays,
+                        )
+                    )
+                    _register_clip(rendered_clip)
+                except Exception as exc:
+                    self.logger.warning(
+                        "Hybrid render text overlay pass failed: %s", exc
+                    )
+            if rendered_clip is None:
+                return {
+                    "success": False,
+                    "error": "Render clip unexpectedly unavailable",
+                }
+
+            output_dir = Path(self.config.paths.processed_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            project_slug = self._slugify_for_filename(
+                str(getattr(state, "project_name", "hybrid"))
+            )
+            output_path = output_dir / (
+                f"hybrid_{project_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
+            )
+
+            write_kwargs: Dict[str, Any] = {
+                "fps": 30,
+                "codec": "libx264",
+            }
+            if getattr(rendered_clip, "audio", None) is not None:
+                write_kwargs["audio_codec"] = "aac"
+            else:
+                write_kwargs["audio"] = False
+
+            await asyncio.to_thread(
+                rendered_clip.write_videofile,
+                str(output_path),
+                **write_kwargs,
+            )
+
+            manifest_payload = {
+                "phase": PipelinePhase.VIDEO_RENDER.value,
+                "created_at": datetime.now().isoformat(),
+                "project_name": str(getattr(state, "project_name", "")),
+                "output_video_path": str(output_path),
+                "segments": timeline_manifest,
+                "narration_segments_requested": len(tts_jobs),
+                "text_overlay_count": len(overlays),
+            }
+            manifest_path = save_finding(
+                state.project_dir,
+                "scripts",
+                "render_manifest.json",
+                manifest_payload,
+            )
+
+            return {
+                "success": True,
+                "video_path": str(output_path),
+                "render_manifest_path": str(manifest_path),
+            }
+        except Exception as exc:
+            self.logger.error("Hybrid local render failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+            }
+        finally:
+            seen_ids: set[int] = set()
+            for clip in reversed(created_clips):
+                clip_id = id(clip)
+                if clip_id in seen_ids:
+                    continue
+                seen_ids.add(clip_id)
+                close_method = getattr(clip, "close", None)
+                if callable(close_method):
+                    try:
+                        close_method()
+                    except Exception:
+                        pass
 
     @staticmethod
     def _slugify_for_filename(text: str) -> str:

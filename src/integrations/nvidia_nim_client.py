@@ -675,8 +675,9 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
         if self.alt_model and self.alt_model != self.model:
             models_to_try.append(self.alt_model)
 
-        max_retries = 3
+        max_retries = 4
         base_delay = 0.5
+        max_delay = 8.0
         last_error = None
         for model_name in models_to_try:
             for attempt in range(max_retries):
@@ -702,7 +703,9 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 except Exception as exc:
                     last_error = exc
                     if attempt < max_retries - 1 and self._is_retryable_error(exc):
-                        delay = (base_delay * (2**attempt)) + random.uniform(0.0, 0.25)
+                        delay = min(
+                            base_delay * (2**attempt), max_delay
+                        ) + random.uniform(0.0, 0.25)
                         self.logger.warning(
                             "NVIDIA NIM transient error on %s (attempt %d/%d): %s. Retrying in %.2fs",
                             model_name,

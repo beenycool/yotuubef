@@ -180,7 +180,9 @@ class EnhancedYouTubeGenerator:
     ) -> Dict[str, Any]:
         """Run hybrid documentary workflow with pause/resume state."""
         try:
-            print(f"Starting hybrid documentary workflow: {project_name}...", flush=True)
+            print(
+                f"Starting hybrid documentary workflow: {project_name}...", flush=True
+            )
             self.logger.info(
                 "Starting hybrid workflow project=%s resume=%s phase_override=%s",
                 project_name,
@@ -206,6 +208,10 @@ class EnhancedYouTubeGenerator:
                     print(f"Hybrid workflow complete at phase: {phase}")
                 if workspace:
                     print(f"Workspace: {workspace}")
+                if result.get("final_script_path"):
+                    print(f"Final script: {result['final_script_path']}")
+                if result.get("final_video_path"):
+                    print(f"Final video: {result['final_video_path']}")
             else:
                 self.logger.error("Hybrid workflow failed: %s", result.get("error"))
 

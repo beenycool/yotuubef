@@ -7,6 +7,7 @@ import pytest
 
 from src.enhanced_orchestrator import EnhancedVideoOrchestrator
 import src.enhanced_orchestrator as orchestrator_module
+from src.hybrid_documentary_state_machine import PipelinePhase
 
 
 def _build_orchestrator_stub() -> EnhancedVideoOrchestrator:
@@ -913,3 +914,134 @@ async def test_agentic_visual_loop_stops_when_no_images(tmp_path, monkeypatch):
 
     assert result["segments"][0]["narration"] == "Original."
     assert calls["ensure"] == 1
+
+
+@pytest.mark.asyncio
+async def test_video_render_phase_returns_final_video_path(tmp_path, monkeypatch):
+    project_dir = tmp_path / "render_success"
+    scripts_dir = project_dir / "research" / "scripts"
+    scripts_dir.mkdir(parents=True)
+
+    script_path = scripts_dir / "final_script.json"
+    script_path.write_text(
+        json.dumps(
+            {
+                "phase": "SCRIPTING",
+                "title": "Title",
+                "hook": "Hook",
+                "loop_bridge": "Loop",
+                "segments": [
+                    {
+                        "time_seconds": 0.0,
+                        "intended_duration_seconds": 4.0,
+                        "narration": "Narration",
+                        "visual_asset_path": "",
+                        "visual_directive": "",
+                        "text_overlay": "",
+                        "evidence_refs": [],
+                        "pace": "normal",
+                        "emotion": "neutral",
+                    }
+                ],
+                "sources_to_check": [],
+                "hashtags": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = SimpleNamespace(
+        project_name="render_success",
+        project_dir=str(project_dir),
+        current_phase=PipelinePhase.VIDEO_RENDER,
+        status="active",
+        metadata={"final_script_path": str(script_path)},
+        gemini_report_path=None,
+    )
+
+    orchestrator = _build_orchestrator_stub()
+    monkeypatch.setattr(orchestrator_module, "save_run_state", lambda _state: None)
+
+    async def _fake_render(state_arg, script_payload):
+        _ = state_arg, script_payload
+        return {
+            "success": True,
+            "video_path": "processed/hybrid_render_success_20260101_120000.mp4",
+            "render_manifest_path": "findings/render_success/research/scripts/render_manifest.json",
+        }
+
+    orchestrator._render_hybrid_local_video = _fake_render
+
+    result = await orchestrator._run_hybrid_state_machine(state)
+
+    assert result["success"] is True
+    assert result["current_phase"] == PipelinePhase.VIDEO_RENDER.value
+    assert result["final_script_path"] == str(script_path)
+    assert result["final_video_path"].endswith(".mp4")
+    assert state.status == "completed"
+    assert state.metadata.get("final_video_path", "").endswith(".mp4")
+
+
+@pytest.mark.asyncio
+async def test_video_render_phase_pauses_when_script_missing(tmp_path, monkeypatch):
+    project_dir = tmp_path / "render_missing"
+    project_dir.mkdir(parents=True)
+
+    state = SimpleNamespace(
+        project_name="render_missing",
+        project_dir=str(project_dir),
+        current_phase=PipelinePhase.VIDEO_RENDER,
+        status="active",
+        metadata={},
+        gemini_report_path=None,
+    )
+
+    orchestrator = _build_orchestrator_stub()
+    monkeypatch.setattr(orchestrator_module, "save_run_state", lambda _state: None)
+
+    result = await orchestrator._run_hybrid_state_machine(state)
+
+    assert result["success"] is False
+    assert result["paused"] is True
+    assert result["current_phase"] == PipelinePhase.VIDEO_RENDER.value
+    assert "final_script_path" in result.get("error", "")
+    assert state.status == "paused_render_failed"
+
+
+@pytest.mark.asyncio
+async def test_video_render_phase_pauses_when_render_fails(tmp_path, monkeypatch):
+    project_dir = tmp_path / "render_fail"
+    scripts_dir = project_dir / "research" / "scripts"
+    scripts_dir.mkdir(parents=True)
+
+    script_path = scripts_dir / "final_script.json"
+    script_path.write_text(
+        json.dumps({"phase": "SCRIPTING", "segments": []}),
+        encoding="utf-8",
+    )
+
+    state = SimpleNamespace(
+        project_name="render_fail",
+        project_dir=str(project_dir),
+        current_phase=PipelinePhase.VIDEO_RENDER,
+        status="active",
+        metadata={"final_script_path": str(script_path)},
+        gemini_report_path=None,
+    )
+
+    orchestrator = _build_orchestrator_stub()
+    monkeypatch.setattr(orchestrator_module, "save_run_state", lambda _state: None)
+
+    async def _fake_render_fail(state_arg, script_payload):
+        _ = state_arg, script_payload
+        return {"success": False, "error": "ffmpeg render failed"}
+
+    orchestrator._render_hybrid_local_video = _fake_render_fail
+
+    result = await orchestrator._run_hybrid_state_machine(state)
+
+    assert result["success"] is False
+    assert result["paused"] is True
+    assert result["current_phase"] == PipelinePhase.VIDEO_RENDER.value
+    assert "ffmpeg render failed" in result["error"]
+    assert state.status == "paused_render_failed"

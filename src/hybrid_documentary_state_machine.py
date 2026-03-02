@@ -56,6 +56,7 @@ class PipelinePhase(str, Enum):
     SYNTHESIS = "SYNTHESIS"
     EVIDENCE_GATHERING = "EVIDENCE_GATHERING"
     SCRIPTING = "SCRIPTING"
+    VIDEO_RENDER = "VIDEO_RENDER"
 
 
 class ResearchArtifact(BaseModel):
@@ -189,6 +190,16 @@ PHASE_JSON_CONTRACTS: Dict[PipelinePhase, str] = {
             ],
             "sources_to_check": ["string"],
             "hashtags": ["string"],
+        },
+        indent=2,
+    ),
+    PipelinePhase.VIDEO_RENDER: json.dumps(
+        {
+            "phase": "VIDEO_RENDER",
+            "status": "ready|rendered|failed",
+            "final_script_path": "research/scripts/final_script.json",
+            "output_video_path": "processed/hybrid_project_20260101_120000.mp4",
+            "notes": "string",
         },
         indent=2,
     ),
