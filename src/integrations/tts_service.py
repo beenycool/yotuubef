@@ -317,6 +317,11 @@ class TTSService:
                 if audio_path:
                     self._trim_segment_silence(audio_path, segment_index=i)
 
+                    # FORCE fit to intended duration to prevent overlapping multiple TTS speaking at once
+                    adjusted_path = self.adjust_audio_speed(audio_path, segment.intended_duration_seconds)
+                    if adjusted_path and adjusted_path.exists():
+                        audio_path = adjusted_path
+
                     # Get audio duration for timing validation
                     try:
                         clip = AudioFileClip(str(audio_path))

@@ -495,7 +495,7 @@ def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> 
     Ensure video meets YouTube Shorts requirements:
     - Vertical format (9:16 aspect ratio)
     - Duration ≤ 60 seconds
-    - Resolution optimized for mobile
+    - Letterboxed properly to avoid cutting off evidence
     """
     logger = logging.getLogger(__name__)
     
@@ -517,21 +517,24 @@ def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> 
     
     logger.info(f"Current aspect ratio: {current_aspect:.3f}, target: {target_aspect:.3f}")
     
-    if abs(current_aspect - target_aspect) > 0.1:  # Needs aspect ratio correction
-        if current_aspect > target_aspect:  # Too wide, crop sides
-            new_width = int(h * target_aspect)
-            x1 = (w - new_width) // 2
-            clip = MoviePyCompat.crop(clip, x1=x1, x2=x1 + new_width)
-            logger.info(f"Cropped width from {w} to {new_width}")
-        else:  # Too tall, crop top/bottom
-            new_height = int(w / target_aspect)
-            y1 = (h - new_height) // 2
-            clip = MoviePyCompat.crop(clip, y1=y1, y2=y1 + new_height)
-            logger.info(f"Cropped height from {h} to {new_height}")
-    
-    # Resize to target resolution
-    clip = MoviePyCompat.resize(clip, (target_width, target_height))
-    logger.info(f"Resized to {target_width}x{target_height} for YouTube Shorts")
+    if abs(current_aspect - target_aspect) > 0.01:
+        logger.info(f"Letterboxing clip from {w}x{h} to {target_width}x{target_height}")
+        if current_aspect > target_aspect:
+            # Wider: fit to width
+            clip = MoviePyCompat.resize(clip, width=target_width)
+        else:
+            # Taller: fit to height
+            clip = MoviePyCompat.resize(clip, height=target_height)
+
+        from moviepy.video.VideoClip import ColorClip
+        from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+
+        bg = ColorClip(size=(target_width, target_height), color=(0, 0, 0))
+        bg = MoviePyCompat.with_duration(bg, clip.duration)
+        clip = MoviePyCompat.with_position(clip, 'center')
+        clip = CompositeVideoClip([bg, clip])
+    else:
+        clip = MoviePyCompat.resize(clip, (target_width, target_height))
     
     return clip
 
