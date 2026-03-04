@@ -274,3 +274,32 @@ def test_video_analysis_enhanced_valid():
     )
     assert analysis.suggested_title == "Enhanced Video"
     assert analysis.audio_ducking_config.duck_volume == 0.5
+
+
+def test_text_overlay_valid_text():
+    overlay = TextOverlay(text="Hello World", timestamp_seconds=1.0, duration=5.0)
+    assert overlay.text == "Hello World"
+
+
+def test_text_overlay_strips_whitespace():
+    overlay = TextOverlay(text="  Hello World  ", timestamp_seconds=1.0, duration=5.0)
+    assert overlay.text == "Hello World"
+
+
+def test_text_overlay_empty_string():
+    with pytest.raises(ValidationError) as exc_info:
+        TextOverlay(text="", timestamp_seconds=1.0, duration=5.0)
+    assert "String should have at least 1 character" in str(exc_info.value)
+
+
+def test_text_overlay_whitespace_only():
+    with pytest.raises(ValidationError) as exc_info:
+        TextOverlay(text="   ", timestamp_seconds=1.0, duration=5.0)
+    assert "Text content cannot be empty or whitespace only" in str(exc_info.value)
+
+
+def test_text_overlay_too_long():
+    long_text = "a" * 201
+    with pytest.raises(ValidationError) as exc_info:
+        TextOverlay(text=long_text, timestamp_seconds=1.0, duration=5.0)
+    assert "String should have at most 200 characters" in str(exc_info.value)
