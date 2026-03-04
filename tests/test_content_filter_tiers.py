@@ -68,3 +68,49 @@ content:
 
     assert result["is_suitable"] is True
     assert result["demonetization_risk"]
+
+def test_contains_forbidden_words(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+content:
+  hard_disallowed: []
+  forbidden_words:
+    - badword
+    - toxic
+  unsuitable_content_types: []
+  demonetization_risk: []
+  caution: []
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    init_config(config_path)
+
+    content_filter = ContentFilter()
+
+    # None and empty strings
+    assert content_filter.contains_forbidden_words(None) is False
+    assert content_filter.contains_forbidden_words("") is False
+    assert content_filter.contains_forbidden_words("   ") is False
+
+    # Clean strings
+    assert content_filter.contains_forbidden_words("This is a clean post") is False
+    assert content_filter.contains_forbidden_words("Just some regular text") is False
+
+    # Exact match
+    assert content_filter.contains_forbidden_words("This contains a badword") is True
+    assert content_filter.contains_forbidden_words("toxic community") is True
+
+    # Case insensitivity
+    assert content_filter.contains_forbidden_words("This contains a BADWORD") is True
+    assert content_filter.contains_forbidden_words("ToXiC player") is True
+
+    # Substring boundaries (should not match if it's part of another word)
+    assert content_filter.contains_forbidden_words("intoxicating perfume") is False
+    assert content_filter.contains_forbidden_words("notabadwordhere") is False
+
+    # Punctuation
+    assert content_filter.contains_forbidden_words("badword!") is True
+    assert content_filter.contains_forbidden_words("Wait, toxic?") is True
+    assert content_filter.contains_forbidden_words(".badword.") is True
