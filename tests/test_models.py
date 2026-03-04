@@ -19,6 +19,7 @@ from src.models import (
     CameraMovement,
     AudioDuckingConfig,
     VideoAnalysisEnhanced,
+    SoundEffect,
 )
 
 
@@ -94,6 +95,15 @@ def test_speed_effect_valid():
 def test_speed_effect_invalid_time_range():
     with pytest.raises(ValidationError):
         SpeedEffect(start_seconds=5.0, end_seconds=1.0, speed_factor=2.0)
+
+
+def test_speed_effect_invalid_start_time_does_not_break_validator():
+    with pytest.raises(ValidationError) as excinfo:
+        SpeedEffect(start_seconds=-1.0, end_seconds=5.0, speed_factor=1.5)
+    errors = excinfo.value.errors()
+    assert len(errors) == 1
+    assert errors[0]["loc"] == ("start_seconds",)
+    assert errors[0]["type"] == "greater_than_equal"
 
 
 def test_video_segment_valid():
@@ -302,3 +312,19 @@ def test_text_overlay_too_long():
     with pytest.raises(ValidationError) as exc_info:
         TextOverlay(text=long_text, timestamp_seconds=1.0, duration=5.0)
     assert "String should have at most 200 characters" in str(exc_info.value)
+
+
+def test_sound_effect_valid():
+    effect = SoundEffect(timestamp_seconds=2.0, effect_name="whoosh")
+    assert effect.timestamp_seconds == 2.0
+    assert effect.effect_name == "whoosh"
+    assert effect.volume == 0.7  # default
+
+
+def test_sound_effect_invalid_timestamp():
+    with pytest.raises(ValidationError) as excinfo:
+        SoundEffect(timestamp_seconds=-1.0, effect_name="whoosh")
+    errors = excinfo.value.errors()
+    assert len(errors) == 1
+    assert errors[0]["loc"] == ("timestamp_seconds",)
+    assert errors[0]["type"] == "greater_than_equal"
