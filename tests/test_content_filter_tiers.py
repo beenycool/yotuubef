@@ -68,3 +68,37 @@ content:
 
     assert result["is_suitable"] is True
     assert result["demonetization_risk"]
+
+def test_content_filter_filter_posts(tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+content:
+  hard_disallowed:
+    - nsfw
+    - banned
+  demonetization_risk:
+    - violence
+  caution: []
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    init_config(config_path)
+
+    content_filter = ContentFilter()
+
+    post1 = _post_with_title("a perfectly fine clip")
+    post2 = _post_with_title("nsfw clip")
+    post3 = _post_with_title("violence in movie scene")
+    post4 = _post_with_title("banned video")
+
+    posts = [post1, post2, post3, post4]
+    filtered_posts = content_filter.filter_posts(posts)
+
+    # Should keep post1 (fine) and post3 (demonetization_risk only flags, doesn't block)
+    assert len(filtered_posts) == 2
+    assert post1 in filtered_posts
+    assert post3 in filtered_posts
+    assert post2 not in filtered_posts
+    assert post4 not in filtered_posts
