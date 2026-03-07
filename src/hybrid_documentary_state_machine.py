@@ -531,6 +531,10 @@ class HackclubMediaSearchClient:
             if not isinstance(url, str) or not url:
                 continue
 
+            # FIX: Filter out logos and icons aggressively
+            if any(x in url.lower() for x in['logo', 'icon', 'avatar', 'profile', 'badge', 'favicon']):
+                continue
+
             title = item.get("title") or item.get("name") or ""
             description = item.get("description") or item.get("snippet") or ""
             source = item.get("source") or item.get("domain") or "unknown"
@@ -540,6 +544,10 @@ class HackclubMediaSearchClient:
                 or item.get("image")
                 or ""
             )
+
+            # FIX: Filter out results where thumbnail_url indicates it's a logo
+            if isinstance(thumbnail_url, str) and ("'logo': true" in thumbnail_url.lower() or "'logo': True" in thumbnail_url):
+                continue
 
             parsed.append(
                 MediaSearchResult(

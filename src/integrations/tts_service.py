@@ -300,11 +300,37 @@ class TTSService:
                     # Get audio duration for timing validation
                     try:
                         clip = AudioFileClip(str(audio_path))
-                        result["actual_duration"] = clip.duration
+                        actual_duration = clip.duration
                         clip.close()
+
+                        # FIX: Prevent overlapping TTS by forcing audio to fit intended duration
+                        if actual_duration > segment.intended_duration_seconds:
+                            speed_factor = actual_duration / segment.intended_duration_seconds
+                            if speed_factor <= 1.4:  # Reasonable speedup limit
+                                adjusted_path = self.adjust_audio_speed(
+                                    audio_path,
+                                    target_duration=segment.intended_duration_seconds,
+                                    output_path=audio_path.with_suffix('.fit.wav')
+                                )
+                                if adjusted_path and adjusted_path.exists():
+                                    audio_path = adjusted_path
+                                    actual_duration = segment.intended_duration_seconds
+                            else:
+                                # Speed up by max 1.4x to mitigate overlap
+                                adjusted_path = self.adjust_audio_speed(
+                                    audio_path,
+                                    target_duration=actual_duration / 1.4,
+                                    output_path=audio_path.with_suffix('.fit.wav')
+                                )
+                                if adjusted_path and adjusted_path.exists():
+                                    audio_path = adjusted_path
+                                    actual_duration = actual_duration / 1.4
+
+                        result["actual_duration"] = actual_duration
+                        result["audio_path"] = audio_path
                     except Exception as e:
                         self.logger.warning(
-                            f"Could not get duration for segment {i}: {e}"
+                            f"Could not get/adjust duration for segment {i}: {e}"
                         )
                         result["actual_duration"] = segment.intended_duration_seconds
 

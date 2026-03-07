@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import argparse
+import base64
+import cv2
 import asyncio
 import json
 import logging
@@ -665,12 +667,89 @@ def gather_workspace_assets(state: RunState) -> List[str]:
     return assets
 
 
-def remap_visual_asset_paths(script_payload: Dict[str, Any], assets: List[str]) -> None:
+def remap_visual_asset_paths(script_payload: Dict[str, Any], assets: List[str], project_dir: str) -> None:
     if not assets:
         return
-    segments = script_payload.get("segments", [])
+    segments = script_payload.get("segments",[])
     if not isinstance(segments, list):
         return
+
+    # Use Qwen VLM to intelligently map assets to segments
+    if NVIDIA_API_KEY:
+        log_event("VLM_MAPPING", "Using Qwen VLM to map visual assets to script segments...")
+        content_items =[
+            {"type": "text", "text": "Map each script segment to the most visually appropriate asset from the provided images. Return ONLY a JSON object with a 'mapping' list containing objects with 'segment_index' and 'asset_index'."}
+        ]
+
+        valid_assets =[]
+        for idx, asset in enumerate(assets):
+            full_path = Path(project_dir) / asset
+            if not full_path.exists(): continue
+
+            try:
+                img = None
+                if full_path.suffix.lower() in['.mp4', '.webm', '.mov']:
+                    cap = cv2.VideoCapture(str(full_path))
+                    ret, frame = cap.read()
+                    cap.release()
+                    if ret:
+                        img = frame
+                else:
+                    img = cv2.imread(str(full_path))
+
+                if img is not None:
+                    # resize to save tokens
+                    img = cv2.resize(img, (512, 512))
+                    _, buffer = cv2.imencode('.jpg', img)
+                    b64 = base64.b64encode(buffer).decode('utf-8')
+                    content_items.append({
+                        "type": "text",
+                        "text": f"Asset {len(valid_assets)}: {asset}"
+                    })
+                    content_items.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
+                    })
+                    valid_assets.append(asset)
+            except Exception as e:
+                pass
+
+        if valid_assets:
+            seg_text = "\n".join([f"Segment {i}: {s.get('narration', '')} | Directive: {s.get('visual_directive', '')}" for i, s in enumerate(segments)])
+            content_items.append({"type": "text", "text": f"Script Segments:\n{seg_text}\n\nReturn JSON format: {{\"mapping\": [{{\"segment_index\": 0, \"asset_index\": 2}}]}}"})
+
+            client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=NVIDIA_API_KEY)
+            try:
+                response = client.chat.completions.create(
+                    model=MODEL_PRIMARY,
+                    messages=[{"role": "user", "content": content_items}],
+                    temperature=0.2,
+                    max_tokens=1000,
+                    response_format={"type": "json_object"}
+                )
+                res_json = json.loads(response.choices[0].message.content)
+                mapping = res_json.get("mapping",[])
+
+                # Apply mapping
+                for m in mapping:
+                    s_idx = m.get("segment_index")
+                    a_idx = m.get("asset_index")
+                    if s_idx is not None and a_idx is not None:
+                        if 0 <= s_idx < len(segments) and 0 <= a_idx < len(valid_assets):
+                            segments[s_idx]["visual_asset_path"] = valid_assets[a_idx]
+
+                # Fill any remaining missing with fallback
+                for idx, seg in enumerate(segments):
+                    path = str(seg.get("visual_asset_path", "")).strip()
+                    if not path or path not in valid_assets:
+                        seg["visual_asset_path"] = valid_assets[idx % len(valid_assets)]
+
+                log_event("VLM_MAPPING_SUCCESS", "Assets successfully mapped via VLM.")
+                return
+            except Exception as e:
+                log_event("VLM_MAPPING_FAILED", str(e))
+
+    # Fallback if VLM fails or no API key
     for idx, segment in enumerate(segments):
         if not isinstance(segment, dict):
             continue
@@ -789,7 +868,7 @@ def phase_scripting(state: RunState) -> Dict[str, Any]:
             raise ValueError("SCRIPTING: segment durations must total 45-60 seconds")
 
     payload = chat_json(prompt, validator=_validate, temperature=0.4)
-    remap_visual_asset_paths(payload, assets)
+    remap_visual_asset_paths(payload, assets, state.project_dir)
 
     script_path = save_finding(
         state.project_dir, "scripts", "final_script.json", payload
