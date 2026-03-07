@@ -99,11 +99,11 @@ class CaptionGenerator:
         self,
         video_clip,
         audio_path: Path,
-        font_size: int = 90,
+        font_size: int = 120, # Increased for Hormozi style
         font: str = "Impact",
         text_color: str = "white",
         stroke_color: str = "black",
-        stroke_width: int = 5,
+        stroke_width: int = 6, # Increased stroke
         highlight_color: str = "yellow",
     ) -> Optional[Any]:
         """
@@ -130,6 +130,7 @@ class CaptionGenerator:
         composite_clip = None
         try:
             from moviepy import TextClip, CompositeVideoClip
+            from src.processing.video_processor_fixes import MoviePyCompat
 
             # Transcribe audio
             words = self.transcribe_with_timestamps(audio_path)
@@ -142,29 +143,24 @@ class CaptionGenerator:
                 start_time = word_data["start"]
                 end_time = word_data["end"]
 
-                # Create bold, heavily stroked text clip for single word
-                txt_clip = TextClip(
+                txt_clip = MoviePyCompat.create_text_clip(
                     word_text,
                     font=font,
-                    fontsize=font_size,
+                    font_size=font_size,
                     color=text_color,
                     stroke_color=stroke_color,
                     stroke_width=stroke_width,
-                    method="label",
-                    align="center",
                 )
 
-                # Position center-bottom with padding
-                txt_clip = txt_clip.set_position(("center", "center"))
-
-                # Set exact timing from Whisper
-                txt_clip = txt_clip.set_start(start_time).set_end(end_time)
+                # Position center screen perfectly
+                txt_clip = MoviePyCompat.with_position(txt_clip, ("center", "center"))
+                txt_clip = MoviePyCompat.with_start(MoviePyCompat.with_duration(txt_clip, end_time - start_time), start_time)
 
                 # Add fade for smoother transitions
                 fade_duration = min(0.1, (end_time - start_time) * 0.2)
                 if fade_duration > 0.02:
-                    txt_clip = txt_clip.crossfadein(fade_duration)
-                    txt_clip = txt_clip.crossfadeout(fade_duration)
+                    txt_clip = MoviePyCompat.crossfadein(txt_clip, fade_duration)
+                    txt_clip = MoviePyCompat.crossfadeout(txt_clip, fade_duration)
 
                 caption_clips.append(txt_clip)
 
