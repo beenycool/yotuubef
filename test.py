@@ -44,7 +44,7 @@ NVIDIA_BASE_URL = os.getenv(
     "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
 ).rstrip("/")
 MODEL_PRIMARY = os.getenv("MODEL_QWEN", "qwen/qwen3.5-397b-a17b")
-MODEL_FALLBACK = os.getenv("MODEL_KIMI", "moonshotai/kimi-k2.5")
+MODEL_FALLBACK = os.getenv("MODEL_KIMI", "qwen/qwen3.5-397b-a17b")
 NVIDIA_CHAT_RETRIES = int(os.getenv("NVIDIA_CHAT_RETRIES", "3"))
 
 SEARCH_COUNT = int(os.getenv("SEARCH_COUNT", "6"))
