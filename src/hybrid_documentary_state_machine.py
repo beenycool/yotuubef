@@ -46,7 +46,7 @@ NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
 DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen3.5-397b-a17b")
 DEFAULT_TRANSCRIBE_MODEL = os.getenv(
-    "NVIDIA_TRANSCRIBE_MODEL", "openai/whisper-large-v3"
+    "NVIDIA_TRANSCRIBE_MODEL", "nvidia/parakeet-ctc-1.1b-asr"
 )
 
 
@@ -531,6 +531,10 @@ class HackclubMediaSearchClient:
             if not isinstance(url, str) or not url:
                 continue
 
+            # FIX: Filter out logos and icons aggressively
+            if any(x in url.lower() for x in['logo', 'icon', 'avatar', 'profile', 'badge', 'favicon']):
+                continue
+
             title = item.get("title") or item.get("name") or ""
             description = item.get("description") or item.get("snippet") or ""
             source = item.get("source") or item.get("domain") or "unknown"
@@ -540,6 +544,10 @@ class HackclubMediaSearchClient:
                 or item.get("image")
                 or ""
             )
+
+            # FIX: Filter out results where thumbnail_url indicates it's a logo
+            if isinstance(thumbnail_url, str) and ("'logo': true" in thumbnail_url.lower() or "'logo': True" in thumbnail_url):
+                continue
 
             parsed.append(
                 MediaSearchResult(

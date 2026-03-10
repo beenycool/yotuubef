@@ -518,21 +518,29 @@ def ensure_shorts_format(clip: VideoFileClip, target_duration: float = 60.0) -> 
     logger.info(f"Current aspect ratio: {current_aspect:.3f}, target: {target_aspect:.3f}")
     
     if abs(current_aspect - target_aspect) > 0.1:  # Needs aspect ratio correction
-        if current_aspect > target_aspect:  # Too wide, crop sides
+        if current_aspect > 1.0:  # Landscape image/video (e.g. 16:9 or wider like a tweet)
+            logger.info("Landscape content detected. Letterboxing instead of cropping to preserve content.")
+            # Resize width to target_width, keeping aspect ratio
+            clip = MoviePyCompat.resize(clip, width=target_width)
+            # Create black bg
+            from moviepy import ColorClip, CompositeVideoClip
+            bg = ColorClip(size=(target_width, target_height), color=(0,0,0)).set_duration(clip.duration)
+            clip = CompositeVideoClip([bg, clip.set_position('center')])
+        elif current_aspect > target_aspect:  # Too wide, but not landscape (e.g. 4:3)
             new_width = int(h * target_aspect)
             x1 = (w - new_width) // 2
             clip = MoviePyCompat.crop(clip, x1=x1, x2=x1 + new_width)
             logger.info(f"Cropped width from {w} to {new_width}")
+            clip = MoviePyCompat.resize(clip, (target_width, target_height))
         else:  # Too tall, crop top/bottom
             new_height = int(w / target_aspect)
             y1 = (h - new_height) // 2
             clip = MoviePyCompat.crop(clip, y1=y1, y2=y1 + new_height)
             logger.info(f"Cropped height from {h} to {new_height}")
-    
-    # Resize to target resolution
-    clip = MoviePyCompat.resize(clip, (target_width, target_height))
-    logger.info(f"Resized to {target_width}x{target_height} for YouTube Shorts")
-    
+            clip = MoviePyCompat.resize(clip, (target_width, target_height))
+    else:
+        clip = MoviePyCompat.resize(clip, (target_width, target_height))
+
     return clip
 
 
