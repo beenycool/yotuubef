@@ -46,7 +46,7 @@ NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
 DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen3.5-397b-a17b")
 DEFAULT_TRANSCRIBE_MODEL = os.getenv(
-    "NVIDIA_TRANSCRIBE_MODEL", "openai/whisper-large-v3"
+    "NVIDIA_TRANSCRIBE_MODEL", "nvidia/parakeet-ctc-1.1b-asr"
 )
 
 
