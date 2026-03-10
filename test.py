@@ -712,7 +712,7 @@ def remap_visual_asset_paths(script_payload: Dict[str, Any], assets: List[str], 
                     })
                     valid_assets.append(asset)
             except Exception as e:
-                pass
+                log_event("VLM_ASSET_LOAD_ERROR", f"Failed to process asset {asset}: {e}")
 
         if valid_assets:
             seg_text = "\n".join([f"Segment {i}: {s.get('narration', '')} | Directive: {s.get('visual_directive', '')}" for i, s in enumerate(segments)])
