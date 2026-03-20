@@ -2534,8 +2534,8 @@ Search results:
             return candidates
 
         try:
-            payload = ast.literal_eval(text)
-        except (ValueError, SyntaxError):
+            payload = json.loads(text)
+        except json.JSONDecodeError:
             return candidates
 
         if isinstance(payload, dict):
