@@ -183,7 +183,7 @@ class TTSService:
             Path to generated audio file or None if failed
         """
         if output_path is None:
-            output_path = Path(tempfile.mktemp(suffix=".wav"))
+            output_path = Path(tempfile.NamedTemporaryFile(suffix=".wav", delete=False).name)
 
         if QWEN_TTS_AVAILABLE:
             result = self._generate_with_qwen(segment, output_path)

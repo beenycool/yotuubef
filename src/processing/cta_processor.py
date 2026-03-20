@@ -440,7 +440,7 @@ class CTAProcessor:
             draw.text((x, y), text, fill=(255, 255, 255, 255), font=font)
             
             # Save to temporary file
-            temp_path = Path(tempfile.mktemp(suffix='.png'))
+            temp_path = Path(tempfile.NamedTemporaryFile(suffix='.png', delete=False).name)
             image.save(temp_path)
             return temp_path
             
