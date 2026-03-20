@@ -158,11 +158,14 @@ class ChannelManager:
             # Analyze and manage comments
             await self._manage_comments(video_id, video_info)
 
+            # Fetch analytics data once to avoid duplicate API calls
+            analytics_data = await self.youtube_client.get_video_analytics(video_id)
+
             # Check thumbnail performance
-            await self._manage_thumbnail_performance(video_id, video_info)
+            await self._manage_thumbnail_performance(video_id, video_info, analytics_data=analytics_data)
 
             # Update performance metrics
-            await self._update_video_metrics(video_id, video_info)
+            await self._update_video_metrics(video_id, video_info, analytics_data=analytics_data)
 
         except Exception as e:
             self.logger.error(f"Video management failed for {video_id}: {e}")
@@ -650,7 +653,7 @@ class ChannelManager:
             self.logger.error(f"Comment action execution failed: {e}")
 
     async def _manage_thumbnail_performance(
-        self, video_id: str, video_info: Dict[str, Any]
+        self, video_id: str, video_info: Dict[str, Any], analytics_data: Optional[Dict[str, Any]] = None
     ):
         """Manage thumbnail A/B testing and optimization"""
         try:
@@ -670,19 +673,19 @@ class ChannelManager:
 
             # Check if already testing
             if video_id in self.active_thumbnail_tests:
-                await self._check_specific_thumbnail_test(video_id)
+                await self._check_specific_thumbnail_test(video_id, analytics_data=analytics_data)
             else:
                 # Start new A/B test if conditions are met
-                await self._start_thumbnail_ab_test(video_id, video_info)
+                await self._start_thumbnail_ab_test(video_id, video_info, analytics_data=analytics_data)
 
         except Exception as e:
             self.logger.error(f"Thumbnail management failed for {video_id}: {e}")
 
-    async def _start_thumbnail_ab_test(self, video_id: str, video_info: Dict[str, Any]):
+    async def _start_thumbnail_ab_test(self, video_id: str, video_info: Dict[str, Any], analytics_data: Optional[Dict[str, Any]] = None):
         """Start A/B testing for thumbnail optimization"""
         try:
             # Get current video performance
-            current_stats = await self.youtube_client.get_video_analytics(video_id)
+            current_stats = analytics_data if analytics_data is not None else await self.youtube_client.get_video_analytics(video_id)
 
             if not current_stats:
                 return
@@ -739,13 +742,13 @@ class ChannelManager:
         except Exception as e:
             self.logger.error(f"Failed to start thumbnail A/B test: {e}")
 
-    async def _check_specific_thumbnail_test(self, video_id: str):
+    async def _check_specific_thumbnail_test(self, video_id: str, analytics_data: Optional[Dict[str, Any]] = None):
         """Check and potentially switch thumbnail variant for active test"""
         try:
             test_info = self.active_thumbnail_tests[video_id]
 
             # Get current performance
-            current_stats = await self.youtube_client.get_video_analytics(video_id)
+            current_stats = analytics_data if analytics_data is not None else await self.youtube_client.get_video_analytics(video_id)
             if not current_stats:
                 return
 
@@ -926,11 +929,11 @@ class ChannelManager:
             except Exception as e:
                 self.logger.error("Winner selection job failed for %s: %s", video_id, e)
 
-    async def _update_video_metrics(self, video_id: str, video_info: Dict[str, Any]):
+    async def _update_video_metrics(self, video_id: str, video_info: Dict[str, Any], analytics_data: Optional[Dict[str, Any]] = None):
         """Update video performance metrics"""
         try:
             # Get current analytics data
-            analytics = await self.youtube_client.get_video_analytics(video_id)
+            analytics = analytics_data if analytics_data is not None else await self.youtube_client.get_video_analytics(video_id)
 
             if analytics:
                 # Create performance metrics
