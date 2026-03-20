@@ -13,6 +13,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 import asyncio
 import logging
 import argparse
+from argparse import ArgumentParser
 import json
 import sys
 from typing import Dict, List, Optional, Any
@@ -636,9 +637,8 @@ class EnhancedYouTubeGenerator:
         print("=" * 50 + "\n")
 
 
-
-def setup_arg_parser() -> argparse.ArgumentParser:
-    """Setup and return the command line argument parser."""
+def setup_argparse() -> ArgumentParser:
+    """Setup and configure command line arguments."""
     parser = argparse.ArgumentParser(
         description="Enhanced AI-Powered YouTube Shorts Generator",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -801,138 +801,9 @@ Examples:
     return parser
 
 
-async def handle_find_command(generator: EnhancedYouTubeGenerator, args: argparse.Namespace) -> None:
-    """Handle the 'find' command."""
-    options = {
-        "enable_cinematic_effects": not args.no_cinematic,
-        "enable_advanced_audio_ducking": not args.no_audio_ducking,
-        "enable_ab_testing": not args.no_ab_testing,
-    }
-
-    result = await generator.find_and_process_videos(
-        max_videos=args.max_videos,
-        subreddit_names=args.subreddits,
-        sort_method=args.sort,
-        time_filter=args.time_filter,
-        dry_run=args.dry_run,
-        options=options,
-    )
-
-    if result.get("success"):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = Path(f"data/results/results_find_{timestamp}.json")
-        result_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(result_file, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"Results saved to: {result_file}")
-    else:
-        print(f"ERROR: Auto video finding failed: {result.get('error')}")
-
-
-async def handle_single_command(generator: EnhancedYouTubeGenerator, args: argparse.Namespace) -> None:
-    """Handle the 'single' command."""
-    options = {
-        "enable_cinematic_effects": not args.no_cinematic,
-        "enable_advanced_audio_ducking": not args.no_audio_ducking,
-        "enable_ab_testing": not args.no_ab_testing,
-    }
-
-    result = await generator.process_single_video(args.url, options)
-
-    if result.get("success"):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = Path(f"data/results/results_single_{timestamp}.json")
-        result_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(result_file, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"Results saved to: {result_file}")
-
-
-async def handle_batch_command(generator: EnhancedYouTubeGenerator, args: argparse.Namespace) -> None:
-    """Handle the 'batch' command."""
-    urls_file = Path(args.file)
-    if not urls_file.exists():
-        print(f"❌ File not found: {urls_file}")
-        return
-
-    with open(urls_file, "r") as f:
-        urls = [line.strip() for line in f if line.strip()]
-
-    if not urls:
-        print("❌ No URLs found in file")
-        return
-
-    options = {"max_concurrent_processing": args.max_concurrent}
-
-    result = await generator.process_batch_videos(urls, options)
-
-    if result.get("success"):
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = Path(f"data/results/results_batch_{timestamp}.json")
-        result_file.parent.mkdir(parents=True, exist_ok=True)
-        with open(result_file, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"Results saved to: {result_file}")
-
-
-async def handle_hybrid_command(generator: EnhancedYouTubeGenerator, args: argparse.Namespace) -> None:
-    """Handle the 'hybrid' command."""
-    result = await generator.process_hybrid_workflow(
-        project_name=args.project,
-        reddit_url=args.reddit_url,
-        resume=args.resume,
-        phase_override=args.phase,
-        gemini_report_path=args.gemini_report,
-        no_upload=args.no_upload,
-        no_auto_research=args.no_auto_research,
-    )
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
-    result_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(result_file, "w") as f:
-        json.dump(result, f, indent=2)
-    print(f"Results saved to: {result_file}")
-
-
-async def handle_manage_command(generator: EnhancedYouTubeGenerator) -> None:
-    """Handle the 'manage' command."""
-    await generator.start_proactive_management()
-
-
-async def handle_optimize_command(generator: EnhancedYouTubeGenerator, args: argparse.Namespace) -> None:
-    """Handle the 'optimize' command."""
-    result = await generator.run_system_optimization(force=args.force)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    result_file = Path(f"data/results/optimization_{timestamp}.json")
-    result_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(result_file, "w") as f:
-        json.dump(result, f, indent=2)
-    print(f"Optimization results saved to: {result_file}")
-
-
-async def handle_status_command(generator: EnhancedYouTubeGenerator) -> None:
-    """Handle the 'status' command."""
-    await generator.get_system_status()
-
-
-def handle_cleanup_command(args: argparse.Namespace) -> None:
-    """Handle the 'cleanup' command."""
-    print("🧹 Starting cleanup process...")
-    clear_temp_files()
-    clear_results()
-    if args.logs or args.all:
-        clear_logs()
-    if args.all:
-        # Add any other all-encompassing cleanup here
-        pass
-    print("✅ Cleanup process finished.")
-
-
 async def main():
     """Main entry point with CLI interface"""
-    parser = setup_arg_parser()
+    parser = setup_argparse()
     args = parser.parse_args()
 
     if not args.command:
@@ -953,21 +824,126 @@ async def main():
 
     try:
         if args.command == "find":
-            await handle_find_command(generator, args)
+            # Find and process videos automatically
+            options = {
+                "enable_cinematic_effects": not args.no_cinematic,
+                "enable_advanced_audio_ducking": not args.no_audio_ducking,
+                "enable_ab_testing": not args.no_ab_testing,
+            }
+
+            result = await generator.find_and_process_videos(
+                max_videos=args.max_videos,
+                subreddit_names=args.subreddits,
+                sort_method=args.sort,
+                time_filter=args.time_filter,
+                dry_run=args.dry_run,
+                options=options,
+            )
+
+            # Save result
+            if result.get("success"):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                result_file = Path(f"data/results/results_find_{timestamp}.json")
+                result_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(result_file, "w") as f:
+                    json.dump(result, f, indent=2)
+                print(f"Results saved to: {result_file}")
+            else:
+                print(f"ERROR: Auto video finding failed: {result.get('error')}")
+
         elif args.command == "single":
-            await handle_single_command(generator, args)
+            # Process single video
+            options = {
+                "enable_cinematic_effects": not args.no_cinematic,
+                "enable_advanced_audio_ducking": not args.no_audio_ducking,
+                "enable_ab_testing": not args.no_ab_testing,
+            }
+
+            result = await generator.process_single_video(args.url, options)
+
+            # Save result
+            if result.get("success"):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                result_file = Path(f"data/results/results_single_{timestamp}.json")
+                result_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(result_file, "w") as f:
+                    json.dump(result, f, indent=2)
+                print(f"Results saved to: {result_file}")
+
         elif args.command == "batch":
-            await handle_batch_command(generator, args)
+            # Process batch of videos
+            urls_file = Path(args.file)
+            if not urls_file.exists():
+                print(f"❌ File not found: {urls_file}")
+                return
+
+            with open(urls_file, "r") as f:
+                urls = [line.strip() for line in f if line.strip()]
+
+            if not urls:
+                print("❌ No URLs found in file")
+                return
+
+            options = {"max_concurrent_processing": args.max_concurrent}
+
+            result = await generator.process_batch_videos(urls, options)
+
+            # Save result
+            if result.get("success"):
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                result_file = Path(f"data/results/results_batch_{timestamp}.json")
+                result_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(result_file, "w") as f:
+                    json.dump(result, f, indent=2)
+                print(f"Results saved to: {result_file}")
+
         elif args.command == "hybrid":
-            await handle_hybrid_command(generator, args)
+            result = await generator.process_hybrid_workflow(
+                project_name=args.project,
+                reddit_url=args.reddit_url,
+                resume=args.resume,
+                phase_override=args.phase,
+                gemini_report_path=args.gemini_report,
+                no_upload=args.no_upload,
+                no_auto_research=args.no_auto_research,
+            )
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
+            result_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(result_file, "w") as f:
+                json.dump(result, f, indent=2)
+            print(f"Results saved to: {result_file}")
+
         elif args.command == "manage":
-            await handle_manage_command(generator)
+            # Start proactive management
+            await generator.start_proactive_management()
+
         elif args.command == "optimize":
-            await handle_optimize_command(generator, args)
+            # Run optimization
+            result = await generator.run_system_optimization(force=args.force)
+
+            # Save result
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            result_file = Path(f"data/results/optimization_{timestamp}.json")
+            result_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(result_file, "w") as f:
+                json.dump(result, f, indent=2)
+            print(f"Optimization results saved to: {result_file}")
+
         elif args.command == "status":
-            await handle_status_command(generator)
+            # Check system status
+            await generator.get_system_status()
+
         elif args.command == "cleanup":
-            handle_cleanup_command(args)
+            print("🧹 Starting cleanup process...")
+            clear_temp_files()
+            clear_results()
+            if args.logs or args.all:
+                clear_logs()
+            if args.all:
+                pass
+            print("✅ Cleanup process finished.")
     except KeyboardInterrupt:
         print("\n⏹️ Operation interrupted by user")
         print("Cleaning up resources...")
