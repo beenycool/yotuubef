@@ -220,6 +220,65 @@ class EnhancedYouTubeGenerator:
             self.logger.error(f"Hybrid workflow failed: {e}")
             return {"success": False, "error": str(e)}
 
+
+    async def _ensure_reddit_client(self) -> Dict[str, Any]:
+        """Initialize and verify Reddit client connection."""
+        if self.reddit_client is None:
+            from src.integrations.reddit_client import create_reddit_client
+            self.reddit_client = await create_reddit_client()
+
+        if not self.reddit_client.is_connected():
+            return {
+                "success": False,
+                "error": "Reddit client not connected. Please check your Reddit API credentials.",
+            }
+        return {"success": True}
+
+    async def _fetch_reddit_posts(self, max_videos: int, subreddit_names: Optional[List[str]]) -> Dict[str, Any]:
+        """Fetch potential posts from Reddit."""
+        fetch_pool = max_videos * 3
+        self.logger.info(
+            f"Fetching {fetch_pool} posts to evaluate top {max_videos} by AI story potential"
+        )
+
+        reddit_posts = await self.reddit_client.get_lore_text_posts(
+            subreddit_names=subreddit_names,
+            max_posts=fetch_pool,
+        )
+
+        if not reddit_posts:
+            return {
+                "success": False,
+                "error": "No suitable lore text posts found on Reddit",
+                "posts_found": 0,
+            }
+        return {"success": True, "posts": reddit_posts}
+
+    async def _score_and_sort_posts(self, reddit_posts: List[Any], max_videos: int) -> tuple[List[Any], List[Any]]:
+        """Score posts using AI and sort them by potential."""
+        self.logger.info(
+            f"Found {len(reddit_posts)} raw posts. Evaluating narrative potential via AI..."
+        )
+
+        scored_posts = []
+        for post in reddit_posts:
+            context = {
+                "title": post.title,
+                "subreddit": post.subreddit,
+                "selftext": post.selftext,
+            }
+            score = await self.orchestrator.ai_client.score_story_potential(context)
+            scored_posts.append((score, post))
+            self.logger.debug(f"Story Score {score}/100: {post.title[:40]}...")
+
+        scored_posts.sort(key=lambda x: x[0], reverse=True)
+        best_posts = [post for score, post in scored_posts[:max_videos]]
+
+        self.logger.info(
+            f"Selected the top {len(best_posts)} highest potential stories."
+        )
+        return best_posts, scored_posts
+
     async def find_and_process_videos(
         self,
         max_videos: int = 5,
@@ -248,60 +307,16 @@ class EnhancedYouTubeGenerator:
                 f"Finding lore text posts from Reddit (max: {max_videos}, sort: {sort_method})"
             )
 
-            # Initialize Reddit client if not already done
-            if self.reddit_client is None:
-                from src.integrations.reddit_client import create_reddit_client
+            client_status = await self._ensure_reddit_client()
+            if not client_status["success"]:
+                return client_status
 
-                self.reddit_client = await create_reddit_client()
+            fetch_result = await self._fetch_reddit_posts(max_videos, subreddit_names)
+            if not fetch_result["success"]:
+                return fetch_result
 
-            # Check if Reddit client is connected
-            if not self.reddit_client.is_connected():
-                return {
-                    "success": False,
-                    "error": "Reddit client not connected. Please check your Reddit API credentials.",
-                }
-
-            # Fetch 3x the max_videos so we have a pool to evaluate
-            fetch_pool = max_videos * 3
-            self.logger.info(
-                f"Fetching {fetch_pool} posts to evaluate top {max_videos} by AI story potential"
-            )
-
-            reddit_posts = await self.reddit_client.get_lore_text_posts(
-                subreddit_names=subreddit_names,
-                max_posts=fetch_pool,
-            )
-
-            if not reddit_posts:
-                return {
-                    "success": False,
-                    "error": "No suitable lore text posts found on Reddit",
-                    "posts_found": 0,
-                }
-
-            self.logger.info(
-                f"Found {len(reddit_posts)} raw posts. Evaluating narrative potential via AI..."
-            )
-
-            # Iterate and score all found posts
-            scored_posts = []
-            for post in reddit_posts:
-                context = {
-                    "title": post.title,
-                    "subreddit": post.subreddit,
-                    "selftext": post.selftext,
-                }
-                score = await self.orchestrator.ai_client.score_story_potential(context)
-                scored_posts.append((score, post))
-                self.logger.debug(f"Story Score {score}/100: {post.title[:40]}...")
-
-            # Sort by score descending and take the best ones
-            scored_posts.sort(key=lambda x: x[0], reverse=True)
-            best_posts = [post for score, post in scored_posts[:max_videos]]
-
-            self.logger.info(
-                f"Selected the top {len(best_posts)} highest potential stories."
-            )
+            reddit_posts = fetch_result["posts"]
+            best_posts, scored_posts = await self._score_and_sort_posts(reddit_posts, max_videos)
 
             # Create result dict for summary (using best_posts)
             result_summary = {"success": True, "posts": best_posts}
