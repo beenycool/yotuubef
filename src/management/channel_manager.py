@@ -236,15 +236,14 @@ class ChannelManager:
                         return await self._analyze_single_comment(c, video_context)
                     except Exception as e:
                         self.logger.warning(
-                            f"Failed to analyze comment {c.get('id', 'unknown')}: {e}"
-                        )
+                            f"Failed to analyze comment {c.get('id', 'unknown')}: {e}",
+                            exc_info=True,
+                            )
                         return None
 
                 tasks = [safe_analyze(c) for c in batch_comments]
                 results_gather = await asyncio.gather(*tasks)
-                for r in results_gather:
-                    if r is not None:
-                        analyses.append(r)
+                analyses.extend(r for r in results_gather if r is not None)
 
             # Create a map of comments for easy lookup
             comment_map = {c.get("id"): c for c in batch_comments}
