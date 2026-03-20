@@ -29,21 +29,21 @@ class BackgroundManager:
         folder_name = "minecraft"
 
         # Hybrid Routing Logic
-        if sub_lower in ["eve", "eveonline"] or any(
-            k in text_lower for k in ["eve online", "ccp games", "isk"]
+        if sub_lower in ("eve", "eveonline") or any(
+            k in text_lower for k in ("eve online", "ccp games", "isk")
         ):
             folder_name = "eve_online"
-        elif sub_lower in ["speedrun", "speedrun_drama", "summoningsalt"] or any(
+        elif sub_lower in ("speedrun", "speedrun_drama", "summoningsalt") or any(
             k in text_lower
-            for k in ["speedrun", "world record", "frame perfect", "glitchless"]
+            for k in ("speedrun", "world record", "frame perfect", "glitchless")
         ):
             folder_name = "speedrunning"
-        elif sub_lower in [
+        elif sub_lower in (
             "lostmedia",
             "defunctland",
             "internetmysteries",
-        ] or any(
-            k in text_lower for k in ["lost media", "unfound", "creepy", "abandoned"]
+        ) or any(
+            k in text_lower for k in ("lost media", "unfound", "creepy", "abandoned")
         ):
             folder_name = "creepy_static"
 
