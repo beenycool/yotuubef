@@ -419,26 +419,24 @@ class DatabaseManager:
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                update_fields = ["status = ?", "updated_at = ?"]
-                values = [status, datetime.now()]
-
-                if error_message is not None:
-                    update_fields.append("error_message = ?")
-                    values.append(error_message)
-
-                if youtube_url is not None:
-                    update_fields.append("youtube_url = ?")
-                    values.append(youtube_url)
-
-                if youtube_video_id is not None:
-                    update_fields.append("youtube_video_id = ?")
-                    values.append(youtube_video_id)
-
-                values.append(upload_id)
-
                 cursor.execute(
-                    f"UPDATE uploads SET {', '.join(update_fields)} WHERE id = ?",
-                    values,
+                    """
+                    UPDATE uploads
+                    SET status = ?,
+                        updated_at = ?,
+                        error_message = COALESCE(?, error_message),
+                        youtube_url = COALESCE(?, youtube_url),
+                        youtube_video_id = COALESCE(?, youtube_video_id)
+                    WHERE id = ?
+                    """,
+                    (
+                        status,
+                        datetime.now(),
+                        error_message,
+                        youtube_url,
+                        youtube_video_id,
+                        upload_id,
+                    ),
                 )
 
                 conn.commit()
