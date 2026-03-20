@@ -1,13 +1,16 @@
 from datetime import datetime, timezone
+import uuid
 import pytest
 
 from src.config.settings import init_config
 from src.integrations.reddit_client import ContentFilter, RedditPost
 
 
-def _post_with_title(title: str, is_video: bool = True, duration: float = 30) -> RedditPost:
+def _post_with_title(
+    title: str, is_video: bool = True, duration: float = 30
+) -> RedditPost:
     return RedditPost(
-        id="abc123",
+        id=str(uuid.uuid4()),
         title=title,
         url="https://example.com/video.mp4",
         subreddit="interesting",
@@ -24,7 +27,7 @@ def _post_with_title(title: str, is_video: bool = True, duration: float = 30) ->
         spoiler=False,
         width=1080,
         height=1920,
-        fps=30
+        fps=30,
     )
 
 
@@ -57,7 +60,13 @@ content:
     post_flagged_caution = _post_with_title("edge case video")
     post_blocked_2 = _post_with_title("banned video content")
 
-    posts = [post_suitable, post_blocked, post_flagged_demo, post_flagged_caution, post_blocked_2]
+    posts = [
+        post_suitable,
+        post_blocked,
+        post_flagged_demo,
+        post_flagged_caution,
+        post_blocked_2,
+    ]
     filtered_posts = content_filter.filter_posts(posts)
 
     # Should keep suitable and flagged (demonetization_risk or caution flag, but don't block)
@@ -69,6 +78,7 @@ content:
     # Should block hard_disallowed
     assert post_blocked not in filtered_posts
     assert post_blocked_2 not in filtered_posts
+
 
 def test_content_filter_filter_posts_quality_blocks(tmp_path):
     """Test filtering posts that fail quality metrics."""
@@ -102,12 +112,19 @@ content:
     # Too short
     post_short = _post_with_title("too short", duration=2)
 
-    # Low res
-    post_low_res = _post_with_title("low res")
-    post_low_res.width = 480
-    post_low_res.height = 360
+ # Low res
+ post_low_res = _post_with_title("low res")
+ post_low_res.width = 480
+ post_low_res.height = 360
 
-    posts = [post_good, post_low_score, post_controversial, post_short, post_low_res]
+ # Too long
+ post_long = _post_with_title("too long", duration=301)
+
+ # Low FPS
+ post_low_fps = _post_with_title("low fps")
+ post_low_fps.fps = 20
+
+ posts = [post_good, post_low_score, post_controversial, post_short, post_low_res, post_long, post_low_fps]
     filtered_posts = content_filter.filter_posts(posts)
 
     assert len(filtered_posts) == 1
