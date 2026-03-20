@@ -350,9 +350,7 @@ class TTSService:
                                 )
                                 if adjusted_path and adjusted_path.exists():
                                     audio_path = adjusted_path
-                                    from moviepy import AudioFileClip as AFC
-
-                                    adj_clip = AFC(str(adjusted_path))
+                                    adj_clip = AudioFileClip(str(adjusted_path))
                                     try:
                                         actual_duration = adj_clip.duration
                                     finally:
@@ -360,15 +358,29 @@ class TTSService:
                             else:
                                 self.logger.warning(
                                     f"Segment {i} requires speedup of {speed_factor:.2f}x "
-                                    f"(>{self.MAX_TTS_SPEEDUP_FACTOR}x), applying max speedup"
+                                    f"(>{self.MAX_TTS_SPEEDUP_FACTOR}x), applying max speedup and truncating to fit"
                                 )
+                                max_target_duration = actual_duration / self.MAX_TTS_SPEEDUP_FACTOR
                                 adjusted_path = self.adjust_audio_speed(
                                     audio_path,
-                                    target_duration=segment.intended_duration_seconds,
+                                    target_duration=max_target_duration,
                                     output_path=audio_path.with_suffix(".fit.wav"),
                                 )
                                 if adjusted_path and adjusted_path.exists():
                                     audio_path = adjusted_path
+
+                                    adj_clip = AudioFileClip(str(adjusted_path))
+                                    try:
+                                        if adj_clip.duration > segment.intended_duration_seconds:
+                                            # Truncate to prevent overlap
+                                            trunc_clip = adj_clip.subclip(0, segment.intended_duration_seconds)
+                                            trunc_path = adjusted_path.with_suffix(".trunc.wav")
+                                            trunc_clip.write_audiofile(str(trunc_path), logger=None)
+                                            audio_path = trunc_path
+                                            trunc_clip.close()
+                                    finally:
+                                        adj_clip.close()
+
                                     actual_duration = segment.intended_duration_seconds
 
                         result["actual_duration"] = actual_duration
