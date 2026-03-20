@@ -11,7 +11,7 @@ import re
 import tempfile
 import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Dict, List, Optional, Tuple, Any
 import subprocess
 import psutil
 import os
@@ -49,7 +49,6 @@ from src.models import (
     TextOverlay,
     NarrativeSegment,
     VisualCue,
-    CallToAction,
 )
 from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
@@ -334,7 +333,7 @@ class VideoDownloader:
                         # Final attempt with generic extractor for Reddit
                         if "v.redd.it" in url or "reddit.com" in url:
                             self.logger.warning(
-                                f"All fallbacks failed, trying generic Reddit extraction"
+                                "All fallbacks failed, trying generic Reddit extraction"
                             )
                             return self._try_generic_reddit_extraction(url, output_path)
                         else:
@@ -384,7 +383,7 @@ class VideoDownloader:
             # Configure yt-dlp options for audio extraction
             ydl_opts = {
                 "format": "bestaudio/best",  # Get best audio quality
-                "outtmpl": str(output_path.with_suffix(f".%(ext)s")),
+                "outtmpl": str(output_path.with_suffix(".%(ext)s")),
                 "quiet": True,
                 "no_warnings": True,
                 "extractaudio": True,  # Enable audio extraction
@@ -1447,13 +1446,23 @@ class AdvancedVideoEnhancer:
         self, clip: VideoFileClip, filter_string: str
     ) -> Optional[VideoFileClip]:
         """Apply FFmpeg filters using subprocess for professional quality"""
+        # Validate filter string to prevent command injection
+        # Only allow safe characters (alphanumeric, =, :, ., ,, -, _, space)
+        if not re.match(r"^[a-zA-Z0-9=:\.,\-\_ ]+$", filter_string):
+            self.logger.warning(
+                f"Security Warning: Invalid characters in FFmpeg filter string: {filter_string}"
+            )
+            return clip
+
         try:
             import tempfile
             import subprocess
 
-            # Create temporary files
-            input_path = tempfile.mktemp(suffix=".mp4")
-            output_path = tempfile.mktemp(suffix=".mp4")
+            # Create temporary files securely
+            fd_in, input_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd_in)
+            fd_out, output_path = tempfile.mkstemp(suffix=".mp4")
+            os.close(fd_out)
 
             # Write input clip to temporary file
             clip.write_videofile(input_path, logger=None)
@@ -2450,7 +2459,11 @@ class TemporaryFileManager:
 
     def create_temp_file(self, suffix: str = "", prefix: str = "video_proc_") -> Path:
         """Create and register a temporary file"""
-        temp_file = Path(tempfile.mktemp(suffix=suffix, prefix=prefix))
+        fd, temp_file_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
+        import os
+
+        os.close(fd)
+        temp_file = Path(temp_file_path)
         return self.register_file(temp_file)
 
     def create_temp_dir(self, prefix: str = "video_proc_") -> Path:
@@ -2885,9 +2898,7 @@ class VideoProcessor:
             # Create background music with basic processing
             try:
                 from moviepy.audio.io.AudioFileClip import AudioFileClip
-                from moviepy.editor import concatenate_audioclips
                 from src.processing.video_processor_fixes import MoviePyCompat
-                import math
 
                 music_clip = AudioFileClip(str(selected_music))
                 resource_manager.register_clip(music_clip)
@@ -2895,7 +2906,6 @@ class VideoProcessor:
                 # Adjust duration to match video
                 if music_clip.duration < video_duration:
                     # Loop the music if it's shorter than video
-                    loops_needed = int(video_duration / music_clip.duration) + 1
                     music_clip = music_clip.loop(duration=video_duration)
                     resource_manager.register_clip(music_clip)
                 elif music_clip.duration > video_duration:
@@ -3129,7 +3139,7 @@ class VideoProcessor:
             self.logger.info(f"Starting video render to: {output_path}")
             return self._write_video_with_retry(final_clip, output_path, temp_manager)
 
-        except Exception as e:
+        except Exception:
             self.logger.error("Error in video rendering", exc_info=True)
             return False
 
@@ -3459,7 +3469,7 @@ class VideoProcessor:
                     try:
                         if temp_output and temp_output.exists():
                             temp_output.unlink()
-                    except:
+                    except Exception:
                         pass
 
         return False
@@ -3536,7 +3546,6 @@ class VideoProcessor:
                 codec = optimal_settings["codec"]
                 preset = optimal_settings["preset"]
                 crf = optimal_settings["crf"]
-                bitrate = optimal_settings["bitrate"]
                 optimal_threads = optimal_settings["threads"]
                 ffmpeg_extra_args = optimal_settings["ffmpeg_params"]
                 additional_params = optimal_settings["additional_params"]
@@ -3549,7 +3558,6 @@ class VideoProcessor:
                 codec = self.config.video.video_codec_cpu
                 preset = self.config.video.ffmpeg_cpu_preset
                 crf = self.config.video.ffmpeg_crf_cpu
-                bitrate = self.config.video.video_bitrate_high
                 optimal_threads = psutil.cpu_count() or 4
                 ffmpeg_extra_args = []
                 additional_params = {}
@@ -3606,7 +3614,7 @@ class VideoProcessor:
             encoding_time = time.time() - start_time
             self.logger.info(f"Video encoding completed in {encoding_time:.2f} seconds")
 
-        except Exception as e:
+        except Exception:
             self.logger.error("Error writing video", exc_info=True)
             raise
 
