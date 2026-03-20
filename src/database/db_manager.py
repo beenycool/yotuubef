@@ -8,7 +8,7 @@ import logging
 import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
-from datetime import datetime
+from datetime import datetime, timezone
 from contextlib import contextmanager
 
 from src.config.settings import get_config
@@ -431,7 +431,7 @@ class DatabaseManager:
                     """,
                     (
                         status,
-                        datetime.now(),
+                        datetime.now(timezone.utc),
                         error_message,
                         youtube_url,
                         youtube_video_id,
