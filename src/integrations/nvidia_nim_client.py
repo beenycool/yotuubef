@@ -441,12 +441,10 @@ class NvidiaNimAIClient:
         """Fallback analysis when NVIDIA NIM is not available"""
         try:
             title = context.get("title", "Video")
-            duration = context.get("duration", 60)
-            score = context.get("score", 0)
+ duration = context.get("duration", 60)
+ score = context.get("score", 0)
 
-            min(100, max(30, score // 10 + 50))
-
-            mood = "exciting"
+ mood = "exciting"
             title_lower = title.lower()
             if any(word in title_lower for word in {"calm", "peaceful", "relaxing"}):
                 mood = "calm"
@@ -555,14 +553,14 @@ class NvidiaNimAIClient:
 
         title_lower = title.lower()
 
-        if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
-            hashtags.extend({"#funny", "#comedy"})
-        elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
-            hashtags.extend({"#amazing", "#mindblowing"})
-        elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
-            hashtags.extend({"#howto", "#tutorial"})
-        elif any(word in title_lower for word in {"reaction", "responds"}):
-            hashtags.extend({"#reaction", "#response"})
+ if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
+ hashtags.extend(("#funny", "#comedy"))
+ elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
+ hashtags.extend(("#amazing", "#mindblowing"))
+ elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
+ hashtags.extend(("#howto", "#tutorial"))
+ elif any(word in title_lower for word in {"reaction", "responds"}):
+ hashtags.extend(("#reaction", "#response"))
 
         hashtags.extend(["#trending", "#fyp", "#explore"])
 
