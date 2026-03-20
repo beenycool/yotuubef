@@ -92,9 +92,23 @@ def test_speed_effect_valid():
     assert effect.end_seconds == 5.0
 
 
-def test_speed_effect_invalid_time_range():
-    with pytest.raises(ValidationError):
-        SpeedEffect(start_seconds=5.0, end_seconds=1.0, speed_factor=2.0)
+@pytest.mark.parametrize(
+    "start_seconds, end_seconds",
+    [
+        pytest.param(5.0, 1.0, id="end_less_than_start"),
+        pytest.param(5.0, 5.0, id="end_equal_to_start"),
+    ],
+)
+def test_speed_effect_invalid_time_range(start_seconds, end_seconds):
+    # End time less than or equal to start time should fail
+    with pytest.raises(ValidationError) as excinfo:
+        SpeedEffect(
+            start_seconds=start_seconds, end_seconds=end_seconds, speed_factor=1.5
+        )
+    errors = excinfo.value.errors()
+    assert len(errors) == 1
+    assert errors[0]["loc"] == ("end_seconds",)
+    assert "End time must be greater than start time" in errors[0]["msg"]
 
 
 def test_speed_effect_invalid_start_time_does_not_break_validator():
