@@ -573,19 +573,30 @@ def ensure_shorts_format(
         f"Current aspect ratio: {current_aspect:.3f}, target: {target_aspect:.3f}"
     )
 
-    if abs(current_aspect - target_aspect) > 0.01:
-        logger.info(f"Letterboxing clip from {w}x{h} to {target_width}x{target_height}")
-        if current_aspect > target_aspect:
-            # Wider: fit to width
-            clip = MoviePyCompat.resize(clip, width=target_width)
+    if abs(current_aspect - target_aspect) > 0.1:
+        if current_aspect > 1.0:
+            logger.info(
+                "Landscape content detected. Letterboxing instead of cropping to preserve content."
+            )
+            scaled_height = int(round(target_width / current_aspect))
+            clip = MoviePyCompat.resize(clip, (target_width, scaled_height))
+            bg = MoviePyCompat.with_duration(
+                ColorClip(size=(target_width, target_height), color=(0, 0, 0)),
+                clip.duration,
+            )
+            clip = CompositeVideoClip([bg, MoviePyCompat.with_position(clip, "center")])
+        elif current_aspect > target_aspect:
+            new_width = int(h * target_aspect)
+            x1 = (w - new_width) // 2
+            clip = MoviePyCompat.crop(clip, x1=x1, x2=x1 + new_width)
+            logger.info(f"Cropped width from {w} to {new_width}")
+            clip = MoviePyCompat.resize(clip, (target_width, target_height))
         else:
-            # Taller: fit to height
-            clip = MoviePyCompat.resize(clip, height=target_height)
-
-        bg = ColorClipImport(size=(target_width, target_height), color=(0, 0, 0))
-        bg = MoviePyCompat.with_duration(bg, clip.duration)
-        clip = MoviePyCompat.with_position(clip, "center")
-        clip = CompositeVideoClipImport([bg, clip])
+            new_height = int(w / target_aspect)
+            y1 = (h - new_height) // 2
+            clip = MoviePyCompat.crop(clip, y1=y1, y2=y1 + new_height)
+            logger.info(f"Cropped height from {h} to {new_height}")
+            clip = MoviePyCompat.resize(clip, (target_width, target_height))
     else:
         clip = MoviePyCompat.resize(clip, (target_width, target_height))
 

@@ -531,6 +531,13 @@ class HackclubMediaSearchClient:
             if not isinstance(url, str) or not url:
                 continue
 
+            # FIX: Filter out logos and icons by checking filename only
+            url_path = url.split("?")[0].split("#")[0]
+            filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
+            filename_lower = filename.lower()
+            if any(kw in filename_lower for kw in LOGO_FILTER_KEYWORDS):
+                continue
+
             title = item.get("title") or item.get("name") or ""
             description = item.get("description") or item.get("snippet") or ""
             source = item.get("source") or item.get("domain") or "unknown"
@@ -542,16 +549,26 @@ class HackclubMediaSearchClient:
             )
 
             # Strict filtering for logos, icons, and avatars
-            url_lower = str(url).lower()
-            title_lower = str(title).lower()
-            BAD_KEYWORDS = {"logo", "icon", "avatar"}
-
             if item.get("logo") is True:
                 continue
-            if any(bad in url_lower for bad in BAD_KEYWORDS | {"profile"}):
+            title_lower = str(title).lower()
+            if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
                 continue
-            if any(bad in title_lower for bad in BAD_KEYWORDS):
-                continue
+
+            # FIX: Filter out results where thumbnail_url indicates it's a logo
+            if (
+                isinstance(thumbnail_url, str)
+                and "'logo': true" in thumbnail_url.lower()
+            ):
+                try:
+                    import ast
+
+                    if isinstance(ast.literal_eval(thumbnail_url), dict):
+                        parsed_thumb = ast.literal_eval(thumbnail_url)
+                        if parsed_thumb.get("logo"):
+                            continue
+                except Exception:
+                    pass
 
             parsed.append(
                 MediaSearchResult(
