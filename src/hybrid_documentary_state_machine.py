@@ -556,19 +556,29 @@ class HackclubMediaSearchClient:
             if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
                 continue
 
-            # FIX: Filter out results where thumbnail_url indicates it's a logo
-            if isinstance(thumbnail_url, str) and thumbnail_url.strip().startswith("{"):
-                parsed_thumb = None
+    # FIX: Filter out results where thumbnail_url indicates it's a logo
+    if isinstance(thumbnail_url, dict):
+        if thumbnail_url.get("logo"):
+            continue
+        thumbnail_url = (
+            thumbnail_url.get("url") or thumbnail_url.get("src") or str(thumbnail_url)
+        )
+    elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
+            parsed_thumb = None
+            try:
+                parsed_thumb = json.loads(thumbnail_url)
+            except json.JSONDecodeError:
                 try:
-                    parsed_thumb = json.loads(thumbnail_url)
-                except json.JSONDecodeError:
-                    try:
-                        parsed_thumb = ast.literal_eval(thumbnail_url)
-                    except (ValueError, SyntaxError):
-                        pass  # Not a valid literal, ignore.
+                    parsed_thumb = ast.literal_eval(thumbnail_url)
+                except (ValueError, SyntaxError):
+                    pass  # Not a parsable dict-like string
 
-                if isinstance(parsed_thumb, dict) and parsed_thumb.get("logo"):
+            if isinstance(parsed_thumb, dict):
+                if parsed_thumb.get("logo"):
                     continue
+                thumbnail_url = (
+                    parsed_thumb.get("url") or parsed_thumb.get("src") or thumbnail_url
+                )
 
             parsed.append(
                 MediaSearchResult(
