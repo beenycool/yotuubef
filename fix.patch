@@ -1,0 +1,26 @@
+--- src/processing/video_processor.py
++++ src/processing/video_processor.py
+@@ -1452,8 +1452,10 @@
+             import subprocess
+
+             # Create temporary files
+-            input_path = tempfile.mktemp(suffix=".mp4")
+-            output_path = tempfile.mktemp(suffix=".mp4")
++            fd_in, input_path = tempfile.mkstemp(suffix=".mp4")
++            os.close(fd_in)
++            fd_out, output_path = tempfile.mkstemp(suffix=".mp4")
++            os.close(fd_out)
+
+             # Write input clip to temporary file
+             clip.write_videofile(input_path, logger=None)
+@@ -2452,7 +2454,9 @@
+
+     def create_temp_file(self, suffix: str = "", prefix: str = "video_proc_") -> Path:
+         """Create and register a temporary file"""
+-        temp_file = Path(tempfile.mktemp(suffix=suffix, prefix=prefix))
++        fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
++        os.close(fd)
++        temp_file = Path(temp_path)
+         return self.register_file(temp_file)
+
+     def create_temp_dir(self, prefix: str = "video_proc_") -> Path:
