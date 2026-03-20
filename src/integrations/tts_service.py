@@ -6,6 +6,7 @@ Optimized for GPU memory usage with constrained VRAM environments.
 
 import logging
 import importlib
+import importlib.util
 from moviepy import AudioFileClip
 
 from src.config.settings import get_config
@@ -43,25 +44,9 @@ except ModuleNotFoundError:
     _librosa = None
     LIBROSA_AVAILABLE = False
 
-try:
-    import elevenlabs
-    from elevenlabs import Voice, VoiceSettings, generate, save
+ELEVENLABS_AVAILABLE = importlib.util.find_spec("elevenlabs") is not None
 
-    ELEVENLABS_AVAILABLE = True
-except ImportError:
-    ELEVENLABS_AVAILABLE = False
-
-try:
-    from dia.model import Dia
-
-    DIA_AVAILABLE = True
-except ImportError:
-    try:
-        from dia import Dia
-
-        DIA_AVAILABLE = True
-    except ImportError:
-        DIA_AVAILABLE = False
+DIA_AVAILABLE = importlib.util.find_spec("dia") is not None
 
 if TORCH_AVAILABLE and SOUNDFILE_AVAILABLE:
     try:
