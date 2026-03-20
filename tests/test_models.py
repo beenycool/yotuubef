@@ -9,9 +9,7 @@ from src.models import (
     VisualCue,
     TextOverlay,
     NarrativeSegment,
-    FocusPoint,
     SpeedEffect,
-    SoundEffect,
     VideoSegment,
     HookMoment,
     AudioHook,
@@ -20,12 +18,9 @@ from src.models import (
     VideoAnalysis,
     CameraMovement,
     AudioDuckingConfig,
-    ThumbnailVariant,
-    EnhancementOptimization,
-    CommentEngagement,
-    PerformanceMetrics,
     VideoAnalysisEnhanced,
 )
+
 
 def test_visual_cue_valid():
     cue = VisualCue(
@@ -33,10 +28,11 @@ def test_visual_cue_valid():
         description="Explosion effect",
         effect_type=EffectType.ZOOM,
         intensity=1.5,
-        duration=2.0
+        duration=2.0,
     )
     assert cue.timestamp_seconds == 1.5
     assert cue.description == "Explosion effect"
+
 
 def test_visual_cue_invalid_duration():
     with pytest.raises(ValidationError):
@@ -45,8 +41,9 @@ def test_visual_cue_invalid_duration():
             description="Explosion effect",
             effect_type=EffectType.ZOOM,
             intensity=1.5,
-            duration=20.0 # Exceeds max 10.0
+            duration=20.0,  # Exceeds max 10.0
         )
+
 
 def test_text_overlay_valid():
     overlay = TextOverlay(
@@ -54,17 +51,19 @@ def test_text_overlay_valid():
         timestamp_seconds=5.0,
         duration=3.0,
         position=PositionType.BOTTOM,
-        style=TextStyle.BOLD
+        style=TextStyle.BOLD,
     )
     assert overlay.text == "Hello World"
+
 
 def test_text_overlay_invalid_text():
     with pytest.raises(ValidationError):
         TextOverlay(
-            text="   ", # Empty text
+            text="   ",  # Empty text
             timestamp_seconds=5.0,
-            duration=3.0
+            duration=3.0,
         )
+
 
 def test_narrative_segment_valid():
     seg = NarrativeSegment(
@@ -72,33 +71,41 @@ def test_narrative_segment_valid():
         time_seconds=0.0,
         intended_duration_seconds=5.0,
         emotion=EmotionType.EXCITED,
-        pacing=PacingType.FAST
+        pacing=PacingType.FAST,
     )
     assert seg.text == "This is a story"
+
 
 def test_narrative_segment_invalid_duration():
     with pytest.raises(ValidationError):
         NarrativeSegment(
             text="This is a story",
             time_seconds=0.0,
-            intended_duration_seconds=40.0 # Exceeds max 30.0
+            intended_duration_seconds=40.0,  # Exceeds max 30.0
         )
 
-def test_speed_effect_validation():
-    # Valid
-    SpeedEffect(start_seconds=1.0, end_seconds=5.0, speed_factor=2.0)
 
-    # Invalid: end <= start
+def test_speed_effect_valid():
+    effect = SpeedEffect(start_seconds=1.0, end_seconds=5.0, speed_factor=2.0)
+    assert effect.start_seconds == 1.0
+    assert effect.end_seconds == 5.0
+
+
+def test_speed_effect_invalid_time_range():
     with pytest.raises(ValidationError):
         SpeedEffect(start_seconds=5.0, end_seconds=1.0, speed_factor=2.0)
 
-def test_video_segment_validation():
-    # Valid
-    VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="Action scene")
 
-    # Invalid: end <= start
+def test_video_segment_valid():
+    segment = VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="Action scene")
+    assert segment.start_seconds == 10.0
+    assert segment.end_seconds == 20.0
+
+
+def test_video_segment_invalid_time_range():
     with pytest.raises(ValidationError):
         VideoSegment(start_seconds=20.0, end_seconds=10.0, reason="Action scene")
+
 
 def test_video_analysis_valid():
     analysis = VideoAnalysis(
@@ -114,12 +121,15 @@ def test_video_analysis_valid():
         best_segment=VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="best"),
         segments=[VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="part 1")],
         music_genres=["pop"],
-        hashtags=["#test", "cool"], # Should auto-add # to cool
-        thumbnail_info=ThumbnailInfo(timestamp_seconds=5.0, reason="face", headline_text="Wow"),
-        call_to_action=CallToAction(text="Subscribe", type="text")
+        hashtags=["#test", "cool"],  # Should auto-add # to cool
+        thumbnail_info=ThumbnailInfo(
+            timestamp_seconds=5.0, reason="face", headline_text="Wow"
+        ),
+        call_to_action=CallToAction(text="Subscribe", type="text"),
     )
     assert analysis.suggested_title == "Test Video"
     assert "#cool" in analysis.hashtags
+
 
 def test_video_analysis_invalid_hook_variations():
     with pytest.raises(ValidationError):
@@ -130,16 +140,25 @@ def test_video_analysis_invalid_hook_variations():
             has_clear_narrative=True,
             original_audio_is_key=False,
             hook_text="Look at this!",
-            hook_variations=["Hook 1", "Hook 1"], # Duplicate
+            hook_variations=["Hook 1", "Hook 1"],  # Duplicate
             visual_hook_moment=HookMoment(timestamp_seconds=2.0, description="Jump"),
-            audio_hook=AudioHook(type="sfx", sound_name="whoosh", timestamp_seconds=2.0),
-            best_segment=VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="best"),
-            segments=[VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="part 1")],
+            audio_hook=AudioHook(
+                type="sfx", sound_name="whoosh", timestamp_seconds=2.0
+            ),
+            best_segment=VideoSegment(
+                start_seconds=10.0, end_seconds=20.0, reason="best"
+            ),
+            segments=[
+                VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="part 1")
+            ],
             music_genres=["pop"],
             hashtags=["#test"],
-            thumbnail_info=ThumbnailInfo(timestamp_seconds=5.0, reason="face", headline_text="Wow"),
-            call_to_action=CallToAction(text="Subscribe", type="text")
+            thumbnail_info=ThumbnailInfo(
+                timestamp_seconds=5.0, reason="face", headline_text="Wow"
+            ),
+            call_to_action=CallToAction(text="Subscribe", type="text"),
         )
+
 
 def test_video_analysis_invalid_hashtags():
     with pytest.raises(ValidationError):
@@ -152,14 +171,23 @@ def test_video_analysis_invalid_hashtags():
             hook_text="Look at this!",
             hook_variations=["Hook 1", "Hook 2"],
             visual_hook_moment=HookMoment(timestamp_seconds=2.0, description="Jump"),
-            audio_hook=AudioHook(type="sfx", sound_name="whoosh", timestamp_seconds=2.0),
-            best_segment=VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="best"),
-            segments=[VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="part 1")],
+            audio_hook=AudioHook(
+                type="sfx", sound_name="whoosh", timestamp_seconds=2.0
+            ),
+            best_segment=VideoSegment(
+                start_seconds=10.0, end_seconds=20.0, reason="best"
+            ),
+            segments=[
+                VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="part 1")
+            ],
             music_genres=["pop"],
-            hashtags=["   ", "!@#"], # Invalid hashtags
-            thumbnail_info=ThumbnailInfo(timestamp_seconds=5.0, reason="face", headline_text="Wow"),
-            call_to_action=CallToAction(text="Subscribe", type="text")
+            hashtags=["   ", "!@#"],  # Invalid hashtags
+            thumbnail_info=ThumbnailInfo(
+                timestamp_seconds=5.0, reason="face", headline_text="Wow"
+            ),
+            call_to_action=CallToAction(text="Subscribe", type="text"),
         )
+
 
 def test_video_analysis_consistency():
     with pytest.raises(ValidationError):
@@ -172,14 +200,23 @@ def test_video_analysis_consistency():
             hook_text="Look at this!",
             hook_variations=["Hook 1", "Hook 2"],
             visual_hook_moment=HookMoment(timestamp_seconds=2.0, description="Jump"),
-            audio_hook=AudioHook(type="sfx", sound_name="whoosh", timestamp_seconds=2.0),
-            best_segment=VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="best"),
-            segments=[VideoSegment(start_seconds=10.0, end_seconds=400.0, reason="too long")], # > 300
+            audio_hook=AudioHook(
+                type="sfx", sound_name="whoosh", timestamp_seconds=2.0
+            ),
+            best_segment=VideoSegment(
+                start_seconds=10.0, end_seconds=20.0, reason="best"
+            ),
+            segments=[
+                VideoSegment(start_seconds=10.0, end_seconds=400.0, reason="too long")
+            ],  # > 300
             music_genres=["pop"],
             hashtags=["#test"],
-            thumbnail_info=ThumbnailInfo(timestamp_seconds=5.0, reason="face", headline_text="Wow"),
-            call_to_action=CallToAction(text="Subscribe", type="text")
+            thumbnail_info=ThumbnailInfo(
+                timestamp_seconds=5.0, reason="face", headline_text="Wow"
+            ),
+            call_to_action=CallToAction(text="Subscribe", type="text"),
         )
+
 
 def test_video_analysis_fallback_defaults():
     # Use construct to bypass validation for this specific test of the method
@@ -188,25 +225,29 @@ def test_video_analysis_fallback_defaults():
     assert defaults["suggested_title"] == "Amazing Video Content"
     assert defaults["fallback"] is True
 
-def test_camera_movement_validation():
-    # Valid
-    CameraMovement(
+
+def test_camera_movement_valid():
+    movement = CameraMovement(
         start_time=1.0,
         end_time=5.0,
         movement_type="pan",
         start_position=(0.0, 0.0),
-        end_position=(1.0, 1.0)
+        end_position=(1.0, 1.0),
     )
+    assert movement.start_time == 1.0
+    assert movement.end_time == 5.0
 
-    # Invalid: end <= start
+
+def test_camera_movement_invalid_time_range():
     with pytest.raises(ValidationError):
         CameraMovement(
             start_time=5.0,
             end_time=1.0,
             movement_type="pan",
             start_position=(0.0, 0.0),
-            end_position=(1.0, 1.0)
+            end_position=(1.0, 1.0),
         )
+
 
 def test_video_analysis_enhanced_valid():
     analysis = VideoAnalysisEnhanced(
@@ -223,9 +264,13 @@ def test_video_analysis_enhanced_valid():
         segments=[VideoSegment(start_seconds=10.0, end_seconds=20.0, reason="part 1")],
         music_genres=["pop"],
         hashtags=["#test"],
-        thumbnail_info=ThumbnailInfo(timestamp_seconds=5.0, reason="face", headline_text="Wow"),
+        thumbnail_info=ThumbnailInfo(
+            timestamp_seconds=5.0, reason="face", headline_text="Wow"
+        ),
         call_to_action=CallToAction(text="Subscribe", type="text"),
-        audio_ducking_config=AudioDuckingConfig(duck_during_narration=True, duck_volume=0.5)
+        audio_ducking_config=AudioDuckingConfig(
+            duck_during_narration=True, duck_volume=0.5
+        ),
     )
     assert analysis.suggested_title == "Enhanced Video"
     assert analysis.audio_ducking_config.duck_volume == 0.5
