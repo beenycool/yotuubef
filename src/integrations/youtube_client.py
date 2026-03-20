@@ -16,7 +16,7 @@ try:
     from googleapiclient.http import MediaFileUpload
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
+    # from google_auth_oauthlib.flow import InstalledAppFlow
 
     GOOGLE_API_AVAILABLE = True
 except ImportError:
@@ -241,8 +241,8 @@ class YouTubeClient:
             }
 
             # Upload video
-            media = MediaFileUpload(
-                video_path, chunksize=-1, resumable=True, mimetype="video/*"
+            media = await asyncio.to_thread(
+                MediaFileUpload, video_path, chunksize=-1, resumable=True, mimetype="video/*"
             )
 
             # Execute upload
@@ -294,7 +294,9 @@ class YouTubeClient:
             self.logger.info(f"Updating thumbnail for video {video_id}")
 
             # Upload thumbnail
-            media = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+            media = await asyncio.to_thread(
+                MediaFileUpload, thumbnail_path, mimetype="image/jpeg"
+            )
 
             request = self.youtube_service.thumbnails().set(
                 videoId=video_id, media_body=media
