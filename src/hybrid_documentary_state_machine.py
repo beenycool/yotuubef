@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import logging
 import os
@@ -556,22 +557,18 @@ class HackclubMediaSearchClient:
                 continue
 
             # FIX: Filter out results where thumbnail_url indicates it's a logo
-            if isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
+            if isinstance(thumbnail_url, str) and thumbnail_url.strip().startswith("{"):
+                parsed_thumb = None
                 try:
-                    parsed_thumb = None
+                    parsed_thumb = json.loads(thumbnail_url)
+                except json.JSONDecodeError:
                     try:
-                        parsed_thumb = json.loads(thumbnail_url)
-                    except json.JSONDecodeError:
-                        import ast
-                        try:
-                            parsed_thumb = ast.literal_eval(thumbnail_url)
-                        except Exception:
-                            pass
+                        parsed_thumb = ast.literal_eval(thumbnail_url)
+                    except (ValueError, SyntaxError):
+                        pass  # Not a valid literal, ignore.
 
-                    if isinstance(parsed_thumb, dict) and parsed_thumb.get("logo"):
-                        continue
-                except Exception:
-                    pass
+                if isinstance(parsed_thumb, dict) and parsed_thumb.get("logo"):
+                    continue
 
             parsed.append(
                 MediaSearchResult(
