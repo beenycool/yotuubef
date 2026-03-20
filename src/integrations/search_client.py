@@ -230,13 +230,13 @@ class AgenticResearcher:
         if turn == 0:
             return [
                 normalized_topic,
-                f"{normalized_topic} timeline key events",
-                f"{normalized_topic} controversy investigation",
+                f"{normalized_topic} forum archive screenshot", # Added to find UI/forum proof
+                f"{normalized_topic} controversy timeline",
             ]
 
         variants = [
-            f"{normalized_topic} primary sources",
-            f"{normalized_topic} official statements",
+            f"{normalized_topic} primary sources evidence",
+            f"{normalized_topic} original post screenshot", # Forces image results of the actual post
             f"{normalized_topic} fact check",
         ]
 
