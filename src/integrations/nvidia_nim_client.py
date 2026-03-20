@@ -441,26 +441,24 @@ class NvidiaNimAIClient:
         """Fallback analysis when NVIDIA NIM is not available"""
         try:
             title = context.get("title", "Video")
-            duration = context.get("duration", 60)
-            score = context.get("score", 0)
+ duration = context.get("duration", 60)
+ score = context.get("score", 0)
 
-            engagement_score = min(100, max(30, score // 10 + 50))
-
-            mood = "exciting"
+ mood = "exciting"
             title_lower = title.lower()
-            if any(word in title_lower for word in ["calm", "peaceful", "relaxing"]):
+            if any(word in title_lower for word in {"calm", "peaceful", "relaxing"}):
                 mood = "calm"
             elif any(
-                word in title_lower for word in ["dramatic", "intense", "serious"]
+                word in title_lower for word in {"dramatic", "intense", "serious"}
             ):
                 mood = "dramatic"
-            elif any(word in title_lower for word in ["funny", "hilarious", "comedy"]):
+            elif any(word in title_lower for word in {"funny", "hilarious", "comedy"}):
                 mood = "humorous"
 
             hook_base = "You won't believe this!"
             if "how to" in title_lower:
                 hook_base = "Learn this amazing trick!"
-            elif any(word in title_lower for word in ["secret", "hidden", "revealed"]):
+            elif any(word in title_lower for word in {"secret", "hidden", "revealed"}):
                 hook_base = "The secret is finally revealed!"
 
             analysis = {
@@ -512,7 +510,7 @@ class NvidiaNimAIClient:
                 .strip()
             )
 
-            engagement_words = ["Amazing", "Incredible", "Shocking", "Unbelievable"]
+            engagement_words = {"Amazing", "Incredible", "Shocking", "Unbelievable"}
             title_lower = title.lower()
 
             if not any(word.lower() in title_lower for word in engagement_words):
@@ -555,14 +553,14 @@ class NvidiaNimAIClient:
 
         title_lower = title.lower()
 
-        if any(word in title_lower for word in ["funny", "comedy", "hilarious"]):
-            hashtags.extend(["#funny", "#comedy"])
-        elif any(word in title_lower for word in ["amazing", "incredible", "wow"]):
-            hashtags.extend(["#amazing", "#mindblowing"])
-        elif any(word in title_lower for word in ["how to", "tutorial", "guide"]):
-            hashtags.extend(["#howto", "#tutorial"])
-        elif any(word in title_lower for word in ["reaction", "responds"]):
-            hashtags.extend(["#reaction", "#response"])
+ if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
+ hashtags.extend(("#funny", "#comedy"))
+ elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
+ hashtags.extend(("#amazing", "#mindblowing"))
+ elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
+ hashtags.extend(("#howto", "#tutorial"))
+ elif any(word in title_lower for word in {"reaction", "responds"}):
+ hashtags.extend(("#reaction", "#response"))
 
         hashtags.extend(["#trending", "#fyp", "#explore"])
 
@@ -644,7 +642,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.error(f"Failed to parse batch comment analysis JSON: {e}")
 
-        except Exception as e:
+        except Exception:
             self.logger.error("Batch comment analysis failed", exc_info=True)
 
         return []
@@ -748,7 +746,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             engagement_score = 50
 
             if any(
-                word in text_lower for word in ["great", "amazing", "love", "awesome"]
+                word in text_lower for word in {"great", "amazing", "love", "awesome"}
             ):
                 engagement_score += 20
 
@@ -757,12 +755,12 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
             if any(
                 phrase in text_lower
-                for phrase in ["i think", "my experience", "i tried"]
+                for phrase in {"i think", "my experience", "i tried"}
             ):
                 engagement_score += 25
 
-            positive_words = ["great", "amazing", "love", "awesome", "fantastic"]
-            negative_words = ["hate", "terrible", "awful", "boring"]
+            positive_words = {"great", "amazing", "love", "awesome", "fantastic"}
+            negative_words = {"hate", "terrible", "awful", "boring"}
 
             positive_count = sum(1 for word in positive_words if word in text_lower)
             negative_count = sum(1 for word in negative_words if word in text_lower)
