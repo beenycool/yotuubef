@@ -114,73 +114,29 @@ class EnhancedVideoOrchestrator:
         self, reddit_url: str, enhanced_options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Run faceless lore pipeline: text post -> research -> script -> TTS -> Minecraft bg."""
+        audio_segments = []
+        audio_clip = None
+        final_video = None
+        output_file = None
         try:
             self.logger.info("Starting faceless lore generation for: %s", reddit_url)
 
-            async with RedditClient() as reddit_client:
-                reddit_post = await reddit_client.get_post_by_url(reddit_url)
+            reddit_post = await self._fetch_and_validate_reddit_post(reddit_url)
+            if isinstance(reddit_post, dict) and not reddit_post.get("success", True):
+                return reddit_post
 
-            if not reddit_post:
-                return {"success": False, "error": "Failed to load Reddit post"}
-            if reddit_post.is_video:
-                return {
-                    "success": False,
-                    "error": "Provided URL points to a video post. Faceless flow requires text posts.",
-                }
-            if (
-                not getattr(reddit_post, "selftext", "")
-                or len(reddit_post.selftext.strip()) < 120
-            ):
-                return {
-                    "success": False,
-                    "error": "Text post is too short for lore generation.",
-                }
-
-            researcher = DeepResearchClient()
-            query = f"{reddit_post.title} {reddit_post.subreddit} history"
-            research_facts = await researcher.conduct_deep_research(query)
-
-            reddit_content_dict = {
-                "title": reddit_post.title,
-                "selftext": reddit_post.selftext,
-                "subreddit": reddit_post.subreddit,
-                "score": reddit_post.score,
-                "num_comments": reddit_post.num_comments,
-                "deep_research": research_facts,
-            }
-            analysis = await self.ai_client.analyze_video_content(
-                None, reddit_content_dict
-            )
+            analysis = await self._generate_lore_script(reddit_post)
             if not analysis:
                 return {"success": False, "error": "Script generation failed"}
 
-            tts_results = (
-                self.advanced_audio_processor.tts_service.generate_multiple_segments(
-                    analysis.narrative_script_segments
-                )
-            )
-            tts_paths = [
-                item.get("audio_path")
-                for item in tts_results
-                if item.get("success") and item.get("audio_path")
-            ]
+            tts_paths = self._generate_tts_audio_clip(analysis.narrative_script_segments)
             if not tts_paths:
                 return {"success": False, "error": "TTS generation failed"}
 
             audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
             audio_clip = concatenate_audioclips(audio_segments)
 
-            bg_manager = BackgroundManager()
-            video_clip = bg_manager.get_sliced_background(
-                target_duration=audio_clip.duration,
-                subreddit=reddit_post.subreddit,
-                text_content=reddit_post.selftext,
-            )
-            if analysis.text_overlays:
-                video_clip = self.video_processor.text_processor.add_text_overlays(
-                    video_clip, analysis.text_overlays
-                )
-            final_video = MoviePyCompat.with_audio(video_clip, audio_clip)
+            final_video = self._generate_faceless_video_clip(reddit_post, analysis, audio_clip)
 
             output_file = self.config.paths.processed_dir / f"lore_{reddit_post.id}.mp4"
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -191,29 +147,7 @@ class EnhancedVideoOrchestrator:
                 audio_codec="aac",
             )
 
-            upload_metadata = {
-                "title": analysis.suggested_title,
-                "description": analysis.summary_for_description,
-                "tags": [tag.replace("#", "") for tag in analysis.hashtags],
-            }
-            upload_result = await self.youtube_client.upload_video(
-                str(output_file), upload_metadata
-            )
-
-            for segment in audio_segments:
-                try:
-                    segment.close()
-                except Exception:
-                    pass
-            try:
-                audio_clip.close()
-            except Exception:
-                pass
-            try:
-                final_video.close()
-            except Exception:
-                pass
-
+            upload_result = await self._upload_faceless_video(output_file, analysis)
             if not upload_result.get("success"):
                 return {
                     "success": False,
@@ -233,6 +167,95 @@ class EnhancedVideoOrchestrator:
             self.logger.error("Lore generation failed: %s", e, exc_info=True)
             self.gpu_manager.clear_gpu_cache()
             return {"success": False, "error": str(e), "stage": "faceless_lore"}
+        finally:
+            for segment in audio_segments:
+                try:
+                    segment.close()
+                except Exception:
+                    pass
+            if audio_clip is not None:
+                try:
+                    audio_clip.close()
+                except Exception:
+                    pass
+            if final_video is not None:
+                try:
+                    final_video.close()
+                except Exception:
+                    pass
+
+    async def _fetch_and_validate_reddit_post(self, reddit_url: str) -> Any:
+        async with RedditClient() as reddit_client:
+            reddit_post = await reddit_client.get_post_by_url(reddit_url)
+
+        if not reddit_post:
+            return {"success": False, "error": "Failed to load Reddit post"}
+        if reddit_post.is_video:
+            return {
+                "success": False,
+                "error": "Provided URL points to a video post. Faceless flow requires text posts.",
+            }
+        if (
+            not getattr(reddit_post, "selftext", "")
+            or len(reddit_post.selftext.strip()) < 120
+        ):
+            return {
+                "success": False,
+                "error": "Text post is too short for lore generation.",
+            }
+        return reddit_post
+
+    async def _generate_lore_script(self, reddit_post: Any) -> Any:
+        researcher = DeepResearchClient()
+        query = f"{reddit_post.title} {reddit_post.subreddit} history"
+        research_facts = await researcher.conduct_deep_research(query)
+
+        reddit_content_dict = {
+            "title": reddit_post.title,
+            "selftext": reddit_post.selftext,
+            "subreddit": reddit_post.subreddit,
+            "score": reddit_post.score,
+            "num_comments": reddit_post.num_comments,
+            "deep_research": research_facts,
+        }
+        return await self.ai_client.analyze_video_content(
+            None, reddit_content_dict
+        )
+
+    def _generate_tts_audio_clip(self, narrative_script_segments: Any) -> List[str]:
+        tts_results = (
+            self.advanced_audio_processor.tts_service.generate_multiple_segments(
+                narrative_script_segments
+            )
+        )
+        return [
+            item.get("audio_path")
+            for item in tts_results
+            if item.get("success") and item.get("audio_path")
+        ]
+
+    def _generate_faceless_video_clip(self, reddit_post: Any, analysis: Any, audio_clip: Any) -> Any:
+        bg_manager = BackgroundManager()
+        video_clip = bg_manager.get_sliced_background(
+            target_duration=audio_clip.duration,
+            subreddit=reddit_post.subreddit,
+            text_content=reddit_post.selftext,
+        )
+        if analysis.text_overlays:
+            video_clip = self.video_processor.text_processor.add_text_overlays(
+                video_clip, analysis.text_overlays
+            )
+        return MoviePyCompat.with_audio(video_clip, audio_clip)
+
+    async def _upload_faceless_video(self, output_file: Any, analysis: Any) -> Dict[str, Any]:
+        upload_metadata = {
+            "title": analysis.suggested_title,
+            "description": analysis.summary_for_description,
+            "tags": [tag.replace("#", "") for tag in analysis.hashtags],
+        }
+        return await self.youtube_client.upload_video(
+            str(output_file), upload_metadata
+        )
 
 
     async def _ai_studio_fetch_and_analyze(self, reddit_url: str) -> tuple[Any, Any]:
