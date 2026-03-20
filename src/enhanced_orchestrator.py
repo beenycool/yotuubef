@@ -608,6 +608,30 @@ class EnhancedVideoOrchestrator:
     async def _handle_wait_for_gemini_report_phase(
         self, state: Any, gemini_report_path: Optional[str], no_auto_research: bool
     ) -> tuple[Any, Optional[Dict[str, Any]]]:
+        def _create_pause_response(
+            success: bool,
+            error: Optional[str] = None,
+            message: Optional[str] = None,
+            **extra_fields,
+        ) -> Dict[str, Any]:
+            state.status = "paused_waiting_for_gemini_report"
+            save_run_state(state)
+            response = {
+                "success": success,
+                "paused": True,
+                "status": state.status,
+                "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
+                "project_name": state.project_name,
+                "pipeline": "hybrid_documentary_studio",
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
+            }
+            if error:
+                response["error"] = error
+            if message:
+                response["message"] = message
+            response.update(extra_fields)
+            return response
+
         report_candidate = gemini_report_path or state.gemini_report_path
         prompt_path = state.metadata.get("deep_research_prompt_path")
         if prompt_path:
@@ -620,40 +644,19 @@ class EnhancedVideoOrchestrator:
                 state.metadata["search_audit_path"] = str(audit_path)
 
         if not report_candidate:
-            state.status = "paused_waiting_for_gemini_report"
-            save_run_state(state)
-            return state, {
-                "success": True,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
-                "deep_research_prompt_path": state.metadata.get(
+            return state, _create_pause_response(
+                success=True,
+                message="Waiting for Gemini report. Resume with --gemini-report.",
+                deep_research_prompt_path=state.metadata.get(
                     "deep_research_prompt_path"
                 ),
-                "message": "Waiting for Gemini report. Resume with --gemini-report.",
-            }
+            )
 
         report_file = Path(report_candidate)
         if not report_file.exists() or not report_file.is_file():
-            state.status = "paused_waiting_for_gemini_report"
-            save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "error": f"Gemini report not found: {report_file}",
-                "status": state.status,
-                "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
-            }
+            return state, _create_pause_response(
+                success=False, error=f"Gemini report not found: {report_file}"
+            )
 
         report_text = report_file.read_text(encoding="utf-8", errors="replace")
         copied_report = save_finding(
@@ -665,9 +668,7 @@ class EnhancedVideoOrchestrator:
         state.gemini_report_path = str(copied_report)
         state.status = "active"
         save_run_state(state)
-        state = set_phase(
-            state, PipelinePhase.SYNTHESIS, "Gemini report supplied"
-        )
+        state = set_phase(state, PipelinePhase.SYNTHESIS, "Gemini report supplied")
         return state, None
 
     async def _handle_synthesis_phase(self, state: Any, phase: Any) -> Any:
@@ -719,7 +720,10 @@ class EnhancedVideoOrchestrator:
                 synthesis_payload = json.loads(
                     Path(synthesis_path).read_text(encoding="utf-8")
                 )
-            except Exception:
+            except (json.JSONDecodeError, OSError) as e:
+                self.logger.warning(
+                    "Failed to load synthesis payload from %s: %s", synthesis_path, e
+                )
                 synthesis_payload = {}
 
         image_queries = self._normalize_query_list(
@@ -768,9 +772,7 @@ class EnhancedVideoOrchestrator:
         )
         state.metadata["evidence_index_path"] = str(evidence_path)
         state.metadata["evidence_search_path"] = str(search_path)
-        state.metadata["raw_media_dir"] = str(
-            Path(state.project_dir) / "raw_media"
-        )
+        state.metadata["raw_media_dir"] = str(Path(state.project_dir) / "raw_media")
         save_run_state(state)
         return set_phase(
             state,
@@ -793,9 +795,7 @@ class EnhancedVideoOrchestrator:
             context_parts.append(
                 self._read_hybrid_artifact_text(state.gemini_report_path)
             )
-        raw_context = "\n\n".join(
-            [item for item in context_parts if item]
-        ).strip()
+        raw_context = "\n\n".join([item for item in context_parts if item]).strip()
 
         workspace_assets = self._collect_hybrid_workspace_assets(state)
         assets_json = json.dumps(workspace_assets, indent=2, ensure_ascii=True)
@@ -805,9 +805,7 @@ class EnhancedVideoOrchestrator:
             else f"[AVAILABLE_WORKSPACE_ASSETS]\n{assets_json}"
         )
 
-        max_tokens = int(
-            os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000")
-        )
+        max_tokens = int(os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000"))
 
         summary_result = summarize_if_needed(
             raw_context,
@@ -846,89 +844,54 @@ class EnhancedVideoOrchestrator:
             "Script finalized; ready for local render",
         )
 
-    async def _handle_video_render_phase(self, state: Any) -> tuple[Any, Optional[Dict[str, Any]]]:
-        final_script_path = str(
-            state.metadata.get("final_script_path", "") or ""
-        )
-        if not final_script_path:
+    async def _handle_video_render_phase(
+        self, state: Any
+    ) -> tuple[Any, Optional[Dict[str, Any]]]:
+        def _create_error_response(
+            error_message: str, include_script_path: bool = False
+        ) -> Dict[str, Any]:
             state.status = "paused_render_failed"
             save_run_state(state)
-            return state, {
+            response = {
                 "success": False,
                 "paused": True,
                 "status": state.status,
                 "current_phase": PipelinePhase.VIDEO_RENDER.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
-                "error": "Missing final_script_path in state metadata",
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
+                "error": error_message,
             }
+            if include_script_path:
+                response["final_script_path"] = final_script_path
+            return response
+
+        final_script_path = str(state.metadata.get("final_script_path", "") or "")
+        if not final_script_path:
+            return state, _create_error_response(
+                "Missing final_script_path in state metadata"
+            )
 
         script_path = Path(final_script_path)
         if not script_path.exists() or not script_path.is_file():
-            state.status = "paused_render_failed"
-            save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
-                "final_script_path": final_script_path,
-                "error": f"Final script not found: {script_path}",
-            }
+            return state, _create_error_response(
+                f"Final script not found: {script_path}", include_script_path=True
+            )
 
         try:
             script_payload = json.loads(script_path.read_text(encoding="utf-8"))
         except Exception as exc:
-            state.status = "paused_render_failed"
-            save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
-                "final_script_path": final_script_path,
-                "error": f"Failed to parse final script JSON: {exc}",
-            }
+            return state, _create_error_response(
+                f"Failed to parse final script JSON: {exc}", include_script_path=True
+            )
 
-        render_result = await self._render_hybrid_local_video(
-            state, script_payload
-        )
+        render_result = await self._render_hybrid_local_video(state, script_payload)
         if not render_result.get("success"):
-            state.status = "paused_render_failed"
-            save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
-                "final_script_path": final_script_path,
-                "error": str(
-                    render_result.get("error", "Hybrid render failed")
-                ),
-            }
+            error = str(render_result.get("error", "Hybrid render failed"))
+            return state, _create_error_response(error, include_script_path=True)
 
         final_video_path = str(render_result.get("video_path", "") or "")
-        render_manifest_path = str(
-            render_result.get("render_manifest_path", "") or ""
-        )
+        render_manifest_path = str(render_result.get("render_manifest_path", "") or "")
         state.metadata["final_video_path"] = final_video_path
         if render_manifest_path:
             state.metadata["render_manifest_path"] = render_manifest_path
@@ -4436,7 +4399,6 @@ Search results:
             visual_features = len(analysis.visual_cues) * 3
             audio_features = len(analysis.sound_effects) * 2
             narrative_features = len(analysis.narrative_script_segments) * 4
-
 
             feature_bonus = (
                 engagement_features
