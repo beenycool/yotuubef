@@ -132,7 +132,6 @@ hashlib                          # Built-in hashing (part of Python)
 secrets                          # Built-in secure random generation (part of Python)
 
 # System Integration
-psutil>=5.9.0                    # System and process utilities
 platform                        # Built-in platform information (part of Python)
 subprocess                       # Built-in subprocess management (part of Python)
 

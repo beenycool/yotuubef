@@ -219,7 +219,6 @@ def test_video_analysis_consistency():
 
 
 def test_video_analysis_fallback_defaults():
-    # Use construct to bypass validation for this specific test of the method
     analysis = VideoAnalysis.model_construct()
     defaults = analysis.get_fallback_defaults()
     assert defaults["suggested_title"] == "Amazing Video Content"
