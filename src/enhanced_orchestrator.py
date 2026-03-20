@@ -35,7 +35,6 @@ from src.models import (
     EmotionType,
     NarrativeSegment,
     PacingType,
-    PerformanceMetrics,
     PositionType,
     TextOverlay,
     TextStyle,
@@ -235,6 +234,254 @@ class EnhancedVideoOrchestrator:
             self.gpu_manager.clear_gpu_cache()
             return {"success": False, "error": str(e), "stage": "faceless_lore"}
 
+
+    async def _ai_studio_fetch_and_analyze(self, reddit_url: str) -> tuple[Any, Any]:
+        # Step 1: Get Reddit post
+        async with RedditClient() as reddit_client:
+            reddit_post = await reddit_client.get_post_by_url(reddit_url)
+
+        if not reddit_post:
+            return None, {"success": False, "error": "Failed to load Reddit post"}
+        if reddit_post.is_video:
+            return None, {"success": False, "error": "Text posts only for this pipeline"}
+
+        # Improvement 1: Multi-Turn Agentic Research
+        self.logger.info("Step 1: Agentic Research (Improvement 1)")
+        researcher = AgenticResearcher()
+        query = f"{reddit_post.title} {reddit_post.subreddit} history"
+        initial_context = f"{reddit_post.title}: {reddit_post.selftext[:500]}"
+
+        research_facts = await researcher.deep_dive(
+            topic=query, initial_context=initial_context, max_turns=2
+        )
+
+        # Step 2: Generate script with Perfect Loop + B-roll queries
+        self.logger.info(
+            "Step 2: Script Generation with Perfect Loop (Improvement 2)"
+        )
+        reddit_content_dict = {
+            "title": reddit_post.title,
+            "selftext": reddit_post.selftext,
+            "subreddit": reddit_post.subreddit,
+            "score": reddit_post.score,
+            "num_comments": reddit_post.num_comments,
+            "deep_research": research_facts,
+        }
+        analysis = await self.ai_client.analyze_video_content(
+            None, reddit_content_dict
+        )
+        if not analysis:
+            return None, {"success": False, "error": "Script generation failed"}
+
+        return reddit_post, analysis
+
+    async def _ai_studio_generate_audio_and_broll(self, analysis: Any) -> tuple[list[Any], Any, list[dict[str, Any]]]:
+        # Step 3: Generate TTS audio
+        self.logger.info("Step 3: TTS Generation")
+        tts_results = (
+            self.advanced_audio_processor.tts_service.generate_multiple_segments(
+                analysis.narrative_script_segments
+            )
+        )
+        tts_paths = [
+            item.get("audio_path")
+            for item in tts_results
+            if item.get("success") and item.get("audio_path")
+        ]
+        if not tts_paths:
+            return [], None, [{"success": False, "error": "TTS generation failed"}]
+
+        # Concatenate TTS segments
+        audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
+        main_audio = concatenate_audioclips(audio_segments)
+
+        # Step 4: Download B-roll images (Improvement 3)
+        self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
+        broll_queries = []
+        for segment in analysis.narrative_script_segments:
+            if (
+                hasattr(segment, "b_roll_search_query")
+                and segment.b_roll_search_query
+            ):
+                broll_queries.append(segment.b_roll_search_query)
+
+        async with BraveImageClient() as image_client:
+            broll_images = await image_client.get_broll_images(
+                broll_queries, max_per_query=1
+            )
+
+        # Map images to moments
+        broll_moments = []
+        for segment in analysis.narrative_script_segments:
+            if (
+                hasattr(segment, "b_roll_search_query")
+                and segment.b_roll_search_query
+            ):
+                query = segment.b_roll_search_query
+                if query in broll_images and broll_images[query]:
+                    broll_moments.append(
+                        {
+                            "image_path": str(broll_images[query][0]),
+                            "timestamp_seconds": segment.time_seconds,
+                            "duration": segment.intended_duration_seconds,
+                        }
+                    )
+        return audio_segments, main_audio, broll_moments
+
+    def _ai_studio_compose_and_render(self, reddit_post: Any, analysis: Any, main_audio: Any, audio_segments: list[Any], broll_moments: list[dict[str, Any]], options: dict[str, Any]) -> dict[str, Any]:
+        # Step 5: Get background video
+        self.logger.info("Step 5: Background Video")
+        bg_manager = BackgroundManager()
+        video_clip = bg_manager.get_sliced_background(
+            target_duration=main_audio.duration,
+            subreddit=reddit_post.subreddit,
+            text_content=reddit_post.selftext,
+        )
+
+        # Step 6: Apply B-roll images
+        if broll_moments:
+            self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
+            apply_broll = getattr(self.video_processor, "apply_broll_images", None)
+            if callable(apply_broll):
+                video_clip = apply_broll(video_clip, broll_moments)
+            else:
+                text_apply_broll = getattr(
+                    self.video_processor.text_processor, "apply_broll_images", None
+                )
+                if callable(text_apply_broll):
+                    video_clip = text_apply_broll(video_clip, broll_moments)
+
+        # Step 7: Add text overlays
+        if analysis.text_overlays:
+            video_clip = self.video_processor.text_processor.add_text_overlays(
+                video_clip, analysis.text_overlays
+            )
+
+        # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
+        combined_audio_path = None
+        if options.get("enable_word_captions", True):
+            self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
+            caption_gen = CaptionGenerator()
+            # Combine all TTS paths for transcription
+            combined_audio_path = self.config.paths.temp_dir / "combined_tts.wav"
+            combined_audio_path.parent.mkdir(parents=True, exist_ok=True)
+            main_audio.write_audiofile(
+                str(combined_audio_path), verbose=False, logger=None
+            )
+
+            video_clip = (
+                caption_gen.generate_word_captions(video_clip, combined_audio_path)
+                or video_clip
+            )
+
+        # Step 9: Add sound effects (Improvement 5)
+        self.logger.info("Step 9: Sound Design (Improvement 5)")
+        sfx_manager = SoundEffectsManager()
+        audio_layers = [main_audio]
+
+        # Add whoosh for each B-roll moment
+        for moment in broll_moments:
+            whoosh_path = sfx_manager.get_whoosh_sound()
+            if whoosh_path:
+                whoosh_clip = (
+                    AudioFileClip(str(whoosh_path))
+                    .set_start(moment["timestamp_seconds"])
+                    .volumex(0.4)
+                )
+                audio_layers.append(whoosh_clip)
+
+        # Add boom for hook (increased volume to 0.8 for high-impact 0-3s retention)
+        boom_path = sfx_manager.get_boom_sound()
+        if boom_path and analysis.narrative_script_segments:
+            hook_time = analysis.narrative_script_segments[0].time_seconds
+            boom_clip = (
+                AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
+            )
+            audio_layers.append(boom_clip)
+
+        # Composite audio
+        final_audio = None
+        final_video = None
+        output_file = (
+            self.config.paths.processed_dir
+            / f"production_studio_{reddit_post.id}.mp4"
+        )
+        try:
+            final_audio = CompositeAudioClip(audio_layers)
+            final_video = MoviePyCompat.with_audio(video_clip, final_audio)
+
+            # Step 10: Write output
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+
+            self.logger.info("Step 10: Rendering final video")
+            final_video.write_videofile(
+                str(output_file),
+                fps=30,
+                codec="libx264",
+                audio_codec="aac",
+            )
+        finally:
+            for clip in audio_segments:
+                try:
+                    clip.close()
+                except Exception as e:
+                    self.logger.warning("Failed to close audio segment clip: %s", e)
+            for clip in audio_layers:
+                if clip is main_audio:
+                    continue
+                try:
+                    clip.close()
+                except Exception as e:
+                    self.logger.warning("Failed to close audio layer clip: %s", e)
+            if final_audio is not None:
+                try:
+                    final_audio.close()
+                except Exception as e:
+                    self.logger.warning(
+                        "Failed to close composite audio clip: %s", e
+                    )
+            try:
+                main_audio.close()
+            except Exception as e:
+                self.logger.warning("Failed to close main audio clip: %s", e)
+            if final_video is not None:
+                try:
+                    final_video.close()
+                except Exception as e:
+                    self.logger.warning("Failed to close final video clip: %s", e)
+            if combined_audio_path and combined_audio_path.exists():
+                try:
+                    combined_audio_path.unlink()
+                except OSError as e:
+                    self.logger.warning(
+                        "Failed to remove temp caption audio %s: %s",
+                        combined_audio_path,
+                        e,
+                    )
+
+        self.logger.info("AI Production Studio pipeline complete!")
+
+        return {
+            "success": True,
+            "video_path": str(output_file),
+            "pipeline": "ai_production_studio",
+            "features_used": [
+                feature
+                for feature in [
+                    "agentic_research",
+                    "perfect_loop",
+                    "broll_injection",
+                    "word_captions"
+                    if options.get("enable_word_captions", True)
+                    else None,
+                    "sound_design",
+                ]
+                if feature is not None
+            ],
+            "broll_moments": len(broll_moments),
+            "research_turns": 2,
+        }
+
     async def process_ai_production_studio(
         self, reddit_url: str, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -252,246 +499,17 @@ class EnhancedVideoOrchestrator:
             )
             options = options or {}
 
-            # Step 1: Get Reddit post
-            async with RedditClient() as reddit_client:
-                reddit_post = await reddit_client.get_post_by_url(reddit_url)
+            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(reddit_url)
+            if reddit_post is None:
+                return analysis_or_err
 
-            if not reddit_post:
-                return {"success": False, "error": "Failed to load Reddit post"}
-            if reddit_post.is_video:
-                return {"success": False, "error": "Text posts only for this pipeline"}
+            audio_segments, main_audio, broll_moments_or_err = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
+            if main_audio is None:
+                return broll_moments_or_err[0]
 
-            # Improvement 1: Multi-Turn Agentic Research
-            self.logger.info("Step 1: Agentic Research (Improvement 1)")
-            researcher = AgenticResearcher()
-            query = f"{reddit_post.title} {reddit_post.subreddit} history"
-            initial_context = f"{reddit_post.title}: {reddit_post.selftext[:500]}"
-
-            research_facts = await researcher.deep_dive(
-                topic=query, initial_context=initial_context, max_turns=2
+            return self._ai_studio_compose_and_render(
+                reddit_post, analysis_or_err, main_audio, audio_segments, broll_moments_or_err, options
             )
-
-            # Step 2: Generate script with Perfect Loop + B-roll queries
-            self.logger.info(
-                "Step 2: Script Generation with Perfect Loop (Improvement 2)"
-            )
-            reddit_content_dict = {
-                "title": reddit_post.title,
-                "selftext": reddit_post.selftext,
-                "subreddit": reddit_post.subreddit,
-                "score": reddit_post.score,
-                "num_comments": reddit_post.num_comments,
-                "deep_research": research_facts,
-            }
-            analysis = await self.ai_client.analyze_video_content(
-                None, reddit_content_dict
-            )
-            if not analysis:
-                return {"success": False, "error": "Script generation failed"}
-
-            # Step 3: Generate TTS audio
-            self.logger.info("Step 3: TTS Generation")
-            tts_results = (
-                self.advanced_audio_processor.tts_service.generate_multiple_segments(
-                    analysis.narrative_script_segments
-                )
-            )
-            tts_paths = [
-                item.get("audio_path")
-                for item in tts_results
-                if item.get("success") and item.get("audio_path")
-            ]
-            if not tts_paths:
-                return {"success": False, "error": "TTS generation failed"}
-
-            # Concatenate TTS segments
-            audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
-            main_audio = concatenate_audioclips(audio_segments)
-
-            # Step 4: Download B-roll images (Improvement 3)
-            self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
-            broll_queries = []
-            for segment in analysis.narrative_script_segments:
-                if (
-                    hasattr(segment, "b_roll_search_query")
-                    and segment.b_roll_search_query
-                ):
-                    broll_queries.append(segment.b_roll_search_query)
-
-            async with BraveImageClient() as image_client:
-                broll_images = await image_client.get_broll_images(
-                    broll_queries, max_per_query=1
-                )
-
-            # Map images to moments
-            broll_moments = []
-            for segment in analysis.narrative_script_segments:
-                if (
-                    hasattr(segment, "b_roll_search_query")
-                    and segment.b_roll_search_query
-                ):
-                    query = segment.b_roll_search_query
-                    if query in broll_images and broll_images[query]:
-                        broll_moments.append(
-                            {
-                                "image_path": str(broll_images[query][0]),
-                                "timestamp_seconds": segment.time_seconds,
-                                "duration": segment.intended_duration_seconds,
-                            }
-                        )
-
-            # Step 5: Get background video
-            self.logger.info("Step 5: Background Video")
-            bg_manager = BackgroundManager()
-            video_clip = bg_manager.get_sliced_background(
-                target_duration=main_audio.duration,
-                subreddit=reddit_post.subreddit,
-                text_content=reddit_post.selftext,
-            )
-
-            # Step 6: Apply B-roll images
-            if broll_moments:
-                self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
-                apply_broll = getattr(self.video_processor, "apply_broll_images", None)
-                if callable(apply_broll):
-                    video_clip = apply_broll(video_clip, broll_moments)
-                else:
-                    text_apply_broll = getattr(
-                        self.video_processor.text_processor, "apply_broll_images", None
-                    )
-                    if callable(text_apply_broll):
-                        video_clip = text_apply_broll(video_clip, broll_moments)
-
-            # Step 7: Add text overlays
-            if analysis.text_overlays:
-                video_clip = self.video_processor.text_processor.add_text_overlays(
-                    video_clip, analysis.text_overlays
-                )
-
-            # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
-            combined_audio_path = None
-            if options.get("enable_word_captions", True):
-                self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
-                caption_gen = CaptionGenerator()
-                # Combine all TTS paths for transcription
-                combined_audio_path = self.config.paths.temp_dir / "combined_tts.wav"
-                combined_audio_path.parent.mkdir(parents=True, exist_ok=True)
-                main_audio.write_audiofile(
-                    str(combined_audio_path), verbose=False, logger=None
-                )
-
-                video_clip = (
-                    caption_gen.generate_word_captions(video_clip, combined_audio_path)
-                    or video_clip
-                )
-
-            # Step 9: Add sound effects (Improvement 5)
-            self.logger.info("Step 9: Sound Design (Improvement 5)")
-            sfx_manager = SoundEffectsManager()
-            audio_layers = [main_audio]
-
-            # Add whoosh for each B-roll moment
-            for moment in broll_moments:
-                whoosh_path = sfx_manager.get_whoosh_sound()
-                if whoosh_path:
-                    whoosh_clip = (
-                        AudioFileClip(str(whoosh_path))
-                        .set_start(moment["timestamp_seconds"])
-                        .volumex(0.4)
-                    )
-                    audio_layers.append(whoosh_clip)
-
-            # Add boom for hook (increased volume to 0.8 for high-impact 0-3s retention)
-            boom_path = sfx_manager.get_boom_sound()
-            if boom_path and analysis.narrative_script_segments:
-                hook_time = analysis.narrative_script_segments[0].time_seconds
-                boom_clip = (
-                    AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
-                )
-                audio_layers.append(boom_clip)
-
-            # Composite audio
-            final_audio = None
-            final_video = None
-            output_file = (
-                self.config.paths.processed_dir
-                / f"production_studio_{reddit_post.id}.mp4"
-            )
-            try:
-                final_audio = CompositeAudioClip(audio_layers)
-                final_video = MoviePyCompat.with_audio(video_clip, final_audio)
-
-                # Step 10: Write output
-                output_file.parent.mkdir(parents=True, exist_ok=True)
-
-                self.logger.info("Step 10: Rendering final video")
-                final_video.write_videofile(
-                    str(output_file),
-                    fps=30,
-                    codec="libx264",
-                    audio_codec="aac",
-                )
-            finally:
-                for clip in audio_segments:
-                    try:
-                        clip.close()
-                    except Exception as e:
-                        self.logger.warning("Failed to close audio segment clip: %s", e)
-                for clip in audio_layers:
-                    if clip is main_audio:
-                        continue
-                    try:
-                        clip.close()
-                    except Exception as e:
-                        self.logger.warning("Failed to close audio layer clip: %s", e)
-                if final_audio is not None:
-                    try:
-                        final_audio.close()
-                    except Exception as e:
-                        self.logger.warning(
-                            "Failed to close composite audio clip: %s", e
-                        )
-                try:
-                    main_audio.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close main audio clip: %s", e)
-                if final_video is not None:
-                    try:
-                        final_video.close()
-                    except Exception as e:
-                        self.logger.warning("Failed to close final video clip: %s", e)
-                if combined_audio_path and combined_audio_path.exists():
-                    try:
-                        combined_audio_path.unlink()
-                    except OSError as e:
-                        self.logger.warning(
-                            "Failed to remove temp caption audio %s: %s",
-                            combined_audio_path,
-                            e,
-                        )
-
-            self.logger.info("AI Production Studio pipeline complete!")
-
-            return {
-                "success": True,
-                "video_path": str(output_file),
-                "pipeline": "ai_production_studio",
-                "features_used": [
-                    feature
-                    for feature in [
-                        "agentic_research",
-                        "perfect_loop",
-                        "broll_injection",
-                        "word_captions"
-                        if options.get("enable_word_captions", True)
-                        else None,
-                        "sound_design",
-                    ]
-                    if feature is not None
-                ],
-                "broll_moments": len(broll_moments),
-                "research_turns": 2,
-            }
 
         except Exception as e:
             self.logger.error("AI Production Studio failed: %s", e, exc_info=True)
@@ -4408,7 +4426,6 @@ Search results:
             audio_features = len(analysis.sound_effects) * 2
             narrative_features = len(analysis.narrative_script_segments) * 4
 
-            base_score = 50  # Baseline
             feature_bonus = (
                 engagement_features
                 + visual_features
