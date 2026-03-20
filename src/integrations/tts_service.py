@@ -5,39 +5,75 @@ Optimized for GPU memory usage with constrained VRAM environments.
 """
 
 import logging
+import importlib
+from moviepy import AudioFileClip
+
+from src.config.settings import get_config
+from src.models import NarrativeSegment, EmotionType, PacingType
+from src.utils.gpu_memory_manager import GPUMemoryManager
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import gc
+import numpy as np
+
+_torch: Any = None
+_sf: Any = None
+_librosa: Any = None
+_Qwen3TTSModel: Any = None
+
+try:
+    _torch = importlib.import_module("torch")
+    TORCH_AVAILABLE = True
+except ModuleNotFoundError:
+    _torch = None
+    TORCH_AVAILABLE = False
+
+try:
+    _sf = importlib.import_module("soundfile")
+    SOUNDFILE_AVAILABLE = True
+except ModuleNotFoundError:
+    _sf = None
+    SOUNDFILE_AVAILABLE = False
+
+try:
+    _librosa = importlib.import_module("librosa")
+    LIBROSA_AVAILABLE = True
+except ModuleNotFoundError:
+    _librosa = None
+    LIBROSA_AVAILABLE = False
 
 try:
     import elevenlabs
     from elevenlabs import Voice, VoiceSettings, generate, save
+
     ELEVENLABS_AVAILABLE = True
 except ImportError:
     ELEVENLABS_AVAILABLE = False
 
 try:
-    import torch
-    import soundfile as sf
     from dia.model import Dia
+
     DIA_AVAILABLE = True
 except ImportError:
     try:
-        # Fallback import structure
         from dia import Dia
-        import soundfile as sf
-        import torch
+
         DIA_AVAILABLE = True
     except ImportError:
         DIA_AVAILABLE = False
 
-import numpy as np  # noqa: E402
-from moviepy import AudioFileClip  # noqa: E402
-
-from src.config.settings import get_config  # noqa: E402
-from src.models import NarrativeSegment, EmotionType, PacingType  # noqa: E402
-from src.utils.gpu_memory_manager import GPUMemoryManager  # noqa: E402
+if TORCH_AVAILABLE and SOUNDFILE_AVAILABLE:
+    try:
+        _qwen_tts = importlib.import_module("qwen_tts")
+        _Qwen3TTSModel = getattr(_qwen_tts, "Qwen3TTSModel", None)
+        QWEN_TTS_AVAILABLE = _Qwen3TTSModel is not None
+    except ModuleNotFoundError:
+        _Qwen3TTSModel = None
+        QWEN_TTS_AVAILABLE = False
+else:
+    _Qwen3TTSModel = None
+    QWEN_TTS_AVAILABLE = False
 
 
 class TTSService:
@@ -280,6 +316,19 @@ class TTSService:
 
                 if audio_path:
                     self._trim_segment_silence(audio_path, segment_index=i)
+
+                    # FORCE fit to intended duration to prevent overlapping multiple TTS speaking at once
+                    adjusted_path = self.adjust_audio_speed(
+                        audio_path, segment.intended_duration_seconds
+                    )
+                    if adjusted_path and adjusted_path.exists():
+                        # Clean up the original temporary file after creating the adjusted version
+                        if adjusted_path != audio_path:
+                            try:
+                                Path(audio_path).unlink(missing_ok=True)
+                            except Exception:
+                                pass  # Best effort cleanup
+                        audio_path = adjusted_path
 
                     # Get audio duration for timing validation
                     try:

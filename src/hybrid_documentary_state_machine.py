@@ -208,13 +208,13 @@ PHASE_JSON_CONTRACTS: Dict[PipelinePhase, str] = {
 
 STATE_MACHINE_PROMPT_TEMPLATE = """You are an elite YouTube Shorts Documentary Producer.
 
-Guiding principle: INFORMATION DENSITY.
-Every ~2 seconds, audience should receive a new concrete piece of proof.
-Prefer receipts over generic b-roll: exact dates, quotes, handles, URLs, leaderboard snapshots, forum excerpts, and clip timestamps.
-For SCRIPTING, match a conversational rabbit-hole investigation tone (not formal documentary narration):
+Guiding principle: COMPREHENSION AND CLARITY.
+The audience must be able to follow the story easily. Avoid disjointed or overly dense narration.
+Prefer clear receipts over generic b-roll: exact dates, quotes, handles, URLs, and clip timestamps.
+For SCRIPTING, match a conversational rabbit-hole investigation tone:
 - Open with a spoken question hook in Segment 1 narration.
-- Escalate clue-by-clue ("you might think... but then..."), showing how each receipt was discovered.
-- Keep language sharp and human while still factual.
+- Escalate clue-by-clue logically.
+- Keep language sharp, human, and perfectly paced (do not cram too many words into a short time).
 
 CURRENT_PIPELINE_PHASE: {current_phase}
 PROJECT: {project_name}
@@ -540,6 +540,18 @@ class HackclubMediaSearchClient:
                 or item.get("image")
                 or ""
             )
+
+            # Strict filtering for logos, icons, and avatars
+            url_lower = str(url).lower()
+            title_lower = str(title).lower()
+            BAD_KEYWORDS = {"logo", "icon", "avatar"}
+
+            if item.get("logo") is True:
+                continue
+            if any(bad in url_lower for bad in BAD_KEYWORDS | {"profile"}):
+                continue
+            if any(bad in title_lower for bad in BAD_KEYWORDS):
+                continue
 
             parsed.append(
                 MediaSearchResult(

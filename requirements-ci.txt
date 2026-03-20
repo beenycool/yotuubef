@@ -13,3 +13,4 @@ opencv-python==4.10.0.84
 psutil==6.0.0
 yt-dlp>=2025.8.22
 openai>=1.0.0
+faster-whisper>=1.0.0

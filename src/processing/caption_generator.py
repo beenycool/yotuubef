@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - optional dependency
     torch = None
 
 from src.config.settings import get_config
+from src.processing.video_processor_fixes import MoviePyCompat
 
 # Try to import faster-whisper
 try:
@@ -142,29 +143,27 @@ class CaptionGenerator:
                 start_time = word_data["start"]
                 end_time = word_data["end"]
 
-                # Create bold, heavily stroked text clip for single word
-                txt_clip = TextClip(
+                txt_clip = MoviePyCompat.create_text_clip(
                     word_text,
                     font=font,
-                    fontsize=font_size,
+                    font_size=font_size,
                     color=text_color,
                     stroke_color=stroke_color,
                     stroke_width=stroke_width,
-                    method="label",
-                    align="center",
                 )
 
-                # Position center-bottom with padding
-                txt_clip = txt_clip.set_position(("center", "center"))
+                if txt_clip is None:
+                    continue
 
-                # Set exact timing from Whisper
-                txt_clip = txt_clip.set_start(start_time).set_end(end_time)
+                txt_clip = MoviePyCompat.with_position(txt_clip, ("center", "center"))
+                txt_clip = MoviePyCompat.with_start(txt_clip, start_time)
+                txt_clip = MoviePyCompat.with_duration(txt_clip, end_time - start_time)
 
                 # Add fade for smoother transitions
                 fade_duration = min(0.1, (end_time - start_time) * 0.2)
                 if fade_duration > 0.02:
-                    txt_clip = txt_clip.crossfadein(fade_duration)
-                    txt_clip = txt_clip.crossfadeout(fade_duration)
+                    txt_clip = MoviePyCompat.crossfadein(txt_clip, fade_duration)
+                    txt_clip = MoviePyCompat.crossfadeout(txt_clip, fade_duration)
 
                 caption_clips.append(txt_clip)
 

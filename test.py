@@ -62,17 +62,16 @@ LOG_FILE = os.getenv("LOG_FILE", "run_log.txt")
 
 
 SCRIPT_SYSTEM_PROMPT = (
-    "You are an elite YouTube Shorts documentary editor for hyper-niche internet/gaming history. "
-    "Primary mode: fast, conversational internet-investigation voiceover. "
-    "Guiding principle: INFORMATION DENSITY. "
-    "1. In SCRIPTING, start Segment 1 narration with a compelling question hook, not a flat declarative line. "
-    "2. Write like a live rabbit-hole investigation: use transitions such as 'you might think... but...' and 'when people checked...'. "
-    "3. Every sentence must add a concrete receipt-backed detail (exact numbers, usernames, IDs, dates, posts, PDFs, quotes, timestamps). "
-    "4. Prefer progression over summary: reveal how the community discovered each clue step-by-step, escalating stakes each beat. "
-    "5. Avoid formal documentary phrasing and dry report tone. Keep wording sharp, human, and conversational while factual. "
-    "6. Visuals dictate script: map each narration beat to specific evidence in provided context/assets. "
-    "7. Create a perfect loop: final sentence must flow grammatically back into the first hook line. "
-    "Return strict JSON only. Never invent facts, sources, dates, quotes, or numbers."
+    "You are an elite YouTube Shorts documentary editor for internet/gaming history. "
+    "Primary mode: Clear, perfectly paced storytelling. "
+    "Guiding principle: COMPREHENSION AND CLARITY. "
+    "1. Do NOT create overly dense walls of text. Write short, punchy sentences that allow the viewer to process the information. "
+    "2. Start Segment 1 with a clear, compelling question hook. "
+    "3. Every segment must logically flow into the next. Use natural transitions. "
+    "4. Visuals dictate script: map each narration beat to specific evidence in provided context/assets. "
+    "5. Ensure strict pacing: do not cram too many words into a short duration (target ~2-3 words per second max). "
+    "6. Create a perfect loop: final sentence must flow grammatically back into the first hook line. "
+    "Return strict JSON only. Never invent facts."
 )
 
 
@@ -484,6 +483,37 @@ async def run_media_queries(
     return results
 
 
+def verify_media_with_vlm(url: str, query: str, api_key: str) -> bool:
+    """Use the Qwen VLM to verify if the image actually matches the query."""
+    if not OPENAI_AVAILABLE or not OpenAI:
+        return True
+    try:
+        client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        response = client.chat.completions.create(
+            model=MODEL_PRIMARY,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Does this image clearly show or relate to: '{query}'? It must not be a generic logo, icon, or unrelated graphic. Reply with only YES or NO.",
+                        },
+                        {"type": "image_url", "image_url": {"url": url}},
+                    ],
+                }
+            ],
+            max_tokens=10,
+            timeout=15,
+            temperature=0.1,
+        )
+        answer = response.choices[0].message.content.strip().upper()
+        return "YES" in answer
+    except Exception as e:
+        log_event("VLM_VERIFY_WARNING", f"Skipping VLM check due to error: {e}")
+        return True  # Fallback to accepting it if VLM endpoint errors out
+
+
 def maybe_download_media(state: RunState, search_payload: Dict[str, Any]) -> List[str]:
     if not DOWNLOAD_MEDIA:
         return []
@@ -491,9 +521,14 @@ def maybe_download_media(state: RunState, search_payload: Dict[str, Any]) -> Lis
     download_targets: List[tuple[str, str]] = []
     for query, hits in (search_payload.get("image", {}) or {}).items():
         if isinstance(hits, list):
-            for item in hits[:2]:
+            for item in hits:
                 if isinstance(item, dict) and item.get("url"):
-                    download_targets.append((str(item["url"]), "images"))
+                    url = str(item["url"])
+                    # Verify using Qwen VLM
+                    if verify_media_with_vlm(url, query, NVIDIA_API_KEY):
+                        download_targets.append((url, "images"))
+                        break  # Only need 1 verified image per query
+
     for query, hits in (search_payload.get("video", {}) or {}).items():
         if isinstance(hits, list):
             for item in hits[:2]:
