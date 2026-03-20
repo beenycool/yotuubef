@@ -7,7 +7,7 @@ import sqlite3
 import logging
 import json
 from pathlib import Path
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from contextlib import contextmanager
 
