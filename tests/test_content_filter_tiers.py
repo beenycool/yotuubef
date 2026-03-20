@@ -66,5 +66,5 @@ content:
         _post_with_title("violence in movie scene")
     )
 
-    assert result["is_suitable"] is True
-    assert result["demonetization_risk"]
+ assert result["is_suitable"] is True
+ assert result["demonetization_risk"]
