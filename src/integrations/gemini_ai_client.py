@@ -154,7 +154,7 @@ class GeminiAIClient:
             self.logger.info("Starting Gemini video content analysis...")
 
             # Extract video metadata
-            video_metadata = self._extract_video_metadata(video_path)
+            video_metadata = await self._extract_video_metadata(video_path)
 
             # Prepare analysis context - handle both RedditPost object and dict
             if (
@@ -248,18 +248,21 @@ class GeminiAIClient:
             self.logger.error(f"Comment analysis failed: {e}")
             return None
 
-    def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
-        """Extract basic video metadata"""
+    async def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
+        """Extract basic video metadata asynchronously"""
         try:
             from moviepy import VideoFileClip
 
-            with VideoFileClip(str(video_path)) as clip:
-                return {
-                    "duration": clip.duration,
-                    "fps": clip.fps,
-                    "size": clip.size,
-                    "has_audio": clip.audio is not None,
-                }
+            def _get_metadata():
+                with VideoFileClip(str(video_path)) as clip:
+                    return {
+                        "duration": clip.duration,
+                        "fps": clip.fps,
+                        "size": clip.size,
+                        "has_audio": clip.audio is not None,
+                    }
+
+            return await asyncio.to_thread(_get_metadata)
 
         except Exception as e:
             self.logger.warning(f"Video metadata extraction failed: {e}")

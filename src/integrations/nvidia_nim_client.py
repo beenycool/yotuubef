@@ -203,7 +203,7 @@ class NvidiaNimAIClient:
 
             # Extract video metadata when a source file is available.
             if video_path is not None:
-                video_metadata = self._extract_video_metadata(video_path)
+                video_metadata = await self._extract_video_metadata(video_path)
             else:
                 video_metadata = {
                     "duration": 60,
@@ -309,18 +309,21 @@ class NvidiaNimAIClient:
             self.logger.warning(f"Failed to score story potential: {e}")
             return 50
 
-    def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
-        """Extract basic video metadata"""
+    async def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
+        """Extract basic video metadata asynchronously"""
         try:
             from moviepy import VideoFileClip
 
-            with VideoFileClip(str(video_path)) as clip:
-                return {
-                    "duration": clip.duration,
-                    "fps": clip.fps,
-                    "size": clip.size,
-                    "has_audio": clip.audio is not None,
-                }
+            def _get_metadata():
+                with VideoFileClip(str(video_path)) as clip:
+                    return {
+                        "duration": clip.duration,
+                        "fps": clip.fps,
+                        "size": clip.size,
+                        "has_audio": clip.audio is not None,
+                    }
+
+            return await asyncio.to_thread(_get_metadata)
 
         except Exception as e:
             self.logger.warning(f"Video metadata extraction failed: {e}")
