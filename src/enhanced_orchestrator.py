@@ -1546,6 +1546,115 @@ Search results:
             )
         return parsed
 
+    def _build_segment_blocks_for_queries(
+        self, segments: List[Dict[str, Any]], requested_indexes: List[int]
+    ) -> List[str]:
+        segment_blocks: List[str] = []
+        for idx in requested_indexes:
+            segment = segments[idx]
+            if not isinstance(segment, dict):
+                continue
+            narration = str(segment.get("narration", "") or "").strip()
+            visual_directive = str(segment.get("visual_directive", "") or "").strip()
+            evidence_refs = segment.get("evidence_refs", [])
+            if isinstance(evidence_refs, list):
+                evidence_text = ", ".join(
+                    [str(item).strip() for item in evidence_refs if str(item).strip()]
+                )
+            else:
+                evidence_text = str(evidence_refs or "").strip()
+
+            segment_blocks.append(
+                "\n".join(
+                    [
+                        f"SEGMENT_INDEX: {idx}",
+                        f"NARRATION: {narration}",
+                        f"VISUAL_DIRECTIVE: {visual_directive}",
+                        f"EVIDENCE_REFS: {evidence_text}",
+                    ]
+                )
+            )
+        return segment_blocks
+
+    async def _generate_queries_via_ai(
+        self,
+        prompt: str,
+        existing_set: set,
+        max_per_segment: int,
+        requested_count: int,
+    ) -> Optional[List[str]]:
+        active_client = getattr(self.ai_client, "active_client", None)
+        if not active_client or not hasattr(
+            active_client, "_chat_completion_with_fallback"
+        ):
+            return None
+
+        try:
+            response = await active_client._chat_completion_with_fallback(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Return strict JSON only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=600,
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content or "{}"
+            parsed = self._safe_parse_phase_json(content) or {}
+            raw_queries = parsed.get("image_queries", [])
+            if isinstance(raw_queries, list):
+                cleaned: List[str] = []
+                for item in raw_queries:
+                    text = str(item or "").strip()
+                    lowered = text.lower()
+                    if not text or lowered in existing_set:
+                        continue
+                    if len(text) < 4 or len(text) > 140:
+                        continue
+                    if text not in cleaned:
+                        cleaned.append(text)
+                if cleaned:
+                    return cleaned[: max_per_segment * requested_count]
+        except Exception:
+            pass
+        return None
+
+    def _generate_fallback_queries(
+        self,
+        segments: list,
+        requested_indexes: list,
+        existing_set: set,
+        max_per_segment: int,
+    ) -> List[str]:
+        fallback_queries: List[str] = []
+        for idx in requested_indexes:
+            segment = segments[idx]
+            if not isinstance(segment, dict):
+                continue
+            narration = str(segment.get("narration", "") or "").strip()
+            visual_directive = str(segment.get("visual_directive", "") or "").strip()
+            tokens = self._tokenize_relevance_text(f"{narration} {visual_directive}")
+            core = " ".join(tokens[:8]).strip()
+            if not core:
+                continue
+            variants = [
+                f"{core} screenshot",
+                f"{core} leaderboard",
+                f"{core} pdf",
+                f"{core} tweet",
+                f"{core} forum post",
+            ]
+            for query in variants:
+                lowered = query.lower().strip()
+                if lowered in existing_set:
+                    continue
+                if query not in fallback_queries:
+                    fallback_queries.append(query)
+        return fallback_queries[: max_per_segment * len(requested_indexes)]
+
     async def _generate_supplementary_image_queries(
         self,
         state: Any,
@@ -1574,31 +1683,9 @@ Search results:
             if str(item).strip()
         }
 
-        segment_blocks: List[str] = []
-        for idx in requested_indexes:
-            segment = segments[idx]
-            if not isinstance(segment, dict):
-                continue
-            narration = str(segment.get("narration", "") or "").strip()
-            visual_directive = str(segment.get("visual_directive", "") or "").strip()
-            evidence_refs = segment.get("evidence_refs", [])
-            if isinstance(evidence_refs, list):
-                evidence_text = ", ".join(
-                    [str(item).strip() for item in evidence_refs if str(item).strip()]
-                )
-            else:
-                evidence_text = str(evidence_refs or "").strip()
-
-            segment_blocks.append(
-                "\n".join(
-                    [
-                        f"SEGMENT_INDEX: {idx}",
-                        f"NARRATION: {narration}",
-                        f"VISUAL_DIRECTIVE: {visual_directive}",
-                        f"EVIDENCE_REFS: {evidence_text}",
-                    ]
-                )
-            )
+        segment_blocks = self._build_segment_blocks_for_queries(
+            segments, requested_indexes
+        )
 
         if not segment_blocks:
             return []
@@ -1616,66 +1703,16 @@ Search results:
             "SEGMENTS:\n" + "\n\n".join(segment_blocks)
         )
 
-        active_client = getattr(self.ai_client, "active_client", None)
-        if active_client and hasattr(active_client, "_chat_completion_with_fallback"):
-            try:
-                response = await active_client._chat_completion_with_fallback(
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": "Return strict JSON only.",
-                        },
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.2,
-                    max_tokens=600,
-                    response_format={"type": "json_object"},
-                )
-                content = response.choices[0].message.content or "{}"
-                parsed = self._safe_parse_phase_json(content) or {}
-                raw_queries = parsed.get("image_queries", [])
-                if isinstance(raw_queries, list):
-                    cleaned: List[str] = []
-                    for item in raw_queries:
-                        text = str(item or "").strip()
-                        lowered = text.lower()
-                        if not text or lowered in existing_set:
-                            continue
-                        if len(text) < 4 or len(text) > 140:
-                            continue
-                        if text not in cleaned:
-                            cleaned.append(text)
-                    if cleaned:
-                        return cleaned[: max_per_segment * len(requested_indexes)]
-            except Exception:
-                pass
+        ai_queries = await self._generate_queries_via_ai(
+            prompt, existing_set, max_per_segment, len(requested_indexes)
+        )
+        if ai_queries is not None:
+            return ai_queries
 
         # Heuristic fallback: build evidence-oriented variants from segment tokens.
-        fallback_queries: List[str] = []
-        for idx in requested_indexes:
-            segment = segments[idx]
-            if not isinstance(segment, dict):
-                continue
-            narration = str(segment.get("narration", "") or "").strip()
-            visual_directive = str(segment.get("visual_directive", "") or "").strip()
-            tokens = self._tokenize_relevance_text(f"{narration} {visual_directive}")
-            core = " ".join(tokens[:8]).strip()
-            if not core:
-                continue
-            variants = [
-                f"{core} screenshot",
-                f"{core} leaderboard",
-                f"{core} pdf",
-                f"{core} tweet",
-                f"{core} forum post",
-            ]
-            for query in variants:
-                lowered = query.lower().strip()
-                if lowered in existing_set:
-                    continue
-                if query not in fallback_queries:
-                    fallback_queries.append(query)
-        return fallback_queries[: max_per_segment * len(requested_indexes)]
+        return self._generate_fallback_queries(
+            segments, requested_indexes, existing_set, max_per_segment
+        )
 
     async def _run_visual_feedback_agent(
         self,
