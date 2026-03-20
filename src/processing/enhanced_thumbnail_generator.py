@@ -234,10 +234,10 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
                 'optimization_strategy': 'emotional_impact'
             }
         
-        elif strategy == 'curiosity_gap':
+elif strategy == 'curiosity_gap':
             # Use more mysterious/intriguing elements
-            curiosity_headlines = [h for h in headlines if any(word in h.lower() 
-                                 for word in {'secret', 'hidden', 'revealed', 'truth', 'mystery'})]
+            CURIOSITY_WORDS = {'secret', 'hidden', 'revealed', 'truth', 'mystery'}
+            curiosity_headlines = [h for h in headlines if any(word in h.lower() for word in CURIOSITY_WORDS)]
             headline = curiosity_headlines[0] if curiosity_headlines else (headlines[0] if headlines else "You Won't Believe...")
             
             return {
