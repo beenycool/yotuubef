@@ -163,3 +163,4 @@ aiosqlite==0.20.0
 filelock==3.24.3
 
 faster-whisper==1.0.0
+moviepy>=2.0.0  # Video file metadata extraction

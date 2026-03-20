@@ -250,23 +250,9 @@ class GeminiAIClient:
 
     async def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
         """Extract basic video metadata asynchronously"""
-        try:
-            from moviepy import VideoFileClip
+        from src.utils.video import extract_video_metadata
 
-            def _get_metadata():
-                with VideoFileClip(str(video_path)) as clip:
-                    return {
-                        "duration": clip.duration,
-                        "fps": clip.fps,
-                        "size": clip.size,
-                        "has_audio": clip.audio is not None,
-                    }
-
-            return await asyncio.to_thread(_get_metadata)
-
-        except Exception as e:
-            self.logger.warning(f"Video metadata extraction failed: {e}")
-            return {"duration": 60, "fps": 30, "size": (1920, 1080), "has_audio": True}
+        return await extract_video_metadata(video_path)
 
     async def _analyze_with_gemini(
         self, context: Dict[str, Any]
