@@ -5,6 +5,7 @@ Handles video uploads, thumbnail management, comment interactions, and performan
 
 import logging
 import asyncio
+import functools
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
@@ -16,7 +17,7 @@ try:
     from googleapiclient.http import MediaFileUpload
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    from google_auth_oauthlib.flow import InstalledAppFlow
+    # from google_auth_oauthlib.flow import InstalledAppFlow
 
     GOOGLE_API_AVAILABLE = True
 except ImportError:
@@ -241,9 +242,15 @@ class YouTubeClient:
             }
 
             # Upload video
-            media = MediaFileUpload(
-                video_path, chunksize=-1, resumable=True, mimetype="video/*"
+            loop = asyncio.get_running_loop()
+            media_partial = functools.partial(
+                MediaFileUpload,
+                video_path,
+                chunksize=-1,
+                resumable=True,
+                mimetype="video/*",
             )
+            media = await loop.run_in_executor(None, media_partial)
 
             # Execute upload
             insert_request = self.youtube_service.videos().insert(
@@ -294,7 +301,11 @@ class YouTubeClient:
             self.logger.info(f"Updating thumbnail for video {video_id}")
 
             # Upload thumbnail
-            media = MediaFileUpload(thumbnail_path, mimetype="image/jpeg")
+            loop = asyncio.get_running_loop()
+            media_partial = functools.partial(
+                MediaFileUpload, thumbnail_path, mimetype="image/jpeg"
+            )
+            media = await loop.run_in_executor(None, media_partial)
 
             request = self.youtube_service.thumbnails().set(
                 videoId=video_id, media_body=media
