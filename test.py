@@ -494,21 +494,25 @@ def verify_media_with_vlm(url: str, query: str, api_key: str) -> bool:
             messages=[
                 {
                     "role": "user",
-                    "content":[
-                        {"type": "text", "text": f"Does this image clearly show or relate to: '{query}'? It must not be a generic logo, icon, or unrelated graphic. Reply with only YES or NO."},
-                        {"type": "image_url", "image_url": {"url": url}}
-                    ]
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": f"Does this image clearly show or relate to: '{query}'? It must not be a generic logo, icon, or unrelated graphic. Reply with only YES or NO.",
+                        },
+                        {"type": "image_url", "image_url": {"url": url}},
+                    ],
                 }
             ],
             max_tokens=10,
             timeout=15,
-            temperature=0.1
+            temperature=0.1,
         )
         answer = response.choices[0].message.content.strip().upper()
         return "YES" in answer
     except Exception as e:
         log_event("VLM_VERIFY_WARNING", f"Skipping VLM check due to error: {e}")
         return True  # Fallback to accepting it if VLM endpoint errors out
+
 
 def maybe_download_media(state: RunState, search_payload: Dict[str, Any]) -> List[str]:
     if not DOWNLOAD_MEDIA:
@@ -520,12 +524,10 @@ def maybe_download_media(state: RunState, search_payload: Dict[str, Any]) -> Lis
             for item in hits:
                 if isinstance(item, dict) and item.get("url"):
                     url = str(item["url"])
-                    if "logo" in url.lower() or "icon" in url.lower() or "avatar" in url.lower():
-                        continue
                     # Verify using Qwen VLM
                     if verify_media_with_vlm(url, query, NVIDIA_API_KEY):
                         download_targets.append((url, "images"))
-                        break # Only need 1 verified image per query
+                        break  # Only need 1 verified image per query
 
     for query, hits in (search_payload.get("video", {}) or {}).items():
         if isinstance(hits, list):

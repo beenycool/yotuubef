@@ -318,8 +318,16 @@ class TTSService:
                     self._trim_segment_silence(audio_path, segment_index=i)
 
                     # FORCE fit to intended duration to prevent overlapping multiple TTS speaking at once
-                    adjusted_path = self.adjust_audio_speed(audio_path, segment.intended_duration_seconds)
+                    adjusted_path = self.adjust_audio_speed(
+                        audio_path, segment.intended_duration_seconds
+                    )
                     if adjusted_path and adjusted_path.exists():
+                        # Clean up the original temporary file after creating the adjusted version
+                        if adjusted_path != audio_path:
+                            try:
+                                Path(audio_path).unlink(missing_ok=True)
+                            except Exception:
+                                pass  # Best effort cleanup
                         audio_path = adjusted_path
 
                     # Get audio duration for timing validation

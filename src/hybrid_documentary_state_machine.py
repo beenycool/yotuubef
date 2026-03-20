@@ -544,11 +544,13 @@ class HackclubMediaSearchClient:
             # Strict filtering for logos, icons, and avatars
             url_lower = str(url).lower()
             title_lower = str(title).lower()
+            BAD_KEYWORDS = {"logo", "icon", "avatar"}
+
             if item.get("logo") is True:
                 continue
-            if any(bad in url_lower for bad in ["logo", "icon", "avatar", "profile"]):
+            if any(bad in url_lower for bad in BAD_KEYWORDS | {"profile"}):
                 continue
-            if any(bad in title_lower for bad in ["logo", "icon", "avatar"]):
+            if any(bad in title_lower for bad in BAD_KEYWORDS):
                 continue
 
             parsed.append(

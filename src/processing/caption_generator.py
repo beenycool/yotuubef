@@ -14,6 +14,7 @@ except Exception:  # pragma: no cover - optional dependency
     torch = None
 
 from src.config.settings import get_config
+from src.processing.video_processor_fixes import MoviePyCompat
 
 # Try to import faster-whisper
 try:
@@ -142,15 +143,13 @@ class CaptionGenerator:
                 start_time = word_data["start"]
                 end_time = word_data["end"]
 
-                from src.processing.video_processor_fixes import MoviePyCompat
-
                 txt_clip = MoviePyCompat.create_text_clip(
                     word_text,
                     font=font,
                     font_size=font_size,
                     color=text_color,
                     stroke_color=stroke_color,
-                    stroke_width=stroke_width
+                    stroke_width=stroke_width,
                 )
 
                 if txt_clip is None:
