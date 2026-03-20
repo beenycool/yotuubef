@@ -554,14 +554,14 @@ class NvidiaNimAIClient:
 
         title_lower = title.lower()
 
- if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
- hashtags.extend(("#funny", "#comedy"))
- elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
- hashtags.extend(("#amazing", "#mindblowing"))
- elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
- hashtags.extend(("#howto", "#tutorial"))
- elif any(word in title_lower for word in {"reaction", "responds"}):
- hashtags.extend(("#reaction", "#response"))
+        if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
+            hashtags.extend(["#funny", "#comedy"])
+        elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
+            hashtags.extend(["#amazing", "#mindblowing"])
+        elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
+            hashtags.extend(["#howto", "#tutorial"])
+        elif any(word in title_lower for word in {"reaction", "responds"}):
+            hashtags.extend(["#reaction", "#response"])
 
         hashtags.extend(["#trending", "#fyp", "#explore"])
 
