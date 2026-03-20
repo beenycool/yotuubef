@@ -110,11 +110,11 @@ class CaptionGenerator:
         self,
         video_clip,
         audio_path: Path,
-        font_size: int = 120,  # Increased for Hormozi style
-        font: str = "Impact",
-        text_color: str = "white",
-        stroke_color: str = "black",
-        stroke_width: int = 6,  # Increased stroke
+        font_size: int = CAPTION_FONT_SIZE,
+        font: str = CAPTION_FONT,
+        text_color: str = CAPTION_TEXT_COLOR,
+        stroke_color: str = CAPTION_STROKE_COLOR,
+        stroke_width: int = CAPTION_STROKE_WIDTH,
         highlight_color: str = "yellow",
     ) -> Optional[Any]:
         """
@@ -177,7 +177,7 @@ class CaptionGenerator:
                 fade_duration = min(
                     _MAX_FADE_DURATION, (end_time - start_time) * _FADE_DURATION_RATIO
                 )
-                if fade_duration > 0.02:
+                if fade_duration > _MIN_FADE_THRESHOLD:
                     txt_clip = MoviePyCompat.crossfadein(txt_clip, fade_duration)
                     txt_clip = MoviePyCompat.crossfadeout(txt_clip, fade_duration)
 

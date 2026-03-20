@@ -43,9 +43,11 @@ HACKCLUB_SEARCH_KEY = (
 NVIDIA_BASE_URL = os.getenv(
     "NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1"
 ).rstrip("/")
-MODEL_PRIMARY = os.getenv("MODEL_QWEN", "qwen/qwen3.5-397b-a17b")
-MODEL_FALLBACK = os.getenv("MODEL_KIMI", "qwen/qwen3.5-397b-a17b")
+MODEL_PRIMARY = os.getenv("MODEL_QWEN", "qwen/qwen2.5-7b-instruct")
+MODEL_FALLBACK = os.getenv("MODEL_KIMI", "qwen/qwen3-235b-a22b")
 NVIDIA_CHAT_RETRIES = int(os.getenv("NVIDIA_CHAT_RETRIES", "3"))
+
+VLM_VIDEO_EXTENSIONS = frozenset({".mp4", ".webm", ".mov"})
 
 SEARCH_COUNT = int(os.getenv("SEARCH_COUNT", "6"))
 DOWNLOAD_MEDIA = os.getenv("DOWNLOAD_MEDIA", "1").strip() not in {"0", "false", "False"}
@@ -702,28 +704,36 @@ def gather_workspace_assets(state: RunState) -> List[str]:
     return assets
 
 
-def remap_visual_asset_paths(script_payload: Dict[str, Any], assets: List[str], project_dir: str) -> None:
+def remap_visual_asset_paths(
+    script_payload: Dict[str, Any], assets: List[str], project_dir: str
+) -> None:
     if not assets:
         return
-    segments = script_payload.get("segments",[])
+    segments = script_payload.get("segments", [])
     if not isinstance(segments, list):
         return
 
     # Use Qwen VLM to intelligently map assets to segments
     if NVIDIA_API_KEY:
-        log_event("VLM_MAPPING", "Using Qwen VLM to map visual assets to script segments...")
-        content_items =[
-            {"type": "text", "text": "Map each script segment to the most visually appropriate asset from the provided images. Return ONLY a JSON object with a 'mapping' list containing objects with 'segment_index' and 'asset_index'."}
+        log_event(
+            "VLM_MAPPING", "Using Qwen VLM to map visual assets to script segments..."
+        )
+        content_items = [
+            {
+                "type": "text",
+                "text": "Map each script segment to the most visually appropriate asset from the provided images. Return ONLY a JSON object with a 'mapping' list containing objects with 'segment_index' and 'asset_index'.",
+            }
         ]
 
-        valid_assets =[]
+        valid_assets = []
         for idx, asset in enumerate(assets):
             full_path = Path(project_dir) / asset
-            if not full_path.exists(): continue
+            if not full_path.exists():
+                continue
 
             try:
                 img = None
-                if full_path.suffix.lower() in['.mp4', '.webm', '.mov']:
+                if full_path.suffix.lower() in VLM_VIDEO_EXTENSIONS:
                     cap = cv2.VideoCapture(str(full_path))
                     ret, frame = cap.read()
                     cap.release()
@@ -735,42 +745,55 @@ def remap_visual_asset_paths(script_payload: Dict[str, Any], assets: List[str], 
                 if img is not None:
                     # resize to save tokens
                     img = cv2.resize(img, (512, 512))
-                    _, buffer = cv2.imencode('.jpg', img)
-                    b64 = base64.b64encode(buffer).decode('utf-8')
-                    content_items.append({
-                        "type": "text",
-                        "text": f"Asset {len(valid_assets)}: {asset}"
-                    })
-                    content_items.append({
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"}
-                    })
+                    _, buffer = cv2.imencode(".jpg", img)
+                    b64 = base64.b64encode(buffer).decode("utf-8")
+                    content_items.append(
+                        {"type": "text", "text": f"Asset {len(valid_assets)}: {asset}"}
+                    )
+                    content_items.append(
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                        }
+                    )
                     valid_assets.append(asset)
             except Exception as e:
-                log_event("VLM_ASSET_LOAD_ERROR", f"Failed to process asset {asset}: {e}")
+                log_event(
+                    "VLM_ASSET_PROCESSING_ERROR",
+                    {"asset": str(full_path), "error": str(e)},
+                )
 
         if valid_assets:
-            seg_text = "\n".join([f"Segment {i}: {s.get('narration', '')} | Directive: {s.get('visual_directive', '')}" for i, s in enumerate(segments)])
-            content_items.append({"type": "text", "text": f"Script Segments:\n{seg_text}\n\nReturn JSON format: {{\"mapping\": [{{\"segment_index\": 0, \"asset_index\": 2}}]}}"})
+            seg_text = "\n".join(
+                [
+                    f"Segment {i}: {s.get('narration', '')} | Directive: {s.get('visual_directive', '')}"
+                    for i, s in enumerate(segments)
+                ]
+            )
+            content_items.append(
+                {
+                    "type": "text",
+                    "text": f'Script Segments:\n{seg_text}\n\nReturn JSON format: {{"mapping": [{{"segment_index": 0, "asset_index": 2}}]}}',
+                }
+            )
 
-            client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=NVIDIA_API_KEY)
             try:
-                response = client.chat.completions.create(
+                response_text = nvidia_chat(
                     model=MODEL_PRIMARY,
                     messages=[{"role": "user", "content": content_items}],
                     temperature=0.2,
-                    max_tokens=1000,
-                    response_format={"type": "json_object"}
                 )
-                res_json = json.loads(response.choices[0].message.content)
-                mapping = res_json.get("mapping",[])
+                res_json = json.loads(response_text)
+                mapping = res_json.get("mapping", [])
 
                 # Apply mapping
                 for m in mapping:
                     s_idx = m.get("segment_index")
                     a_idx = m.get("asset_index")
                     if s_idx is not None and a_idx is not None:
-                        if 0 <= s_idx < len(segments) and 0 <= a_idx < len(valid_assets):
+                        if 0 <= s_idx < len(segments) and 0 <= a_idx < len(
+                            valid_assets
+                        ):
                             segments[s_idx]["visual_asset_path"] = valid_assets[a_idx]
 
                 # Fill any remaining missing with fallback

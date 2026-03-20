@@ -8,8 +8,8 @@ ai_features:
   use_fallback_analysis: true
 api:
   nvidia_nim_api_key: ""
-  nvidia_nim_model: "qwen/qwen3.5-397b-a17b"
-  nvidia_nim_alt_model: "qwen/qwen3.5-397b-a17b"
+  nvidia_nim_model: "qwen/qwen2.5-7b-instruct"
+  nvidia_nim_alt_model: "qwen/qwen3-235b-a22b"
   nvidia_nim_base_url: "https://integrate.api.nvidia.com/v1"
   nvidia_nim_rate_limit_rpm: 60
   ai_provider: "nvidia_nim"

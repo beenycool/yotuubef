@@ -44,10 +44,10 @@ logger = logging.getLogger(__name__)
 
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
-DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen3.5-397b-a17b")
-DEFAULT_TRANSCRIBE_MODEL = os.getenv(
-    "NVIDIA_TRANSCRIBE_MODEL", "nvidia/parakeet-ctc-1.1b-asr"
-)
+DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen2.5-7b-instruct")
+DEFAULT_TRANSCRIBE_MODEL = os.getenv("NVIDIA_TRANSCRIBE_MODEL", "whisper-1")
+
+LOGO_FILTER_KEYWORDS = frozenset({"logo", "icon", "favicon"})
 
 
 class PipelinePhase(str, Enum):

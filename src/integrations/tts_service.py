@@ -84,6 +84,7 @@ class TTSService:
     QWEN_MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"
     QWEN_DEFAULT_SPEAKER = "Ryan"
     QWEN_DEFAULT_LANGUAGE = "Auto"
+    MAX_TTS_SPEEDUP_FACTOR = 1.4
 
     def __init__(self):
         self.config = get_config()
@@ -338,26 +339,37 @@ class TTSService:
 
                         # FIX: Prevent overlapping TTS by forcing audio to fit intended duration
                         if actual_duration > segment.intended_duration_seconds:
-                            speed_factor = actual_duration / segment.intended_duration_seconds
-                            if speed_factor <= 1.4:  # Reasonable speedup limit
+                            speed_factor = (
+                                actual_duration / segment.intended_duration_seconds
+                            )
+                            if speed_factor <= self.MAX_TTS_SPEEDUP_FACTOR:
                                 adjusted_path = self.adjust_audio_speed(
                                     audio_path,
                                     target_duration=segment.intended_duration_seconds,
-                                    output_path=audio_path.with_suffix('.fit.wav')
+                                    output_path=audio_path.with_suffix(".fit.wav"),
+                                )
+                                if adjusted_path and adjusted_path.exists():
+                                    audio_path = adjusted_path
+                                    from moviepy import AudioFileClip as AFC
+
+                                    adj_clip = AFC(str(adjusted_path))
+                                    try:
+                                        actual_duration = adj_clip.duration
+                                    finally:
+                                        adj_clip.close()
+                            else:
+                                self.logger.warning(
+                                    f"Segment {i} requires speedup of {speed_factor:.2f}x "
+                                    f"(>{self.MAX_TTS_SPEEDUP_FACTOR}x), applying max speedup"
+                                )
+                                adjusted_path = self.adjust_audio_speed(
+                                    audio_path,
+                                    target_duration=segment.intended_duration_seconds,
+                                    output_path=audio_path.with_suffix(".fit.wav"),
                                 )
                                 if adjusted_path and adjusted_path.exists():
                                     audio_path = adjusted_path
                                     actual_duration = segment.intended_duration_seconds
-                            else:
-                                # Speed up by max 1.4x to mitigate overlap
-                                adjusted_path = self.adjust_audio_speed(
-                                    audio_path,
-                                    target_duration=actual_duration / 1.4,
-                                    output_path=audio_path.with_suffix('.fit.wav')
-                                )
-                                if adjusted_path and adjusted_path.exists():
-                                    audio_path = adjusted_path
-                                    actual_duration = actual_duration / 1.4
 
                         result["actual_duration"] = actual_duration
                         result["audio_path"] = audio_path
