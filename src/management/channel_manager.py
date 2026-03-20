@@ -231,15 +231,19 @@ class ChannelManager:
                 self.logger.warning(
                     "AI client does not support batch comment analysis, falling back to individual analysis"
                 )
-                for c in batch_comments:
+                async def safe_analyze(c):
                     try:
-                        analysis = await self._analyze_single_comment(c, video_context)
-                        if analysis:
-                            analyses.append(analysis)
+                        return await self._analyze_single_comment(c, video_context)
                     except Exception as e:
                         self.logger.warning(
-                            f"Failed to analyze comment {c.get('id', 'unknown')}: {e}"
-                        )
+                            f"Failed to analyze comment {c.get('id', 'unknown')}: {e}",
+                            exc_info=True,
+                            )
+                        return None
+
+                tasks = [safe_analyze(c) for c in batch_comments]
+                results_gather = await asyncio.gather(*tasks)
+                analyses.extend(r for r in results_gather if r is not None)
 
             # Create a map of comments for easy lookup
             comment_map = {c.get("id"): c for c in batch_comments}
