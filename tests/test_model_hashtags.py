@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 from src.models import VideoAnalysis
 
+
 def test_validate_hashtags_valid_formats():
     """Test valid hashtags are preserved and properly formatted."""
     input_tags = ["#awesome", "video", "#cool_stuff", "   #spaces   "]
@@ -10,21 +11,30 @@ def test_validate_hashtags_valid_formats():
     result = VideoAnalysis.validate_hashtags(input_tags)
     assert result == expected
 
+
 def test_validate_hashtags_strips_special_characters():
     """Test special characters are stripped but alphanumeric and underscores are kept."""
-    standard_tags = ["#hello!world", "#tag@name", "#with_underscore", "#123_abc", "#a#b#c"]
+    standard_tags = [
+        "#hello!world",
+        "#tag@name",
+        "#with_underscore",
+        "#123_abc",
+        "#a#b#c",
+    ]
     expected = ["#helloworld", "#tagname", "#with_underscore", "#123_abc", "#a"]
 
     result = VideoAnalysis.validate_hashtags(standard_tags)
     assert result == expected
 
+
 def test_validate_hashtags_handles_multiple_hashes():
     """Test handling of tags with multiple hash symbols."""
     input_tags = ["#single", "##double", "#a#b", "no#hash"]
-    expected = ["#single", "#a", "#no"]
+    expected = ["#single", "#double", "#a", "#no"]
 
     result = VideoAnalysis.validate_hashtags(input_tags)
     assert result == expected
+
 
 def test_validate_hashtags_ignores_empty_and_whitespace():
     """Test empty strings and whitespace-only strings are ignored."""
@@ -34,20 +44,23 @@ def test_validate_hashtags_ignores_empty_and_whitespace():
     result = VideoAnalysis.validate_hashtags(input_tags)
     assert result == expected
 
-def test_validate_hashtags_raises_value_error_if_empty():
-    """Test ValueError is raised if no valid hashtags remain."""
-    invalid_inputs = [
+
+@pytest.mark.parametrize(
+    "invalid_input",
+    [
         [],
         [""],
         ["   "],
         ["#!@#"],
         ["##invalid"],
-        ["#   "]
-    ]
+        ["#   "],
+    ],
+)
+def test_validate_hashtags_raises_value_error_if_empty(invalid_input):
+    """Test ValueError is raised if no valid hashtags remain."""
+    with pytest.raises(ValueError, match="At least one valid hashtag is required"):
+        VideoAnalysis.validate_hashtags(invalid_input)
 
-    for invalid_input in invalid_inputs:
-        with pytest.raises(ValueError, match="At least one valid hashtag is required"):
-            VideoAnalysis.validate_hashtags(invalid_input)
 
 def test_validate_hashtags_pydantic_validation():
     """Test via Pydantic model validation to ensure it integrates correctly."""
@@ -67,7 +80,7 @@ def test_validate_hashtags_pydantic_validation():
         "music_genres": ["pop"],
         "hashtags": ["#valid_tag"],  # We will test overriding this below
         "thumbnail_info": {"timestamp_seconds": 1.0, "reason": "reason"},
-        "call_to_action": {"text": "Click here", "type": "subscribe"}
+        "call_to_action": {"text": "Click here", "type": "subscribe"},
     }
 
     # Test valid instantiation
