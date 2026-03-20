@@ -164,8 +164,8 @@ class APIConfig:
 
     # NVIDIA NIM
     nvidia_nim_api_key: str = ""
-    nvidia_nim_model: str = "qwen/qwen3.5-397b-a17b"
-    nvidia_nim_alt_model: str = "moonshotai/kimi-k2.5"
+    nvidia_nim_model: str = "qwen/qwen2.5-7b-instruct"
+    nvidia_nim_alt_model: str = "qwen/qwen3-235b-a22b"
     nvidia_nim_rate_limit_rpm: int = 60
     nvidia_nim_base_url: str = "https://integrate.api.nvidia.com/v1"
     ai_provider: str = "nvidia_nim"

@@ -16,6 +16,16 @@ except Exception:  # pragma: no cover - optional dependency
 from src.config.settings import get_config
 from src.processing.video_processor_fixes import MoviePyCompat
 
+_MAX_FADE_DURATION = 0.1
+_FADE_DURATION_RATIO = 0.2
+_MIN_FADE_THRESHOLD = 0.02
+
+CAPTION_FONT_SIZE = 120
+CAPTION_STROKE_WIDTH = 6
+CAPTION_FONT = "Impact"
+CAPTION_TEXT_COLOR = "white"
+CAPTION_STROKE_COLOR = "black"
+
 # Try to import faster-whisper
 try:
     from faster_whisper import WhisperModel
@@ -100,11 +110,11 @@ class CaptionGenerator:
         self,
         video_clip,
         audio_path: Path,
-        font_size: int = 90,
-        font: str = "Impact",
-        text_color: str = "white",
-        stroke_color: str = "black",
-        stroke_width: int = 5,
+        font_size: int = CAPTION_FONT_SIZE,
+        font: str = CAPTION_FONT,
+        text_color: str = CAPTION_TEXT_COLOR,
+        stroke_color: str = CAPTION_STROKE_COLOR,
+        stroke_width: int = CAPTION_STROKE_WIDTH,
         highlight_color: str = "yellow",
     ) -> Optional[Any]:
         """
@@ -131,6 +141,7 @@ class CaptionGenerator:
         composite_clip = None
         try:
             from moviepy import TextClip, CompositeVideoClip
+            from src.processing.video_processor_fixes import MoviePyCompat
 
             # Transcribe audio
             words = self.transcribe_with_timestamps(audio_path)
@@ -155,13 +166,18 @@ class CaptionGenerator:
                 if txt_clip is None:
                     continue
 
+                # Position center screen perfectly
                 txt_clip = MoviePyCompat.with_position(txt_clip, ("center", "center"))
-                txt_clip = MoviePyCompat.with_start(txt_clip, start_time)
-                txt_clip = MoviePyCompat.with_duration(txt_clip, end_time - start_time)
+                txt_clip = MoviePyCompat.with_start(
+                    MoviePyCompat.with_duration(txt_clip, end_time - start_time),
+                    start_time,
+                )
 
                 # Add fade for smoother transitions
-                fade_duration = min(0.1, (end_time - start_time) * 0.2)
-                if fade_duration > 0.02:
+                fade_duration = min(
+                    _MAX_FADE_DURATION, (end_time - start_time) * _FADE_DURATION_RATIO
+                )
+                if fade_duration > _MIN_FADE_THRESHOLD:
                     txt_clip = MoviePyCompat.crossfadein(txt_clip, fade_duration)
                     txt_clip = MoviePyCompat.crossfadeout(txt_clip, fade_duration)
 

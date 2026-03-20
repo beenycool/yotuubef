@@ -98,7 +98,7 @@ class NvidiaNimAIClient:
                     self.config.api, "nvidia_nim_model", "qwen/qwen3.5-397b-a17b"
                 )
                 self.alt_model = getattr(
-                    self.config.api, "nvidia_nim_alt_model", "moonshotai/kimi-k2-5"
+                    self.config.api, "nvidia_nim_alt_model", "qwen/qwen3-235b-a22b"
                 )
                 self.nim_available = True
 
