@@ -13,6 +13,12 @@ from moviepy.audio.io.AudioFileClip import AudioFileClip
 
 from src.config.settings import get_config
 
+# Module-level constants for audio file extensions
+AUDIO_PATTERN_EXTENSIONS = ("*.wav", "*.mp3", "*.ogg", "*.m4a")
+# Derive VALID_AUDIO_SUFFIXES from AUDIO_PATTERN_EXTENSIONS and use a set
+# for efficient membership testing (used in validate_sound_effect)
+VALID_AUDIO_SUFFIXES = {ext[1:].lower() for ext in AUDIO_PATTERN_EXTENSIONS}
+
 
 @dataclass
 class SoundEffectFile:
@@ -162,7 +168,7 @@ class SoundEffectsManager:
 
                 if category_dir.exists():
                     # Find all sound files in category
-                    for pattern in ["*.wav", "*.mp3", "*.ogg", "*.m4a"]:
+                    for pattern in AUDIO_PATTERN_EXTENSIONS:
                         for file_path in category_dir.glob(pattern):
                             if file_path.is_file():
                                 sound_effect = SoundEffectFile(
@@ -183,7 +189,7 @@ class SoundEffectsManager:
 
             # Also scan root directory for uncategorized effects
             root_files = []
-            for pattern in ["*.wav", "*.mp3", "*.ogg", "*.m4a"]:
+            for pattern in AUDIO_PATTERN_EXTENSIONS:
                 for file_path in self.sound_effects_dir.glob(pattern):
                     if file_path.is_file():
                         # Try to categorize based on filename
@@ -408,7 +414,7 @@ class SoundEffectsManager:
             if not file_path.exists():
                 return False, f"File does not exist: {file_path}"
 
-            if file_path.suffix.lower() not in [".wav", ".mp3", ".ogg", ".m4a"]:
+            if file_path.suffix.lower() not in VALID_AUDIO_SUFFIXES:
                 return False, f"Unsupported audio format: {file_path.suffix}"
 
             # Try to load the audio file
