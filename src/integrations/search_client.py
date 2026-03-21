@@ -12,7 +12,6 @@ if TYPE_CHECKING:
     from src.utils.search_audit_logger import SearchAuditLogger
 
 
-
 class DeepResearchClient:
     def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
