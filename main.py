@@ -23,8 +23,12 @@ from src.hybrid_documentary_state_machine import PipelinePhase
 from src.management.channel_manager import ChannelManager
 from src.processing.enhancement_optimizer import EnhancementOptimizer
 from src.integrations.reddit_client import RedditClient
+from src.integrations.reddit_client import create_reddit_client
 from src.config.settings import get_config, setup_logging
 from src.utils.cleanup import clear_temp_files, clear_results, clear_logs
+
+# Multiplier to expand Reddit fetch pool when searching for candidate posts
+REDDIT_FETCH_POOL_MULTIPLIER = 3
 
 
 class EnhancedYouTubeGenerator:
@@ -220,11 +224,11 @@ class EnhancedYouTubeGenerator:
             self.logger.error(f"Hybrid workflow failed: {e}")
             return {"success": False, "error": str(e)}
 
-
     async def _ensure_reddit_client(self) -> Dict[str, Any]:
         """Initialize and verify Reddit client connection."""
         if self.reddit_client is None:
             from src.integrations.reddit_client import create_reddit_client
+
             self.reddit_client = await create_reddit_client()
 
         if not self.reddit_client.is_connected():
@@ -234,7 +238,9 @@ class EnhancedYouTubeGenerator:
             }
         return {"success": True}
 
-    async def _fetch_reddit_posts(self, max_videos: int, subreddit_names: Optional[List[str]]) -> Dict[str, Any]:
+    async def _fetch_reddit_posts(
+        self, max_videos: int, subreddit_names: Optional[List[str]]
+    ) -> Dict[str, Any]:
         """Fetch potential posts from Reddit."""
         fetch_pool = max_videos * 3
         self.logger.info(
@@ -254,7 +260,9 @@ class EnhancedYouTubeGenerator:
             }
         return {"success": True, "posts": reddit_posts}
 
-    async def _score_and_sort_posts(self, reddit_posts: List[Any], max_videos: int) -> tuple[List[Any], List[Any]]:
+    async def _score_and_sort_posts(
+        self, reddit_posts: List[Any], max_videos: int
+    ) -> tuple[List[Any], List[Any]]:
         """Score posts using AI and sort them by potential."""
         self.logger.info(
             f"Found {len(reddit_posts)} raw posts. Evaluating narrative potential via AI..."
@@ -316,7 +324,9 @@ class EnhancedYouTubeGenerator:
                 return fetch_result
 
             reddit_posts = fetch_result["posts"]
-            best_posts, scored_posts = await self._score_and_sort_posts(reddit_posts, max_videos)
+            best_posts, scored_posts = await self._score_and_sort_posts(
+                reddit_posts, max_videos
+            )
 
             # Create result dict for summary (using best_posts)
             result_summary = {"success": True, "posts": best_posts}
