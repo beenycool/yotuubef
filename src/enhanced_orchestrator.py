@@ -122,16 +122,6 @@ class EnhancedVideoOrchestrator:
             self.logger.info("Starting faceless lore generation for: %s", reddit_url)
 
             reddit_post = await self._fetch_and_validate_reddit_post(reddit_url)
-<<<<<<< HEAD
-            if isinstance(reddit_post, dict) and not reddit_post.get("success", True):
-                return reddit_post
-
-            analysis = await self._generate_lore_script(reddit_post)
-            if not analysis:
-                return {"success": False, "error": "Script generation failed"}
-
-            tts_paths = self._generate_tts_audio_clip(analysis.narrative_script_segments)
-=======
             if isinstance(reddit_post, dict):
                 return reddit_post
 
@@ -140,37 +130,23 @@ class EnhancedVideoOrchestrator:
                 return {"success": False, "error": "Script generation failed"}
 
             tts_paths = self._generate_tts_audio(analysis)
->>>>>>> eeaec6a (🧹 fix: Reduce cyclomatic complexity in process_enhanced_video)
             if not tts_paths:
                 return {"success": False, "error": "TTS generation failed"}
 
-            audio_segments, audio_clip, final_video, output_file = self._create_final_video(reddit_post, analysis, tts_paths)
-
-<<<<<<< HEAD
-            final_video = self._generate_faceless_video_clip(reddit_post, analysis, audio_clip)
-
-            output_file = self.config.paths.processed_dir / f"lore_{reddit_post.id}.mp4"
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-            final_video.write_videofile(
-                str(output_file),
-                fps=30,
-                codec="libx264",
-                audio_codec="aac",
+            audio_segments, audio_clip, final_video, output_file = (
+                self._create_final_video(reddit_post, analysis, tts_paths)
             )
 
-            upload_result = await self._upload_faceless_video(output_file, analysis)
-=======
             upload_result = await self.youtube_client.upload_video(
-                str(output_file), {
+                str(output_file),
+                {
                     "title": analysis.suggested_title,
                     "description": analysis.summary_for_description,
                     "tags": [tag.replace("#", "") for tag in analysis.hashtags],
-                }
+                },
             )
 
             self._cleanup_resources(audio_segments, audio_clip, final_video)
-
->>>>>>> eeaec6a (🧹 fix: Reduce cyclomatic complexity in process_enhanced_video)
             if not upload_result.get("success"):
                 return {
                     "success": False,
@@ -241,9 +217,7 @@ class EnhancedVideoOrchestrator:
             "num_comments": reddit_post.num_comments,
             "deep_research": research_facts,
         }
-        return await self.ai_client.analyze_video_content(
-            None, reddit_content_dict
-        )
+        return await self.ai_client.analyze_video_content(None, reddit_content_dict)
 
     def _generate_tts_audio_clip(self, narrative_script_segments: Any) -> List[str]:
         tts_results = (
@@ -257,7 +231,9 @@ class EnhancedVideoOrchestrator:
             if item.get("success") and item.get("audio_path")
         ]
 
-    def _generate_faceless_video_clip(self, reddit_post: Any, analysis: Any, audio_clip: Any) -> Any:
+    def _generate_faceless_video_clip(
+        self, reddit_post: Any, analysis: Any, audio_clip: Any
+    ) -> Any:
         bg_manager = BackgroundManager()
         video_clip = bg_manager.get_sliced_background(
             target_duration=audio_clip.duration,
@@ -270,16 +246,15 @@ class EnhancedVideoOrchestrator:
             )
         return MoviePyCompat.with_audio(video_clip, audio_clip)
 
-    async def _upload_faceless_video(self, output_file: Any, analysis: Any) -> Dict[str, Any]:
+    async def _upload_faceless_video(
+        self, output_file: Any, analysis: Any
+    ) -> Dict[str, Any]:
         upload_metadata = {
             "title": analysis.suggested_title,
             "description": analysis.summary_for_description,
             "tags": [tag.replace("#", "") for tag in analysis.hashtags],
         }
-        return await self.youtube_client.upload_video(
-            str(output_file), upload_metadata
-        )
-
+        return await self.youtube_client.upload_video(str(output_file), upload_metadata)
 
     async def _ai_studio_fetch_and_analyze(self, reddit_url: str) -> tuple[Any, Any]:
         # Step 1: Get Reddit post
@@ -289,7 +264,10 @@ class EnhancedVideoOrchestrator:
         if not reddit_post:
             return None, {"success": False, "error": "Failed to load Reddit post"}
         if reddit_post.is_video:
-            return None, {"success": False, "error": "Text posts only for this pipeline"}
+            return None, {
+                "success": False,
+                "error": "Text posts only for this pipeline",
+            }
 
         # Improvement 1: Multi-Turn Agentic Research
         self.logger.info("Step 1: Agentic Research (Improvement 1)")
@@ -302,9 +280,7 @@ class EnhancedVideoOrchestrator:
         )
 
         # Step 2: Generate script with Perfect Loop + B-roll queries
-        self.logger.info(
-            "Step 2: Script Generation with Perfect Loop (Improvement 2)"
-        )
+        self.logger.info("Step 2: Script Generation with Perfect Loop (Improvement 2)")
         reddit_content_dict = {
             "title": reddit_post.title,
             "selftext": reddit_post.selftext,
@@ -313,15 +289,15 @@ class EnhancedVideoOrchestrator:
             "num_comments": reddit_post.num_comments,
             "deep_research": research_facts,
         }
-        analysis = await self.ai_client.analyze_video_content(
-            None, reddit_content_dict
-        )
+        analysis = await self.ai_client.analyze_video_content(None, reddit_content_dict)
         if not analysis:
             return None, {"success": False, "error": "Script generation failed"}
 
         return reddit_post, analysis
 
-    async def _ai_studio_generate_audio_and_broll(self, analysis: Any) -> tuple[list[Any], Any, list[dict[str, Any]]]:
+    async def _ai_studio_generate_audio_and_broll(
+        self, analysis: Any
+    ) -> tuple[list[Any], Any, list[dict[str, Any]]]:
         # Step 3: Generate TTS audio
         self.logger.info("Step 3: TTS Generation")
         tts_results = (
@@ -345,10 +321,7 @@ class EnhancedVideoOrchestrator:
         self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
         broll_queries = []
         for segment in analysis.narrative_script_segments:
-            if (
-                hasattr(segment, "b_roll_search_query")
-                and segment.b_roll_search_query
-            ):
+            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
                 broll_queries.append(segment.b_roll_search_query)
 
         async with BraveImageClient() as image_client:
@@ -359,10 +332,7 @@ class EnhancedVideoOrchestrator:
         # Map images to moments
         broll_moments = []
         for segment in analysis.narrative_script_segments:
-            if (
-                hasattr(segment, "b_roll_search_query")
-                and segment.b_roll_search_query
-            ):
+            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
                 query = segment.b_roll_search_query
                 if query in broll_images and broll_images[query]:
                     broll_moments.append(
@@ -374,7 +344,15 @@ class EnhancedVideoOrchestrator:
                     )
         return audio_segments, main_audio, broll_moments
 
-    def _ai_studio_compose_and_render(self, reddit_post: Any, analysis: Any, main_audio: Any, audio_segments: list[Any], broll_moments: list[dict[str, Any]], options: dict[str, Any]) -> dict[str, Any]:
+    def _ai_studio_compose_and_render(
+        self,
+        reddit_post: Any,
+        analysis: Any,
+        main_audio: Any,
+        audio_segments: list[Any],
+        broll_moments: list[dict[str, Any]],
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
         # Step 5: Get background video
         self.logger.info("Step 5: Background Video")
         bg_manager = BackgroundManager()
@@ -440,17 +418,14 @@ class EnhancedVideoOrchestrator:
         boom_path = sfx_manager.get_boom_sound()
         if boom_path and analysis.narrative_script_segments:
             hook_time = analysis.narrative_script_segments[0].time_seconds
-            boom_clip = (
-                AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
-            )
+            boom_clip = AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
             audio_layers.append(boom_clip)
 
         # Composite audio
         final_audio = None
         final_video = None
         output_file = (
-            self.config.paths.processed_dir
-            / f"production_studio_{reddit_post.id}.mp4"
+            self.config.paths.processed_dir / f"production_studio_{reddit_post.id}.mp4"
         )
         try:
             final_audio = CompositeAudioClip(audio_layers)
@@ -483,9 +458,7 @@ class EnhancedVideoOrchestrator:
                 try:
                     final_audio.close()
                 except Exception as e:
-                    self.logger.warning(
-                        "Failed to close composite audio clip: %s", e
-                    )
+                    self.logger.warning("Failed to close composite audio clip: %s", e)
             try:
                 main_audio.close()
             except Exception as e:
@@ -562,9 +535,7 @@ class EnhancedVideoOrchestrator:
             "num_comments": reddit_post.num_comments,
             "deep_research": research_facts,
         }
-        return await self.ai_client.analyze_video_content(
-            None, reddit_content_dict
-        )
+        return await self.ai_client.analyze_video_content(None, reddit_content_dict)
 
     def _generate_tts_audio(self, analysis: Any) -> list:
         tts_results = (
@@ -578,7 +549,9 @@ class EnhancedVideoOrchestrator:
             if item.get("success") and item.get("audio_path")
         ]
 
-    def _create_final_video(self, reddit_post: Any, analysis: Any, tts_paths: list) -> tuple:
+    def _create_final_video(
+        self, reddit_post: Any, analysis: Any, tts_paths: list
+    ) -> tuple:
         audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
         audio_clip = concatenate_audioclips(audio_segments)
 
@@ -604,7 +577,9 @@ class EnhancedVideoOrchestrator:
         )
         return audio_segments, audio_clip, final_video, output_file
 
-    def _cleanup_resources(self, audio_segments: list, audio_clip: Any, final_video: Any) -> None:
+    def _cleanup_resources(
+        self, audio_segments: list, audio_clip: Any, final_video: Any
+    ) -> None:
         for segment in audio_segments:
             try:
                 segment.close()
@@ -636,16 +611,27 @@ class EnhancedVideoOrchestrator:
             )
             options = options or {}
 
-            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(reddit_url)
+            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(
+                reddit_url
+            )
             if reddit_post is None:
                 return analysis_or_err
 
-            audio_segments, main_audio, broll_moments_or_err = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
+            (
+                audio_segments,
+                main_audio,
+                broll_moments_or_err,
+            ) = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
             if main_audio is None:
                 return broll_moments_or_err[0]
 
             return self._ai_studio_compose_and_render(
-                reddit_post, analysis_or_err, main_audio, audio_segments, broll_moments_or_err, options
+                reddit_post,
+                analysis_or_err,
+                main_audio,
+                audio_segments,
+                broll_moments_or_err,
+                options,
             )
 
         except Exception as e:
@@ -1507,7 +1493,9 @@ Search results:
     def _active_chat_completion_available(self) -> bool:
         """Return True when an AI client with chat completion fallback is available."""
         active_client = getattr(self.ai_client, "active_client", None)
-        return bool(active_client and hasattr(active_client, "_chat_completion_with_fallback"))
+        return bool(
+            active_client and hasattr(active_client, "_chat_completion_with_fallback")
+        )
 
     async def _generate_hybrid_phase_payload(
         self,
@@ -2534,8 +2522,8 @@ Search results:
             return candidates
 
         try:
-            payload = ast.literal_eval(text)
-        except (ValueError, SyntaxError):
+            payload = json.loads(text)
+        except json.JSONDecodeError:
             return candidates
 
         if isinstance(payload, dict):
