@@ -1448,10 +1448,9 @@ class AdvancedVideoEnhancer:
     ) -> Optional[VideoFileClip]:
         """Apply FFmpeg filters using subprocess for professional quality"""
         try:
-            import tempfile
-            import subprocess
+            # module-level imports already available
 
-            # Create temporary files
+            # Create temporary files securely
             fd_in, input_path = tempfile.mkstemp(suffix=".mp4")
             os.close(fd_in)
             fd_out, output_path = tempfile.mkstemp(suffix=".mp4")
@@ -2452,9 +2451,16 @@ class TemporaryFileManager:
 
     def create_temp_file(self, suffix: str = "", prefix: str = "video_proc_") -> Path:
         """Create and register a temporary file"""
+<<<<<<< HEAD
         fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
         os.close(fd)
         temp_file = Path(temp_path)
+=======
+        import os
+        fd, path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
+        os.close(fd)
+        temp_file = Path(path)
+>>>>>>> b91bb6b (Fix insecure use of tempfile.mktemp() in video_processor.py)
         return self.register_file(temp_file)
 
     def create_temp_dir(self, prefix: str = "video_proc_") -> Path:
