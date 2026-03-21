@@ -1448,8 +1448,7 @@ class AdvancedVideoEnhancer:
     ) -> Optional[VideoFileClip]:
         """Apply FFmpeg filters using subprocess for professional quality"""
         try:
-            import tempfile
-            import subprocess
+            # Use module-level imports (tempfile, subprocess) already present
 
             # Create temporary files
             fd_in, input_path = tempfile.mkstemp(suffix=".mp4")

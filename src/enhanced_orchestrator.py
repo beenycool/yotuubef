@@ -13,7 +13,7 @@ import mimetypes
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
@@ -627,33 +627,6 @@ class EnhancedVideoOrchestrator:
     async def _handle_wait_for_gemini_report_phase(
         self, state: Any, gemini_report_path: Optional[str], no_auto_research: bool
     ) -> tuple[Any, Optional[Dict[str, Any]]]:
-<<<<<<< HEAD
-        def _create_pause_response(
-            success: bool,
-            error: Optional[str] = None,
-            message: Optional[str] = None,
-            **extra_fields,
-        ) -> Dict[str, Any]:
-            state.status = "paused_waiting_for_gemini_report"
-            save_run_state(state)
-            response = {
-                "success": success,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-            }
-            if error:
-                response["error"] = error
-            if message:
-                response["message"] = message
-            response.update(extra_fields)
-            return response
-
-=======
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
         report_candidate = gemini_report_path or state.gemini_report_path
         prompt_path = state.metadata.get("deep_research_prompt_path")
         if prompt_path:
@@ -666,21 +639,6 @@ class EnhancedVideoOrchestrator:
                 state.metadata["search_audit_path"] = str(audit_path)
 
         if not report_candidate:
-<<<<<<< HEAD
-            return state, _create_pause_response(
-                success=True,
-                message="Waiting for Gemini report. Resume with --gemini-report.",
-                deep_research_prompt_path=state.metadata.get(
-                    "deep_research_prompt_path"
-                ),
-            )
-
-        report_file = Path(report_candidate)
-        if not report_file.exists() or not report_file.is_file():
-            return state, _create_pause_response(
-                success=False, error=f"Gemini report not found: {report_file}"
-            )
-=======
             state.status = "paused_waiting_for_gemini_report"
             save_run_state(state)
             return state, {
@@ -715,7 +673,6 @@ class EnhancedVideoOrchestrator:
                     state.metadata.get("hybrid_no_upload", False)
                 ),
             }
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
 
         report_text = report_file.read_text(encoding="utf-8", errors="replace")
         copied_report = save_finding(
@@ -727,13 +684,9 @@ class EnhancedVideoOrchestrator:
         state.gemini_report_path = str(copied_report)
         state.status = "active"
         save_run_state(state)
-<<<<<<< HEAD
-        state = set_phase(state, PipelinePhase.SYNTHESIS, "Gemini report supplied")
-=======
         state = set_phase(
             state, PipelinePhase.SYNTHESIS, "Gemini report supplied"
         )
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
         return state, None
 
     async def _handle_synthesis_phase(self, state: Any, phase: Any) -> Any:
@@ -785,14 +738,7 @@ class EnhancedVideoOrchestrator:
                 synthesis_payload = json.loads(
                     Path(synthesis_path).read_text(encoding="utf-8")
                 )
-<<<<<<< HEAD
-            except (json.JSONDecodeError, OSError) as e:
-                self.logger.warning(
-                    "Failed to load synthesis payload from %s: %s", synthesis_path, e
-                )
-=======
             except Exception:
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
                 synthesis_payload = {}
 
         image_queries = self._normalize_query_list(
@@ -841,13 +787,9 @@ class EnhancedVideoOrchestrator:
         )
         state.metadata["evidence_index_path"] = str(evidence_path)
         state.metadata["evidence_search_path"] = str(search_path)
-<<<<<<< HEAD
-        state.metadata["raw_media_dir"] = str(Path(state.project_dir) / "raw_media")
-=======
         state.metadata["raw_media_dir"] = str(
             Path(state.project_dir) / "raw_media"
         )
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
         save_run_state(state)
         return set_phase(
             state,
@@ -870,13 +812,9 @@ class EnhancedVideoOrchestrator:
             context_parts.append(
                 self._read_hybrid_artifact_text(state.gemini_report_path)
             )
-<<<<<<< HEAD
-        raw_context = "\n\n".join([item for item in context_parts if item]).strip()
-=======
         raw_context = "\n\n".join(
             [item for item in context_parts if item]
         ).strip()
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
 
         workspace_assets = self._collect_hybrid_workspace_assets(state)
         assets_json = json.dumps(workspace_assets, indent=2, ensure_ascii=True)
@@ -886,13 +824,9 @@ class EnhancedVideoOrchestrator:
             else f"[AVAILABLE_WORKSPACE_ASSETS]\n{assets_json}"
         )
 
-<<<<<<< HEAD
-        max_tokens = int(os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000"))
-=======
         max_tokens = int(
             os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000")
         )
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
 
         summary_result = summarize_if_needed(
             raw_context,
@@ -931,17 +865,6 @@ class EnhancedVideoOrchestrator:
             "Script finalized; ready for local render",
         )
 
-<<<<<<< HEAD
-    async def _handle_video_render_phase(
-        self, state: Any
-    ) -> tuple[Any, Optional[Dict[str, Any]]]:
-        def _create_error_response(
-            error_message: str, include_script_path: bool = False
-        ) -> Dict[str, Any]:
-            state.status = "paused_render_failed"
-            save_run_state(state)
-            response = {
-=======
     async def _handle_video_render_phase(self, state: Any) -> tuple[Any, Optional[Dict[str, Any]]]:
         final_script_path = str(
             state.metadata.get("final_script_path", "") or ""
@@ -950,33 +873,12 @@ class EnhancedVideoOrchestrator:
             state.status = "paused_render_failed"
             save_run_state(state)
             return state, {
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
                 "success": False,
                 "paused": True,
                 "status": state.status,
                 "current_phase": PipelinePhase.VIDEO_RENDER.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-<<<<<<< HEAD
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                "error": error_message,
-            }
-            if include_script_path:
-                response["final_script_path"] = final_script_path
-            return response
-
-        final_script_path = str(state.metadata.get("final_script_path", "") or "")
-        if not final_script_path:
-            return state, _create_error_response(
-                "Missing final_script_path in state metadata"
-            )
-
-        script_path = Path(final_script_path)
-        if not script_path.exists() or not script_path.is_file():
-            return state, _create_error_response(
-                f"Final script not found: {script_path}", include_script_path=True
-            )
-=======
                 "no_upload": bool(
                     state.metadata.get("hybrid_no_upload", False)
                 ),
@@ -1000,24 +902,10 @@ class EnhancedVideoOrchestrator:
                 "final_script_path": final_script_path,
                 "error": f"Final script not found: {script_path}",
             }
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
 
         try:
             script_payload = json.loads(script_path.read_text(encoding="utf-8"))
         except Exception as exc:
-<<<<<<< HEAD
-            return state, _create_error_response(
-                f"Failed to parse final script JSON: {exc}", include_script_path=True
-            )
-
-        render_result = await self._render_hybrid_local_video(state, script_payload)
-        if not render_result.get("success"):
-            error = str(render_result.get("error", "Hybrid render failed"))
-            return state, _create_error_response(error, include_script_path=True)
-
-        final_video_path = str(render_result.get("video_path", "") or "")
-        render_manifest_path = str(render_result.get("render_manifest_path", "") or "")
-=======
             state.status = "paused_render_failed"
             save_run_state(state)
             return state, {
@@ -1060,7 +948,6 @@ class EnhancedVideoOrchestrator:
         render_manifest_path = str(
             render_result.get("render_manifest_path", "") or ""
         )
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
         state.metadata["final_video_path"] = final_video_path
         if render_manifest_path:
             state.metadata["render_manifest_path"] = render_manifest_path
@@ -4569,10 +4456,7 @@ Search results:
             audio_features = len(analysis.sound_effects) * 2
             narrative_features = len(analysis.narrative_script_segments) * 4
 
-<<<<<<< HEAD
-=======
 
->>>>>>> 8d1eed9 (Refactor _run_hybrid_state_machine into phase handler methods)
             feature_bonus = (
                 engagement_features
                 + visual_features
