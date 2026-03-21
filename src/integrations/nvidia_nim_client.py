@@ -120,18 +120,25 @@ class NvidiaNimAIClient:
 
         # AI analysis prompts
         self.video_analysis_prompt = """
-        You are a top-tier YouTube Shorts scriptwriter specializing in internet mysteries, speedrunning scandals, and EVE Online corporate espionage. 
-        Write a hyper-optimized 45-second documentary script based on this Reddit lore and Research context.
+        You are a top-tier YouTube Shorts scriptwriter specializing in gaming history and internet mysteries.
+        Your goal is to write a 45-60 second script based on the provided Reddit lore and Research context.
 
         Reddit Post: {title} - {description}
         Research Facts: {deep_research}
 
-        CRITICAL RETENTION RULES:
-        1. THE SUBVERSION HOOK (0-3s): Start with a shocking financial loss, a cheated world record, or a terrifying lost media fact. NEVER start with "Here is the history of..."
-        2. INFORMATION DENSITY (3-35s): Deliver a new piece of critical information every 3 seconds. Use the research facts. No fluff. No pauses.
-        3. THE PERFECT LOOP: The very last sentence of the script MUST grammatically and sonically lead directly into the very first sentence, creating an endless loop.
-           Example First Sentence: "...the most expensive betrayal in gaming history."
-           Example Last Sentence: "And that is exactly why nobody saw it coming in..."
+        CRITICAL SCRIPTING FORMULA (Follow exactly):
+        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff.
+        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date. (e.g., "You might think it's [X], but if you look at the data...")
+        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs. Make the viewer feel like they are solving the mystery alongside you.
+        4. THE REVEAL (35-45s): Reveal the final answer, referencing the visual evidence.
+        5. THE PERFECT LOOP: The final sentence MUST grammatically and sonically flow perfectly back into the first word of the hook.
+
+        FORBIDDEN PHRASES (DO NOT USE THESE):
+        - "Did you know?"
+        - "In today's video"
+        - "Wait for it"
+        - "Let's dive in"
+        - "Mind-blowing"
 
         Output MUST be valid JSON matching this exact structure:
         {{
@@ -144,19 +151,13 @@ class NvidiaNimAIClient:
                     "text": "Your hook here",
                     "time_seconds": 0.0,
                     "intended_duration_seconds": 3.0,
-                    "b_roll_search_query": "specific image search query for visual evidence"
-                }},
-                {{
-                    "text": "The next sentence",
-                    "time_seconds": 3.0,
-                    "intended_duration_seconds": 5.0,
-                    "b_roll_search_query": "image query for this segment"
+                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')"
                 }}
             ],
             "text_overlays":[
                 {{"text": "CAPTION", "timestamp_seconds": 0.0, "duration": 3.0}}
             ],
-            "loop_bridge_text": "text that connects end to beginning"
+            "loop_bridge_text": "text that connects the outro to the intro"
         }}
         """
 
@@ -203,7 +204,7 @@ class NvidiaNimAIClient:
 
             # Extract video metadata when a source file is available.
             if video_path is not None:
-                video_metadata = self._extract_video_metadata(video_path)
+                video_metadata = await self._extract_video_metadata(video_path)
             else:
                 video_metadata = {
                     "duration": 60,
@@ -309,22 +310,11 @@ class NvidiaNimAIClient:
             self.logger.warning(f"Failed to score story potential: {e}")
             return 50
 
-    def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
-        """Extract basic video metadata"""
-        try:
-            from moviepy import VideoFileClip
+    async def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
+        """Extract basic video metadata asynchronously"""
+        from src.utils.video import extract_video_metadata
 
-            with VideoFileClip(str(video_path)) as clip:
-                return {
-                    "duration": clip.duration,
-                    "fps": clip.fps,
-                    "size": clip.size,
-                    "has_audio": clip.audio is not None,
-                }
-
-        except Exception as e:
-            self.logger.warning(f"Video metadata extraction failed: {e}")
-            return {"duration": 60, "fps": 30, "size": (1920, 1080), "has_audio": True}
+        return await extract_video_metadata(video_path)
 
     async def _analyze_with_nim(
         self, context: Dict[str, Any]
@@ -452,26 +442,24 @@ class NvidiaNimAIClient:
         """Fallback analysis when NVIDIA NIM is not available"""
         try:
             title = context.get("title", "Video")
-            duration = context.get("duration", 60)
-            score = context.get("score", 0)
+ duration = context.get("duration", 60)
+ score = context.get("score", 0)
 
-            engagement_score = min(100, max(30, score // 10 + 50))
-
-            mood = "exciting"
+ mood = "exciting"
             title_lower = title.lower()
-            if any(word in title_lower for word in ["calm", "peaceful", "relaxing"]):
+            if any(word in title_lower for word in {"calm", "peaceful", "relaxing"}):
                 mood = "calm"
             elif any(
-                word in title_lower for word in ["dramatic", "intense", "serious"]
+                word in title_lower for word in {"dramatic", "intense", "serious"}
             ):
                 mood = "dramatic"
-            elif any(word in title_lower for word in ["funny", "hilarious", "comedy"]):
+            elif any(word in title_lower for word in {"funny", "hilarious", "comedy"}):
                 mood = "humorous"
 
             hook_base = "You won't believe this!"
             if "how to" in title_lower:
                 hook_base = "Learn this amazing trick!"
-            elif any(word in title_lower for word in ["secret", "hidden", "revealed"]):
+            elif any(word in title_lower for word in {"secret", "hidden", "revealed"}):
                 hook_base = "The secret is finally revealed!"
 
             analysis = {
@@ -523,7 +511,7 @@ class NvidiaNimAIClient:
                 .strip()
             )
 
-            engagement_words = ["Amazing", "Incredible", "Shocking", "Unbelievable"]
+            engagement_words = {"Amazing", "Incredible", "Shocking", "Unbelievable"}
             title_lower = title.lower()
 
             if not any(word.lower() in title_lower for word in engagement_words):
@@ -566,14 +554,14 @@ class NvidiaNimAIClient:
 
         title_lower = title.lower()
 
-        if any(word in title_lower for word in ["funny", "comedy", "hilarious"]):
-            hashtags.extend(["#funny", "#comedy"])
-        elif any(word in title_lower for word in ["amazing", "incredible", "wow"]):
-            hashtags.extend(["#amazing", "#mindblowing"])
-        elif any(word in title_lower for word in ["how to", "tutorial", "guide"]):
-            hashtags.extend(["#howto", "#tutorial"])
-        elif any(word in title_lower for word in ["reaction", "responds"]):
-            hashtags.extend(["#reaction", "#response"])
+ if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
+ hashtags.extend(("#funny", "#comedy"))
+ elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
+ hashtags.extend(("#amazing", "#mindblowing"))
+ elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
+ hashtags.extend(("#howto", "#tutorial"))
+ elif any(word in title_lower for word in {"reaction", "responds"}):
+ hashtags.extend(("#reaction", "#response"))
 
         hashtags.extend(["#trending", "#fyp", "#explore"])
 
@@ -655,7 +643,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.error(f"Failed to parse batch comment analysis JSON: {e}")
 
-        except Exception as e:
+        except Exception:
             self.logger.error("Batch comment analysis failed", exc_info=True)
 
         return []
@@ -759,7 +747,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             engagement_score = 50
 
             if any(
-                word in text_lower for word in ["great", "amazing", "love", "awesome"]
+                word in text_lower for word in {"great", "amazing", "love", "awesome"}
             ):
                 engagement_score += 20
 
@@ -768,12 +756,12 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
             if any(
                 phrase in text_lower
-                for phrase in ["i think", "my experience", "i tried"]
+                for phrase in {"i think", "my experience", "i tried"}
             ):
                 engagement_score += 25
 
-            positive_words = ["great", "amazing", "love", "awesome", "fantastic"]
-            negative_words = ["hate", "terrible", "awful", "boring"]
+            positive_words = {"great", "amazing", "love", "awesome", "fantastic"}
+            negative_words = {"hate", "terrible", "awful", "boring"}
 
             positive_count = sum(1 for word in positive_words if word in text_lower)
             negative_count = sum(1 for word in negative_words if word in text_lower)

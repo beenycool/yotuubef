@@ -93,29 +93,44 @@ class GeminiAIClient:
 
         # AI analysis prompts
         self.video_analysis_prompt = """
-        You are a YouTube Shorts scriptwriter. Write a 45-second script based on this Reddit lore and Research context.
+        You are a top-tier YouTube Shorts scriptwriter specializing in gaming history and internet mysteries.
+        Your goal is to write a 45-60 second script based on the provided Reddit lore and Research context.
 
         Reddit Post: {title} - {description}
         Research Facts: {deep_research}
 
-        Follow this format for high retention:
-        1. THE HOOK (0-3s): Start with a shocking fact.
-        2. THE STORY (3-35s): Fast-paced explanation using the research.
-        3. THE OUTRO (35-45s): Quick conclusion.
+        CRITICAL SCRIPTING FORMULA (Follow exactly):
+        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff.
+        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date. (e.g., "You might think it's [X], but if you look at the data...")
+        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs. Make the viewer feel like they are solving the mystery alongside you.
+        4. THE REVEAL (35-45s): Reveal the final answer, referencing the visual evidence.
+        5. THE PERFECT LOOP: The final sentence MUST grammatically and sonically flow perfectly back into the first word of the hook.
+
+        FORBIDDEN PHRASES (DO NOT USE THESE):
+        - "Did you know?"
+        - "In today's video"
+        - "Wait for it"
+        - "Let's dive in"
+        - "Mind-blowing"
 
         Output MUST be valid JSON matching this exact structure:
         {{
             "suggested_title": "Optimized Title",
             "summary_for_description": "Short description",
-            "mood": "mysterious",
+            "mood": "dramatic",
             "hashtags": ["#lore", "#mystery"],
-            "narrative_script_segments": [
-                {{"text": "Your hook here", "time_seconds": 0.0, "intended_duration_seconds": 3.0}},
-                {{"text": "The next sentence", "time_seconds": 3.0, "intended_duration_seconds": 5.0}}
+            "narrative_script_segments":[
+                {{
+                    "text": "Your hook here",
+                    "time_seconds": 0.0,
+                    "intended_duration_seconds": 3.0,
+                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')"
+                }}
             ],
-            "text_overlays": [
-                {{"text": "CAPTION 1", "timestamp_seconds": 0.0, "duration": 3.0}}
-            ]
+            "text_overlays":[
+                {{"text": "CAPTION", "timestamp_seconds": 0.0, "duration": 3.0}}
+            ],
+            "loop_bridge_text": "text that connects the outro to the intro"
         }}
         """
 
@@ -154,7 +169,7 @@ class GeminiAIClient:
             self.logger.info("Starting Gemini video content analysis...")
 
             # Extract video metadata
-            video_metadata = self._extract_video_metadata(video_path)
+            video_metadata = await self._extract_video_metadata(video_path)
 
             # Prepare analysis context - handle both RedditPost object and dict
             if (
@@ -248,22 +263,11 @@ class GeminiAIClient:
             self.logger.error(f"Comment analysis failed: {e}")
             return None
 
-    def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
-        """Extract basic video metadata"""
-        try:
-            from moviepy import VideoFileClip
+    async def _extract_video_metadata(self, video_path: Path) -> Dict[str, Any]:
+        """Extract basic video metadata asynchronously"""
+        from src.utils.video import extract_video_metadata
 
-            with VideoFileClip(str(video_path)) as clip:
-                return {
-                    "duration": clip.duration,
-                    "fps": clip.fps,
-                    "size": clip.size,
-                    "has_audio": clip.audio is not None,
-                }
-
-        except Exception as e:
-            self.logger.warning(f"Video metadata extraction failed: {e}")
-            return {"duration": 60, "fps": 30, "size": (1920, 1080), "has_audio": True}
+        return await extract_video_metadata(video_path)
 
     async def _analyze_with_gemini(
         self, context: Dict[str, Any]
