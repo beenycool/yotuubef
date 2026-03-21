@@ -868,8 +868,12 @@ class EnhancedVideoOrchestrator:
                 synthesis_payload = json.loads(
                     Path(synthesis_path).read_text(encoding="utf-8")
                 )
+<<<<<<< HEAD
             except Exception:
 
+=======
+            except (json.JSONDecodeError, IOError):
+>>>>>>> cc52404 (Apply reviewer suggestions: narrow broad except clauses in hybrid orchestrator (PR #44))
                 synthesis_payload = {}
 
         image_queries = self._normalize_query_list(
@@ -1046,7 +1050,11 @@ class EnhancedVideoOrchestrator:
 
         try:
             script_payload = json.loads(script_path.read_text(encoding="utf-8"))
+<<<<<<< HEAD
         except (json.JSONDecodeError, OSError) as exc:
+=======
+        except (json.JSONDecodeError, IOError) as exc:
+>>>>>>> cc52404 (Apply reviewer suggestions: narrow broad except clauses in hybrid orchestrator (PR #44))
             state.status = "paused_render_failed"
             save_run_state(state)
             return {
