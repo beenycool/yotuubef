@@ -8,6 +8,27 @@ from moviepy import VideoFileClip
 
 from src.processing.video_processor_fixes import MoviePyCompat
 
+# Routing rules for background selection. Kept as a module-level constant so
+# the tuple objects are created once and the logic is data-driven and easy
+# to extend.
+ROUTING_RULES = (
+    (
+        "eve_online",
+        ("eve", "eveonline"),
+        ("eve online", "ccp games", "isk"),
+    ),
+    (
+        "speedrunning",
+        ("speedrun", "speedrun_drama", "summoningsalt"),
+        ("speedrun", "world record", "frame perfect", "glitchless"),
+    ),
+    (
+        "creepy_static",
+        ("lostmedia", "defunctland", "internetmysteries"),
+        ("lost media", "unfound", "creepy", "abandoned"),
+    ),
+)
+
 
 class BackgroundManager:
     def __init__(self, bg_folder: Optional[Union[str, Path]] = None):
@@ -28,24 +49,11 @@ class BackgroundManager:
         text_lower = text_content.lower()
         folder_name = "minecraft"
 
-        # Hybrid Routing Logic
-        if sub_lower in ("eve", "eveonline") or any(
-            k in text_lower for k in ("eve online", "ccp games", "isk")
-        ):
-            folder_name = "eve_online"
-        elif sub_lower in ("speedrun", "speedrun_drama", "summoningsalt") or any(
-            k in text_lower
-            for k in ("speedrun", "world record", "frame perfect", "glitchless")
-        ):
-            folder_name = "speedrunning"
-        elif sub_lower in (
-            "lostmedia",
-            "defunctland",
-            "internetmysteries",
-        ) or any(
-            k in text_lower for k in ("lost media", "unfound", "creepy", "abandoned")
-        ):
-            folder_name = "creepy_static"
+        # Hybrid Routing Logic driven by ROUTING_RULES for maintainability.
+        for folder, subreddits, keywords in ROUTING_RULES:
+            if sub_lower in subreddits or any(k in text_lower for k in keywords):
+                folder_name = folder
+                break
 
         target_folder = self.base_folder / folder_name
 
