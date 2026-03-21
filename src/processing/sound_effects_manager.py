@@ -15,7 +15,9 @@ from src.config.settings import get_config
 
 # Module-level constants for audio file extensions
 AUDIO_PATTERN_EXTENSIONS = ("*.wav", "*.mp3", "*.ogg", "*.m4a")
-VALID_AUDIO_SUFFIXES = (".wav", ".mp3", ".ogg", ".m4a")
+# Derive VALID_AUDIO_SUFFIXES from AUDIO_PATTERN_EXTENSIONS and use a set
+# for efficient membership testing (used in validate_sound_effect)
+VALID_AUDIO_SUFFIXES = {ext[1:].lower() for ext in AUDIO_PATTERN_EXTENSIONS}
 
 
 @dataclass
