@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import json
 import logging
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class DeepResearchClient:
-    def __init__(self, audit_logger: Optional["SearchAuditLogger"] = None):
+    def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY") or os.getenv(
             "BRAVE_SEARCH_API_KEY"
@@ -97,7 +98,7 @@ class AgenticResearcher:
     Uses deterministic query expansion and executes searches in parallel.
     """
 
-    def __init__(self, audit_logger: Optional["SearchAuditLogger"] = None):
+    def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("BRAVE_SEARCH_API_KEY")
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
