@@ -1504,6 +1504,11 @@ Search results:
                 pass
         return None
 
+    def _active_chat_completion_available(self) -> bool:
+        """Return True when an AI client with chat completion fallback is available."""
+        active_client = getattr(self.ai_client, "active_client", None)
+        return bool(active_client and hasattr(active_client, "_chat_completion_with_fallback"))
+
     async def _generate_hybrid_phase_payload(
         self,
         state,
@@ -1514,12 +1519,10 @@ Search results:
             f"[Hybrid] Calling AI for {phase.value}... (may take 1-2 min)", flush=True
         )
         prompt = build_state_machine_prompt(state, context)
-        active_client = getattr(self.ai_client, "active_client", None)
-
-        if not active_client or not hasattr(
-            active_client, "_chat_completion_with_fallback"
-        ):
+        if not self._active_chat_completion_available():
             raise RuntimeError(f"No AI client available for hybrid phase {phase.value}")
+
+        active_client = getattr(self.ai_client, "active_client", None)
 
         max_tokens = 4000 if phase == PipelinePhase.SCRIPTING else 1800
         response = await active_client._chat_completion_with_fallback(
@@ -1583,11 +1586,9 @@ Search results:
         max_per_segment: int,
         requested_count: int,
     ) -> Optional[List[str]]:
-        active_client = getattr(self.ai_client, "active_client", None)
-        if not active_client or not hasattr(
-            active_client, "_chat_completion_with_fallback"
-        ):
+        if not self._active_chat_completion_available():
             return None
+        active_client = getattr(self.ai_client, "active_client", None)
 
         try:
             response = await active_client._chat_completion_with_fallback(
@@ -1704,7 +1705,7 @@ Search results:
         )
 
         ai_queries = await self._generate_queries_via_ai(
-            prompt, existing_set, max_per_segment, len(requested_indexes)
+            prompt, existing_set, max_per_segment, len(segment_indexes)
         )
         if ai_queries is not None:
             return ai_queries
