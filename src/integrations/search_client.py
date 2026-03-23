@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import json
 import logging
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class DeepResearchClient:
-    def __init__(self, audit_logger: Optional["SearchAuditLogger"] = None):
+    def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY") or os.getenv(
             "BRAVE_SEARCH_API_KEY"
@@ -97,7 +98,7 @@ class AgenticResearcher:
     Uses deterministic query expansion and executes searches in parallel.
     """
 
-    def __init__(self, audit_logger: Optional["SearchAuditLogger"] = None):
+    def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
         self.api_key = os.getenv("BRAVE_SEARCH_API_KEY")
         self.base_url = "https://api.search.brave.com/res/v1/web/search"
@@ -230,13 +231,13 @@ class AgenticResearcher:
         if turn == 0:
             return [
                 normalized_topic,
-                f"{normalized_topic} timeline key events",
-                f"{normalized_topic} controversy investigation",
+                f"{normalized_topic} forum archive screenshot", # Added to find UI/forum proof
+                f"{normalized_topic} controversy timeline",
             ]
 
         variants = [
-            f"{normalized_topic} primary sources",
-            f"{normalized_topic} official statements",
+            f"{normalized_topic} primary sources evidence",
+            f"{normalized_topic} original post screenshot", # Forces image results of the actual post
             f"{normalized_topic} fact check",
         ]
 

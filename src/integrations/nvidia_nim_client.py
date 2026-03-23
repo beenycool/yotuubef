@@ -120,18 +120,25 @@ class NvidiaNimAIClient:
 
         # AI analysis prompts
         self.video_analysis_prompt = """
-        You are a top-tier YouTube Shorts scriptwriter specializing in internet mysteries, speedrunning scandals, and EVE Online corporate espionage. 
-        Write a hyper-optimized 45-second documentary script based on this Reddit lore and Research context.
+        You are a top-tier YouTube Shorts scriptwriter specializing in gaming history and internet mysteries.
+        Your goal is to write a 45-60 second script based on the provided Reddit lore and Research context.
 
         Reddit Post: {title} - {description}
         Research Facts: {deep_research}
 
-        CRITICAL RETENTION RULES:
-        1. THE SUBVERSION HOOK (0-3s): Start with a shocking financial loss, a cheated world record, or a terrifying lost media fact. NEVER start with "Here is the history of..."
-        2. INFORMATION DENSITY (3-35s): Deliver a new piece of critical information every 3 seconds. Use the research facts. No fluff. No pauses.
-        3. THE PERFECT LOOP: The very last sentence of the script MUST grammatically and sonically lead directly into the very first sentence, creating an endless loop.
-           Example First Sentence: "...the most expensive betrayal in gaming history."
-           Example Last Sentence: "And that is exactly why nobody saw it coming in..."
+        CRITICAL SCRIPTING FORMULA (Follow exactly):
+        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff.
+        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date. (e.g., "You might think it's [X], but if you look at the data...")
+        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs. Make the viewer feel like they are solving the mystery alongside you.
+        4. THE REVEAL (35-45s): Reveal the final answer, referencing the visual evidence.
+        5. THE PERFECT LOOP: The final sentence MUST grammatically and sonically flow perfectly back into the first word of the hook.
+
+        FORBIDDEN PHRASES (DO NOT USE THESE):
+        - "Did you know?"
+        - "In today's video"
+        - "Wait for it"
+        - "Let's dive in"
+        - "Mind-blowing"
 
         Output MUST be valid JSON matching this exact structure:
         {{
@@ -144,19 +151,13 @@ class NvidiaNimAIClient:
                     "text": "Your hook here",
                     "time_seconds": 0.0,
                     "intended_duration_seconds": 3.0,
-                    "b_roll_search_query": "specific image search query for visual evidence"
-                }},
-                {{
-                    "text": "The next sentence",
-                    "time_seconds": 3.0,
-                    "intended_duration_seconds": 5.0,
-                    "b_roll_search_query": "image query for this segment"
+                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')"
                 }}
             ],
             "text_overlays":[
                 {{"text": "CAPTION", "timestamp_seconds": 0.0, "duration": 3.0}}
             ],
-            "loop_bridge_text": "text that connects end to beginning"
+            "loop_bridge_text": "text that connects the outro to the intro"
         }}
         """
 

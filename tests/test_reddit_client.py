@@ -112,19 +112,19 @@ content:
     # Too short
     post_short = _post_with_title("too short", duration=2)
 
- # Low res
- post_low_res = _post_with_title("low res")
- post_low_res.width = 480
- post_low_res.height = 360
+    # Low res
+    post_low_res = _post_with_title("low res")
+    post_low_res.width = 480
+    post_low_res.height = 360
 
- # Too long
- post_long = _post_with_title("too long", duration=301)
+    # Too long
+    post_long = _post_with_title("too long", duration=301)
 
- # Low FPS
- post_low_fps = _post_with_title("low fps")
- post_low_fps.fps = 20
+    # Low FPS
+    post_low_fps = _post_with_title("low fps")
+    post_low_fps.fps = 20
 
- posts = [post_good, post_low_score, post_controversial, post_short, post_low_res, post_long, post_low_fps]
+    posts = [post_good, post_low_score, post_controversial, post_short, post_low_res, post_long, post_low_fps]
     filtered_posts = content_filter.filter_posts(posts)
 
     assert len(filtered_posts) == 1
