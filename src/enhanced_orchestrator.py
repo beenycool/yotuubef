@@ -13,7 +13,7 @@ import mimetypes
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
@@ -114,39 +114,106 @@ class EnhancedVideoOrchestrator:
         self, reddit_url: str, enhanced_options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """Run faceless lore pipeline: text post -> research -> script -> TTS -> Minecraft bg."""
-        audio_segments = []
-        audio_clip = None
-        final_video = None
-        output_file = None
         try:
             self.logger.info("Starting faceless lore generation for: %s", reddit_url)
 
-            reddit_post = await self._fetch_and_validate_reddit_post(reddit_url)
-            if isinstance(reddit_post, dict):
-                return reddit_post
+            async with RedditClient() as reddit_client:
+                reddit_post = await reddit_client.get_post_by_url(reddit_url)
 
-            analysis = await self._generate_script_and_research(reddit_post)
+            if not reddit_post:
+                return {"success": False, "error": "Failed to load Reddit post"}
+            if reddit_post.is_video:
+                return {
+                    "success": False,
+                    "error": "Provided URL points to a video post. Faceless flow requires text posts.",
+                }
+            if (
+                not getattr(reddit_post, "selftext", "")
+                or len(reddit_post.selftext.strip()) < 120
+            ):
+                return {
+                    "success": False,
+                    "error": "Text post is too short for lore generation.",
+                }
+
+            researcher = DeepResearchClient()
+            query = f"{reddit_post.title} {reddit_post.subreddit} history"
+            research_facts = await researcher.conduct_deep_research(query)
+
+            reddit_content_dict = {
+                "title": reddit_post.title,
+                "selftext": reddit_post.selftext,
+                "subreddit": reddit_post.subreddit,
+                "score": reddit_post.score,
+                "num_comments": reddit_post.num_comments,
+                "deep_research": research_facts,
+            }
+            analysis = await self.ai_client.analyze_video_content(
+                None, reddit_content_dict
+            )
             if not analysis:
                 return {"success": False, "error": "Script generation failed"}
 
-            tts_paths = self._generate_tts_audio(analysis)
+            tts_results = (
+                self.advanced_audio_processor.tts_service.generate_multiple_segments(
+                    analysis.narrative_script_segments
+                )
+            )
+            tts_paths = [
+                item.get("audio_path")
+                for item in tts_results
+                if item.get("success") and item.get("audio_path")
+            ]
             if not tts_paths:
                 return {"success": False, "error": "TTS generation failed"}
 
-            audio_segments, audio_clip, final_video, output_file = (
-                self._create_final_video(reddit_post, analysis, tts_paths)
-            )
+            audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
+            audio_clip = concatenate_audioclips(audio_segments)
 
-            upload_result = await self.youtube_client.upload_video(
+            bg_manager = BackgroundManager()
+            video_clip = bg_manager.get_sliced_background(
+                target_duration=audio_clip.duration,
+                subreddit=reddit_post.subreddit,
+                text_content=reddit_post.selftext,
+            )
+            if analysis.text_overlays:
+                video_clip = self.video_processor.text_processor.add_text_overlays(
+                    video_clip, analysis.text_overlays
+                )
+            final_video = MoviePyCompat.with_audio(video_clip, audio_clip)
+
+            output_file = self.config.paths.processed_dir / f"lore_{reddit_post.id}.mp4"
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            final_video.write_videofile(
                 str(output_file),
-                {
-                    "title": analysis.suggested_title,
-                    "description": analysis.summary_for_description,
-                    "tags": [tag.replace("#", "") for tag in analysis.hashtags],
-                },
+                fps=30,
+                codec="libx264",
+                audio_codec="aac",
             )
 
-            self._cleanup_resources(audio_segments, audio_clip, final_video)
+            upload_metadata = {
+                "title": analysis.suggested_title,
+                "description": analysis.summary_for_description,
+                "tags": [tag.replace("#", "") for tag in analysis.hashtags],
+            }
+            upload_result = await self.youtube_client.upload_video(
+                str(output_file), upload_metadata
+            )
+
+            for segment in audio_segments:
+                try:
+                    segment.close()
+                except Exception:
+                    pass
+            try:
+                audio_clip.close()
+            except Exception:
+                pass
+            try:
+                final_video.close()
+            except Exception:
+                pass
+
             if not upload_result.get("success"):
                 return {
                     "success": False,
@@ -166,95 +233,7 @@ class EnhancedVideoOrchestrator:
             self.logger.error("Lore generation failed: %s", e, exc_info=True)
             self.gpu_manager.clear_gpu_cache()
             return {"success": False, "error": str(e), "stage": "faceless_lore"}
-        finally:
-            for segment in audio_segments:
-                try:
-                    segment.close()
-                except Exception:
-                    pass
-            if audio_clip is not None:
-                try:
-                    audio_clip.close()
-                except Exception:
-                    pass
-            if final_video is not None:
-                try:
-                    final_video.close()
-                except Exception:
-                    pass
 
-    async def _fetch_and_validate_reddit_post(self, reddit_url: str) -> Any:
-        async with RedditClient() as reddit_client:
-            reddit_post = await reddit_client.get_post_by_url(reddit_url)
-
-        if not reddit_post:
-            return {"success": False, "error": "Failed to load Reddit post"}
-        if reddit_post.is_video:
-            return {
-                "success": False,
-                "error": "Provided URL points to a video post. Faceless flow requires text posts.",
-            }
-        if (
-            not getattr(reddit_post, "selftext", "")
-            or len(reddit_post.selftext.strip()) < 120
-        ):
-            return {
-                "success": False,
-                "error": "Text post is too short for lore generation.",
-            }
-        return reddit_post
-
-    async def _generate_lore_script(self, reddit_post: Any) -> Any:
-        researcher = DeepResearchClient()
-        query = f"{reddit_post.title} {reddit_post.subreddit} history"
-        research_facts = await researcher.conduct_deep_research(query)
-
-        reddit_content_dict = {
-            "title": reddit_post.title,
-            "selftext": reddit_post.selftext,
-            "subreddit": reddit_post.subreddit,
-            "score": reddit_post.score,
-            "num_comments": reddit_post.num_comments,
-            "deep_research": research_facts,
-        }
-        return await self.ai_client.analyze_video_content(None, reddit_content_dict)
-
-    def _generate_tts_audio_clip(self, narrative_script_segments: Any) -> List[str]:
-        tts_results = (
-            self.advanced_audio_processor.tts_service.generate_multiple_segments(
-                narrative_script_segments
-            )
-        )
-        return [
-            item.get("audio_path")
-            for item in tts_results
-            if item.get("success") and item.get("audio_path")
-        ]
-
-    def _generate_faceless_video_clip(
-        self, reddit_post: Any, analysis: Any, audio_clip: Any
-    ) -> Any:
-        bg_manager = BackgroundManager()
-        video_clip = bg_manager.get_sliced_background(
-            target_duration=audio_clip.duration,
-            subreddit=reddit_post.subreddit,
-            text_content=reddit_post.selftext,
-        )
-        if analysis.text_overlays:
-            video_clip = self.video_processor.text_processor.add_text_overlays(
-                video_clip, analysis.text_overlays
-            )
-        return MoviePyCompat.with_audio(video_clip, audio_clip)
-
-    async def _upload_faceless_video(
-        self, output_file: Any, analysis: Any
-    ) -> Dict[str, Any]:
-        upload_metadata = {
-            "title": analysis.suggested_title,
-            "description": analysis.summary_for_description,
-            "tags": [tag.replace("#", "") for tag in analysis.hashtags],
-        }
-        return await self.youtube_client.upload_video(str(output_file), upload_metadata)
 
     async def _ai_studio_fetch_and_analyze(self, reddit_url: str) -> tuple[Any, Any]:
         # Step 1: Get Reddit post
@@ -264,10 +243,7 @@ class EnhancedVideoOrchestrator:
         if not reddit_post:
             return None, {"success": False, "error": "Failed to load Reddit post"}
         if reddit_post.is_video:
-            return None, {
-                "success": False,
-                "error": "Text posts only for this pipeline",
-            }
+            return None, {"success": False, "error": "Text posts only for this pipeline"}
 
         # Improvement 1: Multi-Turn Agentic Research
         self.logger.info("Step 1: Agentic Research (Improvement 1)")
@@ -280,7 +256,9 @@ class EnhancedVideoOrchestrator:
         )
 
         # Step 2: Generate script with Perfect Loop + B-roll queries
-        self.logger.info("Step 2: Script Generation with Perfect Loop (Improvement 2)")
+        self.logger.info(
+            "Step 2: Script Generation with Perfect Loop (Improvement 2)"
+        )
         reddit_content_dict = {
             "title": reddit_post.title,
             "selftext": reddit_post.selftext,
@@ -289,15 +267,15 @@ class EnhancedVideoOrchestrator:
             "num_comments": reddit_post.num_comments,
             "deep_research": research_facts,
         }
-        analysis = await self.ai_client.analyze_video_content(None, reddit_content_dict)
+        analysis = await self.ai_client.analyze_video_content(
+            None, reddit_content_dict
+        )
         if not analysis:
             return None, {"success": False, "error": "Script generation failed"}
 
         return reddit_post, analysis
 
-    async def _ai_studio_generate_audio_and_broll(
-        self, analysis: Any
-    ) -> tuple[list[Any], Any, list[dict[str, Any]]]:
+    async def _ai_studio_generate_audio_and_broll(self, analysis: Any) -> tuple[list[Any], Any, list[dict[str, Any]]]:
         # Step 3: Generate TTS audio
         self.logger.info("Step 3: TTS Generation")
         tts_results = (
@@ -321,7 +299,10 @@ class EnhancedVideoOrchestrator:
         self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
         broll_queries = []
         for segment in analysis.narrative_script_segments:
-            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
+            if (
+                hasattr(segment, "b_roll_search_query")
+                and segment.b_roll_search_query
+            ):
                 broll_queries.append(segment.b_roll_search_query)
 
         async with BraveImageClient() as image_client:
@@ -332,7 +313,10 @@ class EnhancedVideoOrchestrator:
         # Map images to moments
         broll_moments = []
         for segment in analysis.narrative_script_segments:
-            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
+            if (
+                hasattr(segment, "b_roll_search_query")
+                and segment.b_roll_search_query
+            ):
                 query = segment.b_roll_search_query
                 if query in broll_images and broll_images[query]:
                     broll_moments.append(
@@ -344,15 +328,7 @@ class EnhancedVideoOrchestrator:
                     )
         return audio_segments, main_audio, broll_moments
 
-    def _ai_studio_compose_and_render(
-        self,
-        reddit_post: Any,
-        analysis: Any,
-        main_audio: Any,
-        audio_segments: list[Any],
-        broll_moments: list[dict[str, Any]],
-        options: dict[str, Any],
-    ) -> dict[str, Any]:
+    def _ai_studio_compose_and_render(self, reddit_post: Any, analysis: Any, main_audio: Any, audio_segments: list[Any], broll_moments: list[dict[str, Any]], options: dict[str, Any]) -> dict[str, Any]:
         # Step 5: Get background video
         self.logger.info("Step 5: Background Video")
         bg_manager = BackgroundManager()
@@ -418,14 +394,17 @@ class EnhancedVideoOrchestrator:
         boom_path = sfx_manager.get_boom_sound()
         if boom_path and analysis.narrative_script_segments:
             hook_time = analysis.narrative_script_segments[0].time_seconds
-            boom_clip = AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
+            boom_clip = (
+                AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
+            )
             audio_layers.append(boom_clip)
 
         # Composite audio
         final_audio = None
         final_video = None
         output_file = (
-            self.config.paths.processed_dir / f"production_studio_{reddit_post.id}.mp4"
+            self.config.paths.processed_dir
+            / f"production_studio_{reddit_post.id}.mp4"
         )
         try:
             final_audio = CompositeAudioClip(audio_layers)
@@ -458,7 +437,9 @@ class EnhancedVideoOrchestrator:
                 try:
                     final_audio.close()
                 except Exception as e:
-                    self.logger.warning("Failed to close composite audio clip: %s", e)
+                    self.logger.warning(
+                        "Failed to close composite audio clip: %s", e
+                    )
             try:
                 main_audio.close()
             except Exception as e:
@@ -501,99 +482,6 @@ class EnhancedVideoOrchestrator:
             "research_turns": 2,
         }
 
-    async def _fetch_and_validate_reddit_post(self, reddit_url: str) -> Any:
-        async with RedditClient() as reddit_client:
-            reddit_post = await reddit_client.get_post_by_url(reddit_url)
-
-        if not reddit_post:
-            return {"success": False, "error": "Failed to load Reddit post"}
-        if reddit_post.is_video:
-            return {
-                "success": False,
-                "error": "Provided URL points to a video post. Faceless flow requires text posts.",
-            }
-        if (
-            not getattr(reddit_post, "selftext", "")
-            or len(reddit_post.selftext.strip()) < 120
-        ):
-            return {
-                "success": False,
-                "error": "Text post is too short for lore generation.",
-            }
-        return reddit_post
-
-    async def _generate_script_and_research(self, reddit_post: Any) -> Any:
-        researcher = DeepResearchClient()
-        query = f"{reddit_post.title} {reddit_post.subreddit} history"
-        research_facts = await researcher.conduct_deep_research(query)
-
-        reddit_content_dict = {
-            "title": reddit_post.title,
-            "selftext": reddit_post.selftext,
-            "subreddit": reddit_post.subreddit,
-            "score": reddit_post.score,
-            "num_comments": reddit_post.num_comments,
-            "deep_research": research_facts,
-        }
-        return await self.ai_client.analyze_video_content(None, reddit_content_dict)
-
-    def _generate_tts_audio(self, analysis: Any) -> list:
-        tts_results = (
-            self.advanced_audio_processor.tts_service.generate_multiple_segments(
-                analysis.narrative_script_segments
-            )
-        )
-        return [
-            item.get("audio_path")
-            for item in tts_results
-            if item.get("success") and item.get("audio_path")
-        ]
-
-    def _create_final_video(
-        self, reddit_post: Any, analysis: Any, tts_paths: list
-    ) -> tuple:
-        audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
-        audio_clip = concatenate_audioclips(audio_segments)
-
-        bg_manager = BackgroundManager()
-        video_clip = bg_manager.get_sliced_background(
-            target_duration=audio_clip.duration,
-            subreddit=reddit_post.subreddit,
-            text_content=reddit_post.selftext,
-        )
-        if analysis.text_overlays:
-            video_clip = self.video_processor.text_processor.add_text_overlays(
-                video_clip, analysis.text_overlays
-            )
-        final_video = MoviePyCompat.with_audio(video_clip, audio_clip)
-
-        output_file = self.config.paths.processed_dir / f"lore_{reddit_post.id}.mp4"
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        final_video.write_videofile(
-            str(output_file),
-            fps=30,
-            codec="libx264",
-            audio_codec="aac",
-        )
-        return audio_segments, audio_clip, final_video, output_file
-
-    def _cleanup_resources(
-        self, audio_segments: list, audio_clip: Any, final_video: Any
-    ) -> None:
-        for segment in audio_segments:
-            try:
-                segment.close()
-            except Exception:
-                pass
-        try:
-            audio_clip.close()
-        except Exception:
-            pass
-        try:
-            final_video.close()
-        except Exception:
-            pass
-
     async def process_ai_production_studio(
         self, reddit_url: str, options: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
@@ -611,27 +499,16 @@ class EnhancedVideoOrchestrator:
             )
             options = options or {}
 
-            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(
-                reddit_url
-            )
+            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(reddit_url)
             if reddit_post is None:
                 return analysis_or_err
 
-            (
-                audio_segments,
-                main_audio,
-                broll_moments_or_err,
-            ) = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
+            audio_segments, main_audio, broll_moments_or_err = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
             if main_audio is None:
                 return broll_moments_or_err[0]
 
             return self._ai_studio_compose_and_render(
-                reddit_post,
-                analysis_or_err,
-                main_audio,
-                audio_segments,
-                broll_moments_or_err,
-                options,
+                reddit_post, analysis_or_err, main_audio, audio_segments, broll_moments_or_err, options
             )
 
         except Exception as e:
@@ -712,9 +589,7 @@ class EnhancedVideoOrchestrator:
                 "project_name": project_name,
             }
 
-
-    async def _handle_phase_idea_generation(self, state) -> Optional[Dict[str, Any]]:
-
+    async def _handle_idea_generation_phase(self, state: Any) -> Any:
         idea_payload, audit_path = await self._run_idea_generation_search_first(
             state,
         )
@@ -743,18 +618,15 @@ class EnhancedVideoOrchestrator:
             state.metadata["search_audit_path"] = str(audit_path)
         state.context_snapshot = json.dumps(idea_payload, ensure_ascii=True)
         save_run_state(state)
-        set_phase(
-
+        return set_phase(
             state,
             PipelinePhase.WAIT_FOR_GEMINI_REPORT,
             "Idea package generated",
         )
-        return None
 
-    async def _handle_phase_wait_for_gemini_report(
-        self, state, gemini_report_path: Optional[str], no_auto_research: bool
-    ) -> tuple[Optional[Dict[str, Any]], Optional[str]]:
-
+    async def _handle_wait_for_gemini_report_phase(
+        self, state: Any, gemini_report_path: Optional[str], no_auto_research: bool
+    ) -> tuple[Any, Optional[Dict[str, Any]]]:
         report_candidate = gemini_report_path or state.gemini_report_path
         prompt_path = state.metadata.get("deep_research_prompt_path")
         if prompt_path:
@@ -769,25 +641,27 @@ class EnhancedVideoOrchestrator:
         if not report_candidate:
             state.status = "paused_waiting_for_gemini_report"
             save_run_state(state)
-            return {
+            return state, {
                 "success": True,
                 "paused": True,
                 "status": state.status,
                 "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
+                "no_upload": bool(
+                    state.metadata.get("hybrid_no_upload", False)
+                ),
                 "deep_research_prompt_path": state.metadata.get(
                     "deep_research_prompt_path"
                 ),
                 "message": "Waiting for Gemini report. Resume with --gemini-report.",
-            }, gemini_report_path
+            }
 
         report_file = Path(report_candidate)
         if not report_file.exists() or not report_file.is_file():
             state.status = "paused_waiting_for_gemini_report"
             save_run_state(state)
-            return {
+            return state, {
                 "success": False,
                 "paused": True,
                 "error": f"Gemini report not found: {report_file}",
@@ -795,9 +669,10 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-            }, gemini_report_path
-
+                "no_upload": bool(
+                    state.metadata.get("hybrid_no_upload", False)
+                ),
+            }
 
         report_text = report_file.read_text(encoding="utf-8", errors="replace")
         copied_report = save_finding(
@@ -809,20 +684,19 @@ class EnhancedVideoOrchestrator:
         state.gemini_report_path = str(copied_report)
         state.status = "active"
         save_run_state(state)
-        set_phase(state, PipelinePhase.SYNTHESIS, "Gemini report supplied")
-        return None, None
+        state = set_phase(
+            state, PipelinePhase.SYNTHESIS, "Gemini report supplied"
+        )
+        return state, None
 
-    async def _handle_phase_synthesis(self, state) -> Optional[Dict[str, Any]]:
+    async def _handle_synthesis_phase(self, state: Any, phase: Any) -> Any:
         report_path = Path(state.gemini_report_path or "")
         if not report_path.exists():
-            set_phase(
-
+            return set_phase(
                 state,
                 PipelinePhase.WAIT_FOR_GEMINI_REPORT,
                 "Gemini report missing during synthesis",
             )
-            return None
-
 
         idea_text = self._read_hybrid_artifact_text(
             state.metadata.get("idea_generation_path")
@@ -833,8 +707,7 @@ class EnhancedVideoOrchestrator:
         )
         synthesis_payload = await self._generate_hybrid_phase_payload(
             state,
-            PipelinePhase.SYNTHESIS,
-
+            phase,
             synthesis_context,
         )
         synthesis_payload["image_queries"] = self._normalize_query_list(
@@ -851,16 +724,13 @@ class EnhancedVideoOrchestrator:
         )
         state.metadata["synthesis_path"] = str(synthesis_path)
         save_run_state(state)
-        set_phase(
-
+        return set_phase(
             state,
             PipelinePhase.EVIDENCE_GATHERING,
             "Synthesis prepared",
         )
-        return None
 
-    async def _handle_phase_evidence_gathering(self, state) -> Optional[Dict[str, Any]]:
-
+    async def _handle_evidence_gathering_phase(self, state: Any) -> Any:
         synthesis_path = state.metadata.get("synthesis_path")
         synthesis_payload: Dict[str, Any] = {}
         if synthesis_path and Path(synthesis_path).exists():
@@ -868,12 +738,7 @@ class EnhancedVideoOrchestrator:
                 synthesis_payload = json.loads(
                     Path(synthesis_path).read_text(encoding="utf-8")
                 )
-<<<<<<< HEAD
             except Exception:
-
-=======
-            except (json.JSONDecodeError, IOError):
->>>>>>> cc52404 (Apply reviewer suggestions: narrow broad except clauses in hybrid orchestrator (PR #44))
                 synthesis_payload = {}
 
         image_queries = self._normalize_query_list(
@@ -926,16 +791,13 @@ class EnhancedVideoOrchestrator:
             Path(state.project_dir) / "raw_media"
         )
         save_run_state(state)
-        set_phase(
-
+        return set_phase(
             state,
             PipelinePhase.SCRIPTING,
             "Evidence artifacts captured",
         )
-        return None
 
-    async def _handle_phase_scripting(self, state) -> Optional[Dict[str, Any]]:
-
+    async def _handle_scripting_phase(self, state: Any, phase: Any) -> Any:
         context_parts: List[str] = []
         for key in (
             "idea_generation_path",
@@ -954,7 +816,6 @@ class EnhancedVideoOrchestrator:
             [item for item in context_parts if item]
         ).strip()
 
-
         workspace_assets = self._collect_hybrid_workspace_assets(state)
         assets_json = json.dumps(workspace_assets, indent=2, ensure_ascii=True)
         raw_context = (
@@ -966,7 +827,6 @@ class EnhancedVideoOrchestrator:
         max_tokens = int(
             os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000")
         )
-
 
         summary_result = summarize_if_needed(
             raw_context,
@@ -988,8 +848,7 @@ class EnhancedVideoOrchestrator:
 
         script_payload = await self._run_agentic_scripting_with_visual_loop(
             state,
-            PipelinePhase.SCRIPTING,
-
+            phase,
             summary_result.context or raw_context,
         )
         final_script_path = save_finding(
@@ -1000,23 +859,20 @@ class EnhancedVideoOrchestrator:
         )
         state.metadata["final_script_path"] = str(final_script_path)
         save_run_state(state)
-        set_phase(
-
+        return set_phase(
             state,
             PipelinePhase.VIDEO_RENDER,
             "Script finalized; ready for local render",
         )
-        return None
 
-    async def _handle_phase_video_render(self, state) -> Optional[Dict[str, Any]]:
+    async def _handle_video_render_phase(self, state: Any) -> tuple[Any, Optional[Dict[str, Any]]]:
         final_script_path = str(
             state.metadata.get("final_script_path", "") or ""
         )
         if not final_script_path:
             state.status = "paused_render_failed"
             save_run_state(state)
-            return {
-
+            return state, {
                 "success": False,
                 "paused": True,
                 "status": state.status,
@@ -1033,7 +889,7 @@ class EnhancedVideoOrchestrator:
         if not script_path.exists() or not script_path.is_file():
             state.status = "paused_render_failed"
             save_run_state(state)
-            return {
+            return state, {
                 "success": False,
                 "paused": True,
                 "status": state.status,
@@ -1047,17 +903,12 @@ class EnhancedVideoOrchestrator:
                 "error": f"Final script not found: {script_path}",
             }
 
-
         try:
             script_payload = json.loads(script_path.read_text(encoding="utf-8"))
-<<<<<<< HEAD
-        except (json.JSONDecodeError, OSError) as exc:
-=======
-        except (json.JSONDecodeError, IOError) as exc:
->>>>>>> cc52404 (Apply reviewer suggestions: narrow broad except clauses in hybrid orchestrator (PR #44))
+        except Exception as exc:
             state.status = "paused_render_failed"
             save_run_state(state)
-            return {
+            return state, {
                 "success": False,
                 "paused": True,
                 "status": state.status,
@@ -1077,7 +928,7 @@ class EnhancedVideoOrchestrator:
         if not render_result.get("success"):
             state.status = "paused_render_failed"
             save_run_state(state)
-            return {
+            return state, {
                 "success": False,
                 "paused": True,
                 "status": state.status,
@@ -1097,15 +948,13 @@ class EnhancedVideoOrchestrator:
         render_manifest_path = str(
             render_result.get("render_manifest_path", "") or ""
         )
-
         state.metadata["final_video_path"] = final_video_path
         if render_manifest_path:
             state.metadata["render_manifest_path"] = render_manifest_path
         state.status = "completed"
         save_run_state(state)
 
-        return {
-
+        return state, {
             "success": True,
             "paused": False,
             "status": state.status,
@@ -1117,8 +966,6 @@ class EnhancedVideoOrchestrator:
             "final_video_path": final_video_path,
             "render_manifest_path": render_manifest_path,
         }
-
-
 
     async def _run_hybrid_state_machine(
         self,
@@ -1141,44 +988,38 @@ class EnhancedVideoOrchestrator:
             print(f"[Hybrid] Phase: {phase.value}", flush=True)
 
             if phase == PipelinePhase.IDEA_GENERATION:
-                result = await self._handle_phase_idea_generation(state)
-                if result is not None:
-                    return result
+                state = await self._handle_idea_generation_phase(state)
                 continue
 
             if phase == PipelinePhase.WAIT_FOR_GEMINI_REPORT:
-                result, gemini_report_path = await self._handle_phase_wait_for_gemini_report(
-
+                state, result = await self._handle_wait_for_gemini_report_phase(
                     state, gemini_report_path, no_auto_research
                 )
                 if result is not None:
                     return result
+                gemini_report_path = None
                 continue
 
             if phase == PipelinePhase.SYNTHESIS:
-                result = await self._handle_phase_synthesis(state)
-                if result is not None:
-                    return result
+                state = await self._handle_synthesis_phase(state, phase)
                 continue
 
             if phase == PipelinePhase.EVIDENCE_GATHERING:
-                result = await self._handle_phase_evidence_gathering(state)
-                if result is not None:
-                    return result
+                state = await self._handle_evidence_gathering_phase(state)
                 continue
 
             if phase == PipelinePhase.SCRIPTING:
-                result = await self._handle_phase_scripting(state)
-                if result is not None:
-                    return result
+                state = await self._handle_scripting_phase(state, phase)
                 continue
 
             if phase == PipelinePhase.VIDEO_RENDER:
-                result = await self._handle_phase_video_render(state)
+                state, result = await self._handle_video_render_phase(state)
                 if result is not None:
                     return result
-                continue
+                # Just in case, though it should always return from video render phase
+                break
 
+        return {"success": False, "error": "Exited state machine unexpectedly"}
 
     # Curated scouting queries for search-first idea discovery (avoid LLM inventing topics)
     _SCOUTING_QUERIES = [
@@ -1563,13 +1404,6 @@ Search results:
                 pass
         return None
 
-    def _active_chat_completion_available(self) -> bool:
-        """Return True when an AI client with chat completion fallback is available."""
-        active_client = getattr(self.ai_client, "active_client", None)
-        return bool(
-            active_client and hasattr(active_client, "_chat_completion_with_fallback")
-        )
-
     async def _generate_hybrid_phase_payload(
         self,
         state,
@@ -1580,10 +1414,12 @@ Search results:
             f"[Hybrid] Calling AI for {phase.value}... (may take 1-2 min)", flush=True
         )
         prompt = build_state_machine_prompt(state, context)
-        if not self._active_chat_completion_available():
-            raise RuntimeError(f"No AI client available for hybrid phase {phase.value}")
-
         active_client = getattr(self.ai_client, "active_client", None)
+
+        if not active_client or not hasattr(
+            active_client, "_chat_completion_with_fallback"
+        ):
+            raise RuntimeError(f"No AI client available for hybrid phase {phase.value}")
 
         max_tokens = 4000 if phase == PipelinePhase.SCRIPTING else 1800
         response = await active_client._chat_completion_with_fallback(
@@ -1609,113 +1445,6 @@ Search results:
                 f"Hybrid phase {phase.value}: AI payload failed contract validation"
             )
         return parsed
-
-    def _build_segment_blocks_for_queries(
-        self, segments: List[Dict[str, Any]], requested_indexes: List[int]
-    ) -> List[str]:
-        segment_blocks: List[str] = []
-        for idx in requested_indexes:
-            segment = segments[idx]
-            if not isinstance(segment, dict):
-                continue
-            narration = str(segment.get("narration", "") or "").strip()
-            visual_directive = str(segment.get("visual_directive", "") or "").strip()
-            evidence_refs = segment.get("evidence_refs", [])
-            if isinstance(evidence_refs, list):
-                evidence_text = ", ".join(
-                    [str(item).strip() for item in evidence_refs if str(item).strip()]
-                )
-            else:
-                evidence_text = str(evidence_refs or "").strip()
-
-            segment_blocks.append(
-                "\n".join(
-                    [
-                        f"SEGMENT_INDEX: {idx}",
-                        f"NARRATION: {narration}",
-                        f"VISUAL_DIRECTIVE: {visual_directive}",
-                        f"EVIDENCE_REFS: {evidence_text}",
-                    ]
-                )
-            )
-        return segment_blocks
-
-    async def _generate_queries_via_ai(
-        self,
-        prompt: str,
-        existing_set: set,
-        max_per_segment: int,
-        requested_count: int,
-    ) -> Optional[List[str]]:
-        if not self._active_chat_completion_available():
-            return None
-        active_client = getattr(self.ai_client, "active_client", None)
-
-        try:
-            response = await active_client._chat_completion_with_fallback(
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "Return strict JSON only.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=600,
-                response_format={"type": "json_object"},
-            )
-            content = response.choices[0].message.content or "{}"
-            parsed = self._safe_parse_phase_json(content) or {}
-            raw_queries = parsed.get("image_queries", [])
-            if isinstance(raw_queries, list):
-                cleaned: List[str] = []
-                for item in raw_queries:
-                    text = str(item or "").strip()
-                    lowered = text.lower()
-                    if not text or lowered in existing_set:
-                        continue
-                    if len(text) < 4 or len(text) > 140:
-                        continue
-                    if text not in cleaned:
-                        cleaned.append(text)
-                if cleaned:
-                    return cleaned[: max_per_segment * requested_count]
-        except Exception:
-            pass
-        return None
-
-    def _generate_fallback_queries(
-        self,
-        segments: list,
-        requested_indexes: list,
-        existing_set: set,
-        max_per_segment: int,
-    ) -> List[str]:
-        fallback_queries: List[str] = []
-        for idx in requested_indexes:
-            segment = segments[idx]
-            if not isinstance(segment, dict):
-                continue
-            narration = str(segment.get("narration", "") or "").strip()
-            visual_directive = str(segment.get("visual_directive", "") or "").strip()
-            tokens = self._tokenize_relevance_text(f"{narration} {visual_directive}")
-            core = " ".join(tokens[:8]).strip()
-            if not core:
-                continue
-            variants = [
-                f"{core} screenshot",
-                f"{core} leaderboard",
-                f"{core} pdf",
-                f"{core} tweet",
-                f"{core} forum post",
-            ]
-            for query in variants:
-                lowered = query.lower().strip()
-                if lowered in existing_set:
-                    continue
-                if query not in fallback_queries:
-                    fallback_queries.append(query)
-        return fallback_queries[: max_per_segment * len(requested_indexes)]
 
     async def _generate_supplementary_image_queries(
         self,
@@ -1745,9 +1474,31 @@ Search results:
             if str(item).strip()
         }
 
-        segment_blocks = self._build_segment_blocks_for_queries(
-            segments, requested_indexes
-        )
+        segment_blocks: List[str] = []
+        for idx in requested_indexes:
+            segment = segments[idx]
+            if not isinstance(segment, dict):
+                continue
+            narration = str(segment.get("narration", "") or "").strip()
+            visual_directive = str(segment.get("visual_directive", "") or "").strip()
+            evidence_refs = segment.get("evidence_refs", [])
+            if isinstance(evidence_refs, list):
+                evidence_text = ", ".join(
+                    [str(item).strip() for item in evidence_refs if str(item).strip()]
+                )
+            else:
+                evidence_text = str(evidence_refs or "").strip()
+
+            segment_blocks.append(
+                "\n".join(
+                    [
+                        f"SEGMENT_INDEX: {idx}",
+                        f"NARRATION: {narration}",
+                        f"VISUAL_DIRECTIVE: {visual_directive}",
+                        f"EVIDENCE_REFS: {evidence_text}",
+                    ]
+                )
+            )
 
         if not segment_blocks:
             return []
@@ -1765,16 +1516,66 @@ Search results:
             "SEGMENTS:\n" + "\n\n".join(segment_blocks)
         )
 
-        ai_queries = await self._generate_queries_via_ai(
-            prompt, existing_set, max_per_segment, len(segment_indexes)
-        )
-        if ai_queries is not None:
-            return ai_queries
+        active_client = getattr(self.ai_client, "active_client", None)
+        if active_client and hasattr(active_client, "_chat_completion_with_fallback"):
+            try:
+                response = await active_client._chat_completion_with_fallback(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Return strict JSON only.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=600,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                parsed = self._safe_parse_phase_json(content) or {}
+                raw_queries = parsed.get("image_queries", [])
+                if isinstance(raw_queries, list):
+                    cleaned: List[str] = []
+                    for item in raw_queries:
+                        text = str(item or "").strip()
+                        lowered = text.lower()
+                        if not text or lowered in existing_set:
+                            continue
+                        if len(text) < 4 or len(text) > 140:
+                            continue
+                        if text not in cleaned:
+                            cleaned.append(text)
+                    if cleaned:
+                        return cleaned[: max_per_segment * len(requested_indexes)]
+            except Exception:
+                pass
 
         # Heuristic fallback: build evidence-oriented variants from segment tokens.
-        return self._generate_fallback_queries(
-            segments, requested_indexes, existing_set, max_per_segment
-        )
+        fallback_queries: List[str] = []
+        for idx in requested_indexes:
+            segment = segments[idx]
+            if not isinstance(segment, dict):
+                continue
+            narration = str(segment.get("narration", "") or "").strip()
+            visual_directive = str(segment.get("visual_directive", "") or "").strip()
+            tokens = self._tokenize_relevance_text(f"{narration} {visual_directive}")
+            core = " ".join(tokens[:8]).strip()
+            if not core:
+                continue
+            variants = [
+                f"{core} screenshot",
+                f"{core} leaderboard",
+                f"{core} pdf",
+                f"{core} tweet",
+                f"{core} forum post",
+            ]
+            for query in variants:
+                lowered = query.lower().strip()
+                if lowered in existing_set:
+                    continue
+                if query not in fallback_queries:
+                    fallback_queries.append(query)
+        return fallback_queries[: max_per_segment * len(requested_indexes)]
 
     async def _run_visual_feedback_agent(
         self,
@@ -2595,8 +2396,8 @@ Search results:
             return candidates
 
         try:
-            payload = json.loads(text)
-        except json.JSONDecodeError:
+            payload = ast.literal_eval(text)
+        except (ValueError, SyntaxError):
             return candidates
 
         if isinstance(payload, dict):
@@ -4654,6 +4455,7 @@ Search results:
             visual_features = len(analysis.visual_cues) * 3
             audio_features = len(analysis.sound_effects) * 2
             narrative_features = len(analysis.narrative_script_segments) * 4
+
 
             feature_bonus = (
                 engagement_features
