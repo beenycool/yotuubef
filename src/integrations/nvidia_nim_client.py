@@ -80,6 +80,16 @@ class NvidiaNimAIClient:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
 
+        self._MOOD_WORDS_CALM = {"calm", "peaceful", "relaxing"}
+        self._MOOD_WORDS_DRAMATIC = {"dramatic", "intense", "serious"}
+        self._MOOD_WORDS_HUMOROUS = {"funny", "hilarious", "comedy"}
+        self._HOOK_WORDS_SECRET = {"secret", "hidden", "revealed"}
+        self._ENGAGEMENT_WORDS = {"amazing", "incredible", "shocking", "unbelievable"}
+        self._HASHTAG_WORDS_FUNNY = {"funny", "comedy", "hilarious"}
+        self._HASHTAG_WORDS_AMAZING = {"amazing", "incredible", "wow"}
+        self._HASHTAG_WORDS_HOWTO = {"how to", "tutorial", "guide"}
+        self._HASHTAG_WORDS_REACTION = {"reaction", "responds"}
+
         # Initialize NVIDIA NIM client if available
         if OPENAI_AVAILABLE and hasattr(self.config.api, "nvidia_nim_api_key"):
             api_key = self.config.api.nvidia_nim_api_key
@@ -447,19 +457,17 @@ class NvidiaNimAIClient:
 
  mood = "exciting"
             title_lower = title.lower()
-            if any(word in title_lower for word in {"calm", "peaceful", "relaxing"}):
+            if any(word in title_lower for word in self._MOOD_WORDS_CALM):
                 mood = "calm"
-            elif any(
-                word in title_lower for word in {"dramatic", "intense", "serious"}
-            ):
+            elif any(word in title_lower for word in self._MOOD_WORDS_DRAMATIC):
                 mood = "dramatic"
-            elif any(word in title_lower for word in {"funny", "hilarious", "comedy"}):
+            elif any(word in title_lower for word in self._MOOD_WORDS_HUMOROUS):
                 mood = "humorous"
 
             hook_base = "You won't believe this!"
             if "how to" in title_lower:
                 hook_base = "Learn this amazing trick!"
-            elif any(word in title_lower for word in {"secret", "hidden", "revealed"}):
+            elif any(word in title_lower for word in self._HOOK_WORDS_SECRET):
                 hook_base = "The secret is finally revealed!"
 
             analysis = {
@@ -511,10 +519,10 @@ class NvidiaNimAIClient:
                 .strip()
             )
 
-            engagement_words = {"Amazing", "Incredible", "Shocking", "Unbelievable"}
+            engagement_words = self._ENGAGEMENT_WORDS
             title_lower = title.lower()
 
-            if not any(word.lower() in title_lower for word in engagement_words):
+            if not any(word in title_lower for word in engagement_words):
                 if len(title) < 50:
                     title = f"Amazing: {title}"
 
@@ -554,14 +562,14 @@ class NvidiaNimAIClient:
 
         title_lower = title.lower()
 
- if any(word in title_lower for word in {"funny", "comedy", "hilarious"}):
- hashtags.extend(("#funny", "#comedy"))
- elif any(word in title_lower for word in {"amazing", "incredible", "wow"}):
- hashtags.extend(("#amazing", "#mindblowing"))
- elif any(word in title_lower for word in {"how to", "tutorial", "guide"}):
- hashtags.extend(("#howto", "#tutorial"))
- elif any(word in title_lower for word in {"reaction", "responds"}):
- hashtags.extend(("#reaction", "#response"))
+        if any(word in title_lower for word in self._HASHTAG_WORDS_FUNNY):
+            hashtags.extend(["#funny", "#comedy"])
+        elif any(word in title_lower for word in self._HASHTAG_WORDS_AMAZING):
+            hashtags.extend(["#amazing", "#mindblowing"])
+        elif any(word in title_lower for word in self._HASHTAG_WORDS_HOWTO):
+            hashtags.extend(["#howto", "#tutorial"])
+        elif any(word in title_lower for word in self._HASHTAG_WORDS_REACTION):
+            hashtags.extend(["#reaction", "#response"])
 
         hashtags.extend(["#trending", "#fyp", "#explore"])
 
