@@ -7,7 +7,7 @@ import logging
 import json
 import asyncio
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 
 try:
@@ -395,10 +395,6 @@ class GeminiAIClient:
         try:
             title = context.get("title", "Video")
             duration = context.get("duration", 60)
-            score = context.get("score", 0)
-
-            # Generate analysis based on content characteristics
-            engagement_score = min(100, max(30, score // 10 + 50))
 
             # Determine mood based on title keywords
             mood = "exciting"
@@ -611,7 +607,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             except (json.JSONDecodeError, ValueError) as e:
                 self.logger.error(f"Failed to parse batch comment analysis JSON: {e}")
 
-        except Exception as e:
+        except Exception:
             self.logger.error("Batch comment analysis failed", exc_info=True)
 
         return []
@@ -680,6 +676,110 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             self.logger.error(f"Fallback comment analysis failed: {e}")
             return "Engagement Score: 50\nSentiment: neutral\nInteraction Priority: 5"
 
+    def _extract_narrative_segments(self, analysis_result: Dict[str, Any]) -> List[Any]:
+        """Extract narrative segments from analysis result"""
+        from src.models import NarrativeSegment
+
+        raw_narrative_segments = analysis_result.get("narrative_script_segments", [])
+        narrative_segments: List[NarrativeSegment] = []
+        for item in raw_narrative_segments:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            narrative_segments.append(
+                NarrativeSegment(
+                    text=text,
+                    time_seconds=float(item.get("time_seconds", 0.0)),
+                    intended_duration_seconds=float(
+                        item.get("intended_duration_seconds", 4.0)
+                    ),
+                )
+            )
+
+        if not narrative_segments:
+            narrative_segments = [
+                NarrativeSegment(
+                    text="Here is a wild Reddit mystery that gets even stranger with context.",
+                    time_seconds=0.0,
+                    intended_duration_seconds=4.0,
+                ),
+                NarrativeSegment(
+                    text="These are the key facts people keep bringing up.",
+                    time_seconds=4.0,
+                    intended_duration_seconds=5.0,
+                ),
+            ]
+        return narrative_segments
+
+    def _generate_video_segments(self, narrative_segments: List[Any]) -> List[Any]:
+        """Generate video segments from narrative segments"""
+        from src.models import VideoSegment
+
+        segments = []
+        for i, segment in enumerate(narrative_segments):
+            end_seconds = segment.time_seconds + segment.intended_duration_seconds
+            if i + 1 < len(narrative_segments):
+                next_start = narrative_segments[i + 1].time_seconds
+                end_seconds = max(end_seconds, next_start)
+            segments.append(
+                VideoSegment(
+                    start_seconds=segment.time_seconds,
+                    end_seconds=end_seconds,
+                    reason="Narrative segment",
+                )
+            )
+        return segments
+
+    def _extract_text_overlays(self, analysis_result: Dict[str, Any]) -> List[Any]:
+        """Extract text overlays from analysis result"""
+        from src.models import TextOverlay
+
+        raw_overlays = analysis_result.get("text_overlays", [])
+        text_overlays: List[TextOverlay] = []
+        for item in raw_overlays:
+            if not isinstance(item, dict):
+                continue
+            text = str(item.get("text", "")).strip()
+            if not text:
+                continue
+            text_overlays.append(
+                TextOverlay(
+                    text=text,
+                    timestamp_seconds=float(item.get("timestamp_seconds", 0.0)),
+                    duration=float(item.get("duration", 2.0)),
+                )
+            )
+        return text_overlays
+
+    def _extract_reddit_metadata(self, reddit_content: Any) -> Tuple[str, str]:
+        """Extract title and description from reddit content"""
+        # Handle both RedditPost object and dict for content extraction
+        if (
+            hasattr(reddit_content, "__dict__")
+            and hasattr(reddit_content, "title")
+            and not hasattr(reddit_content, "get")
+        ):
+            # RedditPost object (dataclass/object with attributes)
+            title = getattr(reddit_content, "title", "Video")
+            description = getattr(reddit_content, "title", "Amazing content!")[
+                :200
+            ]  # Use title as description since RedditPost doesn't have selftext
+        else:
+            # Dictionary format
+            title = (
+                reddit_content.get("title", "Video")
+                if hasattr(reddit_content, "get")
+                else "Video"
+            )
+            description = (
+                reddit_content.get("selftext", "")
+                if hasattr(reddit_content, "get")
+                else ""
+            )[:200] or "Amazing content!"
+        return title, description
+
     def _convert_to_enhanced_analysis(
         self, analysis_result: Dict[str, Any], reddit_content: Any
     ) -> VideoAnalysisEnhanced:
@@ -692,57 +792,12 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                 ThumbnailInfo,
                 CallToAction,
                 AudioDuckingConfig,
-                NarrativeSegment,
-                TextOverlay,
             )
 
-            raw_narrative_segments = analysis_result.get(
-                "narrative_script_segments", []
-            )
-            narrative_segments: List[NarrativeSegment] = []
-            for item in raw_narrative_segments:
-                if not isinstance(item, dict):
-                    continue
-                text = str(item.get("text", "")).strip()
-                if not text:
-                    continue
-                narrative_segments.append(
-                    NarrativeSegment(
-                        text=text,
-                        time_seconds=float(item.get("time_seconds", 0.0)),
-                        intended_duration_seconds=float(
-                            item.get("intended_duration_seconds", 4.0)
-                        ),
-                    )
-                )
-
-            if not narrative_segments:
-                narrative_segments = [
-                    NarrativeSegment(
-                        text="Here is a wild Reddit mystery that gets even stranger with context.",
-                        time_seconds=0.0,
-                        intended_duration_seconds=4.0,
-                    ),
-                    NarrativeSegment(
-                        text="These are the key facts people keep bringing up.",
-                        time_seconds=4.0,
-                        intended_duration_seconds=5.0,
-                    ),
-                ]
-
-            segments = []
-            for i, segment in enumerate(narrative_segments):
-                end_seconds = segment.time_seconds + segment.intended_duration_seconds
-                if i + 1 < len(narrative_segments):
-                    next_start = narrative_segments[i + 1].time_seconds
-                    end_seconds = max(end_seconds, next_start)
-                segments.append(
-                    VideoSegment(
-                        start_seconds=segment.time_seconds,
-                        end_seconds=end_seconds,
-                        reason="Narrative segment",
-                    )
-                )
+            narrative_segments = self._extract_narrative_segments(analysis_result)
+            segments = self._generate_video_segments(narrative_segments)
+            text_overlays = self._extract_text_overlays(analysis_result)
+            title, description = self._extract_reddit_metadata(reddit_content)
 
             # Create hook moment
             visual_hook_moment = HookMoment(
@@ -771,46 +826,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
             # Create call to action
             call_to_action = CallToAction(text="Subscribe for more!", type="subscribe")
-
-            raw_overlays = analysis_result.get("text_overlays", [])
-            text_overlays: List[TextOverlay] = []
-            for item in raw_overlays:
-                if not isinstance(item, dict):
-                    continue
-                text = str(item.get("text", "")).strip()
-                if not text:
-                    continue
-                text_overlays.append(
-                    TextOverlay(
-                        text=text,
-                        timestamp_seconds=float(item.get("timestamp_seconds", 0.0)),
-                        duration=float(item.get("duration", 2.0)),
-                    )
-                )
-
-            # Handle both RedditPost object and dict for content extraction
-            if (
-                hasattr(reddit_content, "__dict__")
-                and hasattr(reddit_content, "title")
-                and not hasattr(reddit_content, "get")
-            ):
-                # RedditPost object (dataclass/object with attributes)
-                title = getattr(reddit_content, "title", "Video")
-                description = getattr(reddit_content, "title", "Amazing content!")[
-                    :200
-                ]  # Use title as description since RedditPost doesn't have selftext
-            else:
-                # Dictionary format
-                title = (
-                    reddit_content.get("title", "Video")
-                    if hasattr(reddit_content, "get")
-                    else "Video"
-                )
-                description = (
-                    reddit_content.get("selftext", "")
-                    if hasattr(reddit_content, "get")
-                    else ""
-                )[:200] or "Amazing content!"
 
             # Create enhanced analysis
             enhanced_analysis = VideoAnalysisEnhanced(
