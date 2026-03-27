@@ -427,56 +427,6 @@ class DatabaseManager:
         except sqlite3.Error as e:
             self.logger.error(f"Error updating upload status: {e}")
 
-    def record_processing_step(
-        self,
-        upload_id: int,
-        step_name: str,
-        step_status: str,
-        start_time: datetime,
-        end_time: Optional[datetime] = None,
-        error_message: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Optional[int]:
-        """Record a processing step for detailed tracking"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                duration_seconds = None
-                if end_time and start_time:
-                    duration_seconds = (end_time - start_time).total_seconds()
-
-                metadata_json = None
-                if metadata:
-                    metadata_json = json.dumps(metadata)
-
-                cursor.execute(
-                    """
-                    INSERT INTO processing_history (
-                        upload_id, step_name, step_status, start_time, end_time,
-                        duration_seconds, error_message, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        upload_id,
-                        step_name,
-                        step_status,
-                        start_time,
-                        end_time,
-                        duration_seconds,
-                        error_message,
-                        metadata_json,
-                    ),
-                )
-
-                step_id = cursor.lastrowid
-                conn.commit()
-                return step_id
-
-        except sqlite3.Error as e:
-            self.logger.error(f"Error recording processing step: {e}")
-            return None
-
     def record_local_artifacts(
         self,
         reddit_url: str,
