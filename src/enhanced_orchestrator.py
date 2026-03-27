@@ -13,7 +13,7 @@ import mimetypes
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
@@ -328,16 +328,7 @@ class EnhancedVideoOrchestrator:
                     )
         return audio_segments, main_audio, broll_moments
 
-    def _ai_studio_compose_and_render(self, reddit_post: Any, analysis: Any, main_audio: Any, audio_segments: list[Any], broll_moments: list[dict[str, Any]], options: dict[str, Any]) -> dict[str, Any]:
-        # Step 5: Get background video
-        self.logger.info("Step 5: Background Video")
-        bg_manager = BackgroundManager()
-        video_clip = bg_manager.get_sliced_background(
-            target_duration=main_audio.duration,
-            subreddit=reddit_post.subreddit,
-            text_content=reddit_post.selftext,
-        )
-
+    def _ai_studio_apply_visuals(self, video_clip: Any, broll_moments: list[dict[str, Any]], analysis: Any) -> Any:
         # Step 6: Apply B-roll images
         if broll_moments:
             self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
@@ -356,7 +347,9 @@ class EnhancedVideoOrchestrator:
             video_clip = self.video_processor.text_processor.add_text_overlays(
                 video_clip, analysis.text_overlays
             )
+        return video_clip
 
+    def _ai_studio_apply_captions(self, video_clip: Any, main_audio: Any, options: dict[str, Any]) -> tuple[Any, Optional[Path]]:
         # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
         combined_audio_path = None
         if options.get("enable_word_captions", True):
@@ -373,7 +366,9 @@ class EnhancedVideoOrchestrator:
                 caption_gen.generate_word_captions(video_clip, combined_audio_path)
                 or video_clip
             )
+        return video_clip, combined_audio_path
 
+    def _ai_studio_build_audio(self, main_audio: Any, broll_moments: list[dict[str, Any]], analysis: Any) -> list[Any]:
         # Step 9: Add sound effects (Improvement 5)
         self.logger.info("Step 9: Sound Design (Improvement 5)")
         sfx_manager = SoundEffectsManager()
@@ -398,6 +393,60 @@ class EnhancedVideoOrchestrator:
                 AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
             )
             audio_layers.append(boom_clip)
+        return audio_layers
+
+    def _ai_studio_cleanup_resources(self, audio_segments: list[Any], audio_layers: list[Any], final_audio: Any, main_audio: Any, final_video: Any, combined_audio_path: Optional[Path]) -> None:
+        for clip in audio_segments:
+            try:
+                clip.close()
+            except Exception as e:
+                self.logger.warning("Failed to close audio segment clip: %s", e)
+        for clip in audio_layers:
+            if clip is main_audio:
+                continue
+            try:
+                clip.close()
+            except Exception as e:
+                self.logger.warning("Failed to close audio layer clip: %s", e)
+        if final_audio is not None:
+            try:
+                final_audio.close()
+            except Exception as e:
+                self.logger.warning(
+                    "Failed to close composite audio clip: %s", e
+                )
+        try:
+            main_audio.close()
+        except Exception as e:
+            self.logger.warning("Failed to close main audio clip: %s", e)
+        if final_video is not None:
+            try:
+                final_video.close()
+            except Exception as e:
+                self.logger.warning("Failed to close final video clip: %s", e)
+        if combined_audio_path and combined_audio_path.exists():
+            try:
+                combined_audio_path.unlink()
+            except OSError as e:
+                self.logger.warning(
+                    "Failed to remove temp caption audio %s: %s",
+                    combined_audio_path,
+                    e,
+                )
+
+    def _ai_studio_compose_and_render(self, reddit_post: Any, analysis: Any, main_audio: Any, audio_segments: list[Any], broll_moments: list[dict[str, Any]], options: dict[str, Any]) -> dict[str, Any]:
+        # Step 5: Get background video
+        self.logger.info("Step 5: Background Video")
+        bg_manager = BackgroundManager()
+        video_clip = bg_manager.get_sliced_background(
+            target_duration=main_audio.duration,
+            subreddit=reddit_post.subreddit,
+            text_content=reddit_post.selftext,
+        )
+
+        video_clip = self._ai_studio_apply_visuals(video_clip, broll_moments, analysis)
+        video_clip, combined_audio_path = self._ai_studio_apply_captions(video_clip, main_audio, options)
+        audio_layers = self._ai_studio_build_audio(main_audio, broll_moments, analysis)
 
         # Composite audio
         final_audio = None
@@ -421,43 +470,9 @@ class EnhancedVideoOrchestrator:
                 audio_codec="aac",
             )
         finally:
-            for clip in audio_segments:
-                try:
-                    clip.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close audio segment clip: %s", e)
-            for clip in audio_layers:
-                if clip is main_audio:
-                    continue
-                try:
-                    clip.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close audio layer clip: %s", e)
-            if final_audio is not None:
-                try:
-                    final_audio.close()
-                except Exception as e:
-                    self.logger.warning(
-                        "Failed to close composite audio clip: %s", e
-                    )
-            try:
-                main_audio.close()
-            except Exception as e:
-                self.logger.warning("Failed to close main audio clip: %s", e)
-            if final_video is not None:
-                try:
-                    final_video.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close final video clip: %s", e)
-            if combined_audio_path and combined_audio_path.exists():
-                try:
-                    combined_audio_path.unlink()
-                except OSError as e:
-                    self.logger.warning(
-                        "Failed to remove temp caption audio %s: %s",
-                        combined_audio_path,
-                        e,
-                    )
+            self._ai_studio_cleanup_resources(
+                audio_segments, audio_layers, final_audio, main_audio, final_video, combined_audio_path
+            )
 
         self.logger.info("AI Production Studio pipeline complete!")
 
