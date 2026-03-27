@@ -323,7 +323,6 @@ class TTSService:
                         actual_duration = clip.duration
                         clip.close()
 
-                        # FIX: Prevent overlapping TTS by forcing audio to fit intended duration
                         if actual_duration > segment.intended_duration_seconds:
                             speed_factor = (
                                 actual_duration / segment.intended_duration_seconds
