@@ -687,56 +687,6 @@ class DatabaseManager:
             self.logger.error(f"Error getting processing stats: {e}")
             return {}
 
-    def update_daily_analytics(self):
-        """Update daily analytics summary"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                today = datetime.now().date()
-
-                # Calculate daily stats
-                cursor.execute(
-                    """
-                    SELECT 
-                        COUNT(*) as videos_processed,
-                        COUNT(CASE WHEN status = 'completed' THEN 1 END) as videos_uploaded,
-                        AVG(processing_duration_seconds) as avg_processing_time,
-                        SUM(processing_duration_seconds) as total_processing_time
-                    FROM uploads 
-                    WHERE DATE(upload_timestamp) = ?
-                """,
-                    (today,),
-                )
-
-                stats = cursor.fetchone()
-
-                if stats and stats[0] > 0:  # If there are videos processed today
-                    success_rate = (stats[1] / stats[0]) * 100 if stats[0] > 0 else 0
-
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO analytics (
-                            date, videos_processed, videos_uploaded,
-                            total_processing_time_seconds, average_processing_time_seconds,
-                            success_rate
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                        (
-                            today,
-                            stats[0],
-                            stats[1],
-                            stats[3] or 0,
-                            stats[2] or 0,
-                            success_rate,
-                        ),
-                    )
-
-                    conn.commit()
-                    self.logger.debug(f"Updated daily analytics for {today}")
-
-        except sqlite3.Error as e:
-            self.logger.error(f"Error updating daily analytics: {e}")
-
     def cleanup_old_records(self, days_to_keep: int = 90):
         """Clean up old records to prevent database bloat"""
         try:
