@@ -208,6 +208,128 @@ class VideoDownloader:
             ]
         )
 
+    def _get_video_ydl_opts(self, url: str, output_path: Path) -> Dict[str, Any]:
+        """Configure and return yt-dlp options for video download based on URL type."""
+        if "v.redd.it" in url or "reddit.com" in url:
+            # For Reddit videos, use progressive format selection with fallbacks
+            format_selector = "best[ext=mp4][height<=1080]/best[ext=webm][height<=1080]/best[height<=720]/worst[ext=mp4]/worst"
+        else:
+            # For other platforms, prefer 1080p or lower
+            format_selector = "best[height<=1080]/best"
+
+        ydl_opts = {
+            "format": format_selector,
+            "outtmpl": str(output_path.with_suffix(".%(ext)s")),
+            "quiet": True,
+            "no_warnings": True,
+            "extractaudio": False,
+            "audioformat": "mp3",
+            "embed_chapters": False,
+            "embed_info": False,
+            "writesubtitles": False,
+            "writeautomaticsub": False,
+            "ignore_errors": False,
+            "no_check_certificate": True,
+            "retries": 10,
+            "fragment_retries": 10,
+        }
+
+        # YouTube-specific optimizations
+        if "youtube.com" in url or "youtu.be" in url:
+            ydl_opts["extractor_args"] = {
+                "youtube": {"player_client": ["android", "web"]},
+            }
+            ydl_opts["hls_prefer_ffmpeg"] = True
+
+        ydl_opts.update(self._get_yt_dlp_auth_options())
+        return ydl_opts
+
+    def _handle_video_download_error(self, url: str, output_path: Path, ydl_opts: Dict[str, Any], download_error: Exception) -> bool:
+        """Handle download errors, attempting fallback strategies if applicable."""
+        error_msg = str(download_error).lower()
+
+        if self._looks_like_auth_error(error_msg):
+            if not (ydl_opts.get("cookiefile") or ydl_opts.get("cookiesfrombrowser")):
+                self.logger.warning(
+                    "Video source requires authenticated cookies. Configure "
+                    "YTDLP_COOKIES_FILE or YTDLP_COOKIES_FROM_BROWSER. url=%s",
+                    url,
+                )
+            raise download_error
+
+        # Check for format availability errors
+        if any(phrase in error_msg for phrase in [
+            "requested format is not available",
+            "no video formats found",
+            "format not found",
+            "403",
+            "forbidden",
+            "fragment not found",
+            "the downloaded file is empty",
+        ]):
+            self.logger.warning(f"Primary format failed for {url}, trying progressive fallbacks")
+            return self._download_video_with_fallbacks(url, output_path, ydl_opts, download_error)
+
+        raise download_error
+
+    def _download_video_with_fallbacks(self, url: str, output_path: Path, base_ydl_opts: Dict[str, Any], original_error: Exception) -> bool:
+        """Attempt to download a video using a sequence of fallback formats."""
+        if "youtube.com" in url or "youtu.be" in url:
+            fallback_formats = [
+                "best[height<=720][ext=mp4]/best[height<=720]/worst[ext=mp4]/worst",
+                "worst[ext=mp4]/worst[ext=webm]/worst",
+                "bestvideo+bestaudio/best",
+                "bestvideo/best",
+                "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
+            ]
+        else:
+            fallback_formats = [
+                "worst[ext=mp4]/worst[ext=webm]/worst",
+                "bestvideo+bestaudio/best",
+                "bestvideo/best",
+                "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
+            ]
+
+        for i, fallback_format in enumerate(fallback_formats):
+            try:
+                self.logger.info(
+                    f"Trying fallback format {i + 1}/{len(fallback_formats)}: {fallback_format}"
+                )
+                fallback_opts = base_ydl_opts.copy()
+                fallback_opts["format"] = fallback_format
+                fallback_opts["quiet"] = False  # Enable output for debugging
+
+                with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                    ydl_fallback.download([url])
+                return True
+            except Exception as fallback_error:
+                self.logger.debug(f"Fallback format {i + 1} failed: {fallback_error}")
+                continue
+
+        # Final attempt with generic extractor for Reddit
+        if "v.redd.it" in url or "reddit.com" in url:
+            self.logger.warning("All fallbacks failed, trying generic Reddit extraction")
+            return self._try_generic_reddit_extraction(url, output_path)
+
+        raise original_error
+
+    def _find_downloaded_video_file(self, url: str, output_path: Path) -> bool:
+        """Locate the downloaded video file and ensure it matches the expected output path."""
+        downloaded_files = list(output_path.parent.glob(f"{output_path.stem}.*"))
+        video_extensions = [".mp4", ".webm", ".mkv", ".avi", ".mov"]
+
+        for file_path in downloaded_files:
+            if file_path.suffix.lower() in video_extensions:
+                final_path = output_path.with_suffix(file_path.suffix)
+                if file_path != final_path:
+                    file_path.rename(final_path)
+
+                self.logger.info(f"Successfully downloaded video to {final_path}")
+                return True
+
+        self.logger.error(f"No video file found after download from {url}")
+        return False
+
     def download_video(self, url: str, output_path: Path) -> bool:
         """
         Download video from URL using yt-dlp
@@ -220,144 +342,18 @@ class VideoDownloader:
             True if download successful, False otherwise
         """
         try:
-            # Ensure output directory exists
             output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Configure format string based on URL type with improved Reddit handling
-            if "v.redd.it" in url or "reddit.com" in url:
-                # For Reddit videos, use progressive format selection with fallbacks
-                format_selector = "best[ext=mp4][height<=1080]/best[ext=webm][height<=1080]/best[height<=720]/worst[ext=mp4]/worst"
-            else:
-                # For other platforms, prefer 1080p or lower
-                format_selector = "best[height<=1080]/best"
-
-            # Configure yt-dlp options
-            ydl_opts = {
-                "format": format_selector,
-                "outtmpl": str(output_path.with_suffix(".%(ext)s")),
-                "quiet": True,
-                "no_warnings": True,
-                "extractaudio": False,  # Keep as video download
-                "audioformat": "mp3",
-                "embed_chapters": False,
-                "embed_info": False,
-                "writesubtitles": False,
-                "writeautomaticsub": False,
-                "ignore_errors": False,
-                "no_check_certificate": True,
-                "retries": 10,
-                "fragment_retries": 10,
-            }
-            # YouTube-specific: use Android client to reduce 403 errors from cloud IPs
-            if "youtube.com" in url or "youtu.be" in url:
-                ydl_opts["extractor_args"] = {
-                    "youtube": {"player_client": ["android", "web"]},
-                }
-                ydl_opts["hls_prefer_ffmpeg"] = True
-            ydl_opts.update(self._get_yt_dlp_auth_options())
+            ydl_opts = self._get_video_ydl_opts(url, output_path)
 
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    # Download the video
                     ydl.download([url])
             except Exception as download_error:
-                # Enhanced error handling with multiple fallback strategies
-                error_msg = str(download_error).lower()
-                if self._looks_like_auth_error(error_msg):
-                    if not (
-                        ydl_opts.get("cookiefile") or ydl_opts.get("cookiesfrombrowser")
-                    ):
-                        self.logger.warning(
-                            "Video source requires authenticated cookies. Configure "
-                            "YTDLP_COOKIES_FILE or YTDLP_COOKIES_FROM_BROWSER. url=%s",
-                            url,
-                        )
-                    raise download_error
+                handled = self._handle_video_download_error(url, output_path, ydl_opts, download_error)
+                if not handled:
+                    return False
 
-                if any(
-                    phrase in error_msg
-                    for phrase in [
-                        "requested format is not available",
-                        "no video formats found",
-                        "format not found",
-                        "403",
-                        "forbidden",
-                        "fragment not found",
-                        "the downloaded file is empty",
-                    ]
-                ):
-                    self.logger.warning(
-                        f"Primary format failed for {url}, trying progressive fallbacks"
-                    )
-
-                    # YouTube: prefer lower-res progressive first to avoid 403 on DASH/HLS
-                    if "youtube.com" in url or "youtu.be" in url:
-                        fallback_formats = [
-                            "best[height<=720][ext=mp4]/best[height<=720]/worst[ext=mp4]/worst",
-                            "worst[ext=mp4]/worst[ext=webm]/worst",
-                            "bestvideo+bestaudio/best",
-                            "bestvideo/best",
-                            "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
-                        ]
-                    else:
-                        fallback_formats = [
-                            "worst[ext=mp4]/worst[ext=webm]/worst",
-                            "bestvideo+bestaudio/best",
-                            "bestvideo/best",
-                            "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
-                        ]
-
-                    success = False
-                    for i, fallback_format in enumerate(fallback_formats):
-                        try:
-                            self.logger.info(
-                                f"Trying fallback format {i + 1}/{len(fallback_formats)}: {fallback_format}"
-                            )
-                            fallback_opts = ydl_opts.copy()
-                            fallback_opts["format"] = fallback_format
-                            fallback_opts["quiet"] = (
-                                False  # Enable output for debugging
-                            )
-
-                            with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
-                                ydl_fallback.download([url])
-                            success = True
-                            break
-
-                        except Exception as fallback_error:
-                            self.logger.debug(
-                                f"Fallback format {i + 1} failed: {fallback_error}"
-                            )
-                            continue
-
-                    if not success:
-                        # Final attempt with generic extractor for Reddit
-                        if "v.redd.it" in url or "reddit.com" in url:
-                            self.logger.warning(
-                                f"All fallbacks failed, trying generic Reddit extraction"
-                            )
-                            return self._try_generic_reddit_extraction(url, output_path)
-                        else:
-                            raise download_error
-                else:
-                    raise download_error
-
-            # Find the downloaded file (yt-dlp may change the extension)
-            downloaded_files = list(output_path.parent.glob(f"{output_path.stem}.*"))
-            video_extensions = [".mp4", ".webm", ".mkv", ".avi", ".mov"]
-
-            for file_path in downloaded_files:
-                if file_path.suffix.lower() in video_extensions:
-                    # Rename to expected output path
-                    final_path = output_path.with_suffix(file_path.suffix)
-                    if file_path != final_path:
-                        file_path.rename(final_path)
-
-                    self.logger.info(f"Successfully downloaded video to {final_path}")
-                    return True
-
-            self.logger.error(f"No video file found after download from {url}")
-            return False
+            return self._find_downloaded_video_file(url, output_path)
 
         except Exception as e:
             self.logger.error(f"Error downloading video from {url}: {e}")
