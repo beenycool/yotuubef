@@ -148,6 +148,30 @@ class VideoDownloader:
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
 
+    # Class-level constants for better maintainability (PEP 8)
+    _FORMAT_ERROR_PHRASES = (
+        "requested format is not available",
+        "no video formats found",
+        "format not found",
+        "403",
+        "forbidden",
+        "fragment not found",
+        "the downloaded file is empty",
+    )
+
+    _COMMON_FALLBACK_FORMATS = (
+        "worst[ext=mp4]/worst[ext=webm]/worst",
+        "bestvideo+bestaudio/best",
+        "bestvideo/best",
+        "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
+    )
+
+    _YOUTUBE_FALLBACK_FORMATS = (
+        "best[height<=720][ext=mp4]/best[height<=720]/worst[ext=mp4]/worst",
+    ) + _COMMON_FALLBACK_FORMATS
+
+    _VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv", ".avi", ".mov"}
+
     @staticmethod
     def _parse_cookies_from_browser(raw_value: str) -> Optional[Tuple[str, ...]]:
         value = str(raw_value or "").strip()
@@ -244,7 +268,13 @@ class VideoDownloader:
         ydl_opts.update(self._get_yt_dlp_auth_options())
         return ydl_opts
 
-    def _handle_video_download_error(self, url: str, output_path: Path, ydl_opts: Dict[str, Any], download_error: Exception) -> bool:
+    def _handle_video_download_error(
+        self,
+        url: str,
+        output_path: Path,
+        ydl_opts: Dict[str, Any],
+        download_error: Exception,
+    ) -> bool:
         """Handle download errors, attempting fallback strategies if applicable."""
         error_msg = str(download_error).lower()
 
@@ -258,37 +288,28 @@ class VideoDownloader:
             raise download_error
 
         # Check for format availability errors
-        if any(phrase in error_msg for phrase in [
-            "requested format is not available",
-            "no video formats found",
-            "format not found",
-            "403",
-            "forbidden",
-            "fragment not found",
-            "the downloaded file is empty",
-        ]):
-            self.logger.warning(f"Primary format failed for {url}, trying progressive fallbacks")
-            return self._download_video_with_fallbacks(url, output_path, ydl_opts, download_error)
+        if any(phrase in error_msg for phrase in self._FORMAT_ERROR_PHRASES):
+            self.logger.warning(
+                f"Primary format failed for {url}, trying progressive fallbacks"
+            )
+            return self._download_video_with_fallbacks(
+                url, output_path, ydl_opts, download_error
+            )
 
         raise download_error
 
-    def _download_video_with_fallbacks(self, url: str, output_path: Path, base_ydl_opts: Dict[str, Any], original_error: Exception) -> bool:
+    def _download_video_with_fallbacks(
+        self,
+        url: str,
+        output_path: Path,
+        base_ydl_opts: Dict[str, Any],
+        original_error: Exception,
+    ) -> bool:
         """Attempt to download a video using a sequence of fallback formats."""
         if "youtube.com" in url or "youtu.be" in url:
-            fallback_formats = [
-                "best[height<=720][ext=mp4]/best[height<=720]/worst[ext=mp4]/worst",
-                "worst[ext=mp4]/worst[ext=webm]/worst",
-                "bestvideo+bestaudio/best",
-                "bestvideo/best",
-                "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
-            ]
+            fallback_formats = self._YOUTUBE_FALLBACK_FORMATS
         else:
-            fallback_formats = [
-                "worst[ext=mp4]/worst[ext=webm]/worst",
-                "bestvideo+bestaudio/best",
-                "bestvideo/best",
-                "(mp4,webm,mkv,avi)[height<=1080]/(mp4,webm,mkv,avi)",
-            ]
+            fallback_formats = self._COMMON_FALLBACK_FORMATS
 
         for i, fallback_format in enumerate(fallback_formats):
             try:
@@ -308,7 +329,9 @@ class VideoDownloader:
 
         # Final attempt with generic extractor for Reddit
         if "v.redd.it" in url or "reddit.com" in url:
-            self.logger.warning("All fallbacks failed, trying generic Reddit extraction")
+            self.logger.warning(
+                "All fallbacks failed, trying generic Reddit extraction"
+            )
             return self._try_generic_reddit_extraction(url, output_path)
 
         raise original_error
@@ -316,10 +339,9 @@ class VideoDownloader:
     def _find_downloaded_video_file(self, url: str, output_path: Path) -> bool:
         """Locate the downloaded video file and ensure it matches the expected output path."""
         downloaded_files = list(output_path.parent.glob(f"{output_path.stem}.*"))
-        video_extensions = [".mp4", ".webm", ".mkv", ".avi", ".mov"]
 
         for file_path in downloaded_files:
-            if file_path.suffix.lower() in video_extensions:
+            if file_path.suffix.lower() in self._VIDEO_EXTENSIONS:
                 final_path = output_path.with_suffix(file_path.suffix)
                 if file_path != final_path:
                     file_path.rename(final_path)
@@ -349,7 +371,9 @@ class VideoDownloader:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
             except Exception as download_error:
-                handled = self._handle_video_download_error(url, output_path, ydl_opts, download_error)
+                handled = self._handle_video_download_error(
+                    url, output_path, ydl_opts, download_error
+                )
                 if not handled:
                     return False
 
