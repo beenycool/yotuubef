@@ -62,23 +62,6 @@ class DatabaseManager:
                     )
                 """)
 
-                # Create processing_history table for detailed tracking
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS processing_history (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        upload_id INTEGER,
-                        step_name TEXT NOT NULL,
-                        step_status TEXT NOT NULL,
-                        start_time DATETIME NOT NULL,
-                        end_time DATETIME,
-                        duration_seconds REAL,
-                        error_message TEXT,
-                        metadata TEXT,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        FOREIGN KEY (upload_id) REFERENCES uploads (id)
-                    )
-                """)
-
                 self._ensure_local_artifacts_table(cursor)
 
                 conn.commit()
@@ -99,9 +82,7 @@ class DatabaseManager:
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)"
                 )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_processing_history_upload_id ON processing_history(upload_id)"
-                )
+                cursor.execute()
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_local_artifacts_reddit_url ON local_artifacts(reddit_url)"
                 )
@@ -427,56 +408,6 @@ class DatabaseManager:
         except sqlite3.Error as e:
             self.logger.error(f"Error updating upload status: {e}")
 
-    def record_processing_step(
-        self,
-        upload_id: int,
-        step_name: str,
-        step_status: str,
-        start_time: datetime,
-        end_time: Optional[datetime] = None,
-        error_message: Optional[str] = None,
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> Optional[int]:
-        """Record a processing step for detailed tracking"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                duration_seconds = None
-                if end_time and start_time:
-                    duration_seconds = (end_time - start_time).total_seconds()
-
-                metadata_json = None
-                if metadata:
-                    metadata_json = json.dumps(metadata)
-
-                cursor.execute(
-                    """
-                    INSERT INTO processing_history (
-                        upload_id, step_name, step_status, start_time, end_time,
-                        duration_seconds, error_message, metadata
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        upload_id,
-                        step_name,
-                        step_status,
-                        start_time,
-                        end_time,
-                        duration_seconds,
-                        error_message,
-                        metadata_json,
-                    ),
-                )
-
-                step_id = cursor.lastrowid
-                conn.commit()
-                return step_id
-
-        except sqlite3.Error as e:
-            self.logger.error(f"Error recording processing step: {e}")
-            return None
-
     def record_local_artifacts(
         self,
         reddit_url: str,
@@ -673,25 +604,10 @@ class DatabaseManager:
         """Clean up old records to prevent database bloat"""
         try:
             days_int = max(0, int(days_to_keep))
-            history_modifier = f"-{days_int} days"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
-                # Delete old processing history
-                cursor.execute(
-                    """
-                    DELETE FROM processing_history 
-                    WHERE created_at < datetime('now', ?)
-                """,
-                    (history_modifier,),
-                )
-
-                deleted_history = cursor.rowcount
-
                 conn.commit()
-
-                if deleted_history > 0:
-                    self.logger.info(f"Cleaned up {deleted_history} history records")
 
         except sqlite3.Error as e:
             self.logger.error(f"Error cleaning up old records: {e}")
