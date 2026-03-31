@@ -234,7 +234,6 @@ class EnhancedVideoOrchestrator:
             self.gpu_manager.clear_gpu_cache()
             return {"success": False, "error": str(e), "stage": "faceless_lore"}
 
-
     async def _ai_studio_fetch_and_analyze(self, reddit_url: str) -> tuple[Any, Any]:
         # Step 1: Get Reddit post
         async with RedditClient() as reddit_client:
@@ -243,7 +242,10 @@ class EnhancedVideoOrchestrator:
         if not reddit_post:
             return None, {"success": False, "error": "Failed to load Reddit post"}
         if reddit_post.is_video:
-            return None, {"success": False, "error": "Text posts only for this pipeline"}
+            return None, {
+                "success": False,
+                "error": "Text posts only for this pipeline",
+            }
 
         # Improvement 1: Multi-Turn Agentic Research
         self.logger.info("Step 1: Agentic Research (Improvement 1)")
@@ -256,9 +258,7 @@ class EnhancedVideoOrchestrator:
         )
 
         # Step 2: Generate script with Perfect Loop + B-roll queries
-        self.logger.info(
-            "Step 2: Script Generation with Perfect Loop (Improvement 2)"
-        )
+        self.logger.info("Step 2: Script Generation with Perfect Loop (Improvement 2)")
         reddit_content_dict = {
             "title": reddit_post.title,
             "selftext": reddit_post.selftext,
@@ -267,15 +267,15 @@ class EnhancedVideoOrchestrator:
             "num_comments": reddit_post.num_comments,
             "deep_research": research_facts,
         }
-        analysis = await self.ai_client.analyze_video_content(
-            None, reddit_content_dict
-        )
+        analysis = await self.ai_client.analyze_video_content(None, reddit_content_dict)
         if not analysis:
             return None, {"success": False, "error": "Script generation failed"}
 
         return reddit_post, analysis
 
-    async def _ai_studio_generate_audio_and_broll(self, analysis: Any) -> tuple[list[Any], Any, list[dict[str, Any]]]:
+    async def _ai_studio_generate_audio_and_broll(
+        self, analysis: Any
+    ) -> tuple[list[Any], Any, list[dict[str, Any]]]:
         # Step 3: Generate TTS audio
         self.logger.info("Step 3: TTS Generation")
         tts_results = (
@@ -299,10 +299,7 @@ class EnhancedVideoOrchestrator:
         self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
         broll_queries = []
         for segment in analysis.narrative_script_segments:
-            if (
-                hasattr(segment, "b_roll_search_query")
-                and segment.b_roll_search_query
-            ):
+            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
                 broll_queries.append(segment.b_roll_search_query)
 
         async with BraveImageClient() as image_client:
@@ -313,10 +310,7 @@ class EnhancedVideoOrchestrator:
         # Map images to moments
         broll_moments = []
         for segment in analysis.narrative_script_segments:
-            if (
-                hasattr(segment, "b_roll_search_query")
-                and segment.b_roll_search_query
-            ):
+            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
                 query = segment.b_roll_search_query
                 if query in broll_images and broll_images[query]:
                     broll_moments.append(
@@ -328,7 +322,9 @@ class EnhancedVideoOrchestrator:
                     )
         return audio_segments, main_audio, broll_moments
 
-    def _ai_studio_apply_visuals(self, video_clip: Any, broll_moments: list[dict[str, Any]], analysis: Any) -> Any:
+    def _ai_studio_apply_visuals(
+        self, video_clip: Any, broll_moments: list[dict[str, Any]], analysis: Any
+    ) -> Any:
         # Step 6: Apply B-roll images
         if broll_moments:
             self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
@@ -349,7 +345,9 @@ class EnhancedVideoOrchestrator:
             )
         return video_clip
 
-    def _ai_studio_apply_captions(self, video_clip: Any, main_audio: Any, options: dict[str, Any]) -> tuple[Any, Optional[Path]]:
+    def _ai_studio_apply_captions(
+        self, video_clip: Any, main_audio: Any, options: dict[str, Any]
+    ) -> tuple[Any, Optional[Path]]:
         # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
         combined_audio_path = None
         if options.get("enable_word_captions", True):
@@ -368,7 +366,9 @@ class EnhancedVideoOrchestrator:
             )
         return video_clip, combined_audio_path
 
-    def _ai_studio_build_audio(self, main_audio: Any, broll_moments: list[dict[str, Any]], analysis: Any) -> list[Any]:
+    def _ai_studio_build_audio(
+        self, main_audio: Any, broll_moments: list[dict[str, Any]], analysis: Any
+    ) -> list[Any]:
         # Step 9: Add sound effects (Improvement 5)
         self.logger.info("Step 9: Sound Design (Improvement 5)")
         sfx_manager = SoundEffectsManager()
@@ -389,41 +389,35 @@ class EnhancedVideoOrchestrator:
         boom_path = sfx_manager.get_boom_sound()
         if boom_path and analysis.narrative_script_segments:
             hook_time = analysis.narrative_script_segments[0].time_seconds
-            boom_clip = (
-                AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
-            )
+            boom_clip = AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
             audio_layers.append(boom_clip)
         return audio_layers
 
-    def _ai_studio_cleanup_resources(self, audio_segments: list[Any], audio_layers: list[Any], final_audio: Any, main_audio: Any, final_video: Any, combined_audio_path: Optional[Path]) -> None:
-        for clip in audio_segments:
-            try:
-                clip.close()
-            except Exception as e:
-                self.logger.warning("Failed to close audio segment clip: %s", e)
-        for clip in audio_layers:
-            if clip is main_audio:
-                continue
-            try:
-                clip.close()
-            except Exception as e:
-                self.logger.warning("Failed to close audio layer clip: %s", e)
-        if final_audio is not None:
-            try:
-                final_audio.close()
-            except Exception as e:
-                self.logger.warning(
-                    "Failed to close composite audio clip: %s", e
-                )
-        try:
-            main_audio.close()
-        except Exception as e:
-            self.logger.warning("Failed to close main audio clip: %s", e)
-        if final_video is not None:
-            try:
-                final_video.close()
-            except Exception as e:
-                self.logger.warning("Failed to close final video clip: %s", e)
+    def _ai_studio_cleanup_resources(
+        self,
+        audio_segments: list[Any],
+        audio_layers: list[Any],
+        final_audio: Any,
+        main_audio: Any,
+        final_video: Any,
+        combined_audio_path: Optional[Path],
+    ) -> None:
+        resource_groups = [
+            (audio_segments, "audio segment"),
+            ([c for c in audio_layers if c is not main_audio], "audio layer"),
+            ([final_audio], "composite audio"),
+            ([main_audio], "main audio"),
+            ([final_video], "final video"),
+        ]
+
+        for clips, name in resource_groups:
+            for clip in clips:
+                if clip:
+                    try:
+                        clip.close()
+                    except Exception as e:
+                        self.logger.warning("Failed to close %s clip: %s", name, e)
+
         if combined_audio_path and combined_audio_path.exists():
             try:
                 combined_audio_path.unlink()
@@ -434,7 +428,15 @@ class EnhancedVideoOrchestrator:
                     e,
                 )
 
-    def _ai_studio_compose_and_render(self, reddit_post: Any, analysis: Any, main_audio: Any, audio_segments: list[Any], broll_moments: list[dict[str, Any]], options: dict[str, Any]) -> dict[str, Any]:
+    def _ai_studio_compose_and_render(
+        self,
+        reddit_post: Any,
+        analysis: Any,
+        main_audio: Any,
+        audio_segments: list[Any],
+        broll_moments: list[dict[str, Any]],
+        options: dict[str, Any],
+    ) -> dict[str, Any]:
         # Step 5: Get background video
         self.logger.info("Step 5: Background Video")
         bg_manager = BackgroundManager()
@@ -445,15 +447,16 @@ class EnhancedVideoOrchestrator:
         )
 
         video_clip = self._ai_studio_apply_visuals(video_clip, broll_moments, analysis)
-        video_clip, combined_audio_path = self._ai_studio_apply_captions(video_clip, main_audio, options)
+        video_clip, combined_audio_path = self._ai_studio_apply_captions(
+            video_clip, main_audio, options
+        )
         audio_layers = self._ai_studio_build_audio(main_audio, broll_moments, analysis)
 
         # Composite audio
         final_audio = None
         final_video = None
         output_file = (
-            self.config.paths.processed_dir
-            / f"production_studio_{reddit_post.id}.mp4"
+            self.config.paths.processed_dir / f"production_studio_{reddit_post.id}.mp4"
         )
         try:
             final_audio = CompositeAudioClip(audio_layers)
@@ -471,7 +474,12 @@ class EnhancedVideoOrchestrator:
             )
         finally:
             self._ai_studio_cleanup_resources(
-                audio_segments, audio_layers, final_audio, main_audio, final_video, combined_audio_path
+                audio_segments,
+                audio_layers,
+                final_audio,
+                main_audio,
+                final_video,
+                combined_audio_path,
             )
 
         self.logger.info("AI Production Studio pipeline complete!")
@@ -514,16 +522,27 @@ class EnhancedVideoOrchestrator:
             )
             options = options or {}
 
-            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(reddit_url)
+            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(
+                reddit_url
+            )
             if reddit_post is None:
                 return analysis_or_err
 
-            audio_segments, main_audio, broll_moments_or_err = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
+            (
+                audio_segments,
+                main_audio,
+                broll_moments_or_err,
+            ) = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
             if main_audio is None:
                 return broll_moments_or_err[0]
 
             return self._ai_studio_compose_and_render(
-                reddit_post, analysis_or_err, main_audio, audio_segments, broll_moments_or_err, options
+                reddit_post,
+                analysis_or_err,
+                main_audio,
+                audio_segments,
+                broll_moments_or_err,
+                options,
             )
 
         except Exception as e:
@@ -663,9 +682,7 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
                 "deep_research_prompt_path": state.metadata.get(
                     "deep_research_prompt_path"
                 ),
@@ -684,9 +701,7 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
             }
 
         report_text = report_file.read_text(encoding="utf-8", errors="replace")
@@ -699,9 +714,7 @@ class EnhancedVideoOrchestrator:
         state.gemini_report_path = str(copied_report)
         state.status = "active"
         save_run_state(state)
-        state = set_phase(
-            state, PipelinePhase.SYNTHESIS, "Gemini report supplied"
-        )
+        state = set_phase(state, PipelinePhase.SYNTHESIS, "Gemini report supplied")
         return state, None
 
     async def _handle_synthesis_phase(self, state: Any, phase: Any) -> Any:
@@ -802,9 +815,7 @@ class EnhancedVideoOrchestrator:
         )
         state.metadata["evidence_index_path"] = str(evidence_path)
         state.metadata["evidence_search_path"] = str(search_path)
-        state.metadata["raw_media_dir"] = str(
-            Path(state.project_dir) / "raw_media"
-        )
+        state.metadata["raw_media_dir"] = str(Path(state.project_dir) / "raw_media")
         save_run_state(state)
         return set_phase(
             state,
@@ -827,9 +838,7 @@ class EnhancedVideoOrchestrator:
             context_parts.append(
                 self._read_hybrid_artifact_text(state.gemini_report_path)
             )
-        raw_context = "\n\n".join(
-            [item for item in context_parts if item]
-        ).strip()
+        raw_context = "\n\n".join([item for item in context_parts if item]).strip()
 
         workspace_assets = self._collect_hybrid_workspace_assets(state)
         assets_json = json.dumps(workspace_assets, indent=2, ensure_ascii=True)
@@ -839,9 +848,7 @@ class EnhancedVideoOrchestrator:
             else f"[AVAILABLE_WORKSPACE_ASSETS]\n{assets_json}"
         )
 
-        max_tokens = int(
-            os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000")
-        )
+        max_tokens = int(os.getenv("HYBRID_SCRIPT_CONTEXT_MAX_TOKENS", "120000"))
 
         summary_result = summarize_if_needed(
             raw_context,
@@ -880,10 +887,10 @@ class EnhancedVideoOrchestrator:
             "Script finalized; ready for local render",
         )
 
-    async def _handle_video_render_phase(self, state: Any) -> tuple[Any, Optional[Dict[str, Any]]]:
-        final_script_path = str(
-            state.metadata.get("final_script_path", "") or ""
-        )
+    async def _handle_video_render_phase(
+        self, state: Any
+    ) -> tuple[Any, Optional[Dict[str, Any]]]:
+        final_script_path = str(state.metadata.get("final_script_path", "") or "")
         if not final_script_path:
             state.status = "paused_render_failed"
             save_run_state(state)
@@ -894,9 +901,7 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.VIDEO_RENDER.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
                 "error": "Missing final_script_path in state metadata",
             }
 
@@ -911,9 +916,7 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.VIDEO_RENDER.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
                 "final_script_path": final_script_path,
                 "error": f"Final script not found: {script_path}",
             }
@@ -930,16 +933,12 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.VIDEO_RENDER.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
                 "final_script_path": final_script_path,
                 "error": f"Failed to parse final script JSON: {exc}",
             }
 
-        render_result = await self._render_hybrid_local_video(
-            state, script_payload
-        )
+        render_result = await self._render_hybrid_local_video(state, script_payload)
         if not render_result.get("success"):
             state.status = "paused_render_failed"
             save_run_state(state)
@@ -950,19 +949,13 @@ class EnhancedVideoOrchestrator:
                 "current_phase": PipelinePhase.VIDEO_RENDER.value,
                 "project_name": state.project_name,
                 "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(
-                    state.metadata.get("hybrid_no_upload", False)
-                ),
+                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
                 "final_script_path": final_script_path,
-                "error": str(
-                    render_result.get("error", "Hybrid render failed")
-                ),
+                "error": str(render_result.get("error", "Hybrid render failed")),
             }
 
         final_video_path = str(render_result.get("video_path", "") or "")
-        render_manifest_path = str(
-            render_result.get("render_manifest_path", "") or ""
-        )
+        render_manifest_path = str(render_result.get("render_manifest_path", "") or "")
         state.metadata["final_video_path"] = final_video_path
         if render_manifest_path:
             state.metadata["render_manifest_path"] = render_manifest_path
@@ -4470,7 +4463,6 @@ Search results:
             visual_features = len(analysis.visual_cues) * 3
             audio_features = len(analysis.sound_effects) * 2
             narrative_features = len(analysis.narrative_script_segments) * 4
-
 
             feature_bonus = (
                 engagement_features
