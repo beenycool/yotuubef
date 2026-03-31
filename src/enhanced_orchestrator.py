@@ -28,7 +28,7 @@ from moviepy import (
     concatenate_videoclips,
 )
 
-import asyncprawcore.exceptions
+import asyncprawcore
 
 from src.config.settings import get_config
 from src.models import (
@@ -4160,7 +4160,7 @@ Search results:
                 "reddit_post": reddit_post,
             }
 
-        except asyncprawcore.exceptions.ResponseException as e:
+        except asyncprawcore.ResponseException as e:
             if e.response.status == 404:
                 self.logger.error(
                     f"Error fetching post from URL {reddit_url}: received 404 HTTP response"
