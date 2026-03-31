@@ -452,10 +452,10 @@ class NvidiaNimAIClient:
         """Fallback analysis when NVIDIA NIM is not available"""
         try:
             title = context.get("title", "Video")
- duration = context.get("duration", 60)
- score = context.get("score", 0)
+            duration = context.get("duration", 60)
+            context.get("score", 0)
 
- mood = "exciting"
+            mood = "exciting"
             title_lower = title.lower()
             if any(word in title_lower for word in self._MOOD_WORDS_CALM):
                 mood = "calm"
@@ -814,33 +814,35 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             narrative_segments: List[NarrativeSegment] = []
             b_roll_moments = []
 
+            ns_append = narrative_segments.append
+            bm_append = b_roll_moments.append
+
             for item in raw_narrative_segments:
-                if not isinstance(item, dict):
+                if type(item) is not dict:
                     continue
                 text = str(item.get("text", "")).strip()
                 if not text:
                     continue
 
                 b_roll_query = item.get("b_roll_search_query")
-                narrative_segments.append(
+                time_sec = float(item.get("time_seconds", 0.0))
+                duration = float(item.get("intended_duration_seconds", 4.0))
+
+                ns_append(
                     NarrativeSegment(
                         text=text,
-                        time_seconds=float(item.get("time_seconds", 0.0)),
-                        intended_duration_seconds=float(
-                            item.get("intended_duration_seconds", 4.0)
-                        ),
+                        time_seconds=time_sec,
+                        intended_duration_seconds=duration,
                         b_roll_search_query=b_roll_query,
                     )
                 )
 
                 if b_roll_query:
-                    b_roll_moments.append(
+                    bm_append(
                         {
                             "search_query": b_roll_query,
-                            "timestamp_seconds": float(item.get("time_seconds", 0.0)),
-                            "duration": float(
-                                item.get("intended_duration_seconds", 4.0)
-                            ),
+                            "timestamp_seconds": time_sec,
+                            "duration": duration,
                         }
                     )
 
