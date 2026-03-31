@@ -79,21 +79,6 @@ class DatabaseManager:
                     )
                 """)
 
-                # Create analytics table for performance tracking
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS analytics (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        date DATE NOT NULL,
-                        videos_processed INTEGER DEFAULT 0,
-                        videos_uploaded INTEGER DEFAULT 0,
-                        total_processing_time_seconds REAL DEFAULT 0,
-                        average_processing_time_seconds REAL DEFAULT 0,
-                        success_rate REAL DEFAULT 0,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        UNIQUE(date)
-                    )
-                """)
-
                 self._ensure_local_artifacts_table(cursor)
 
                 conn.commit()
@@ -116,9 +101,6 @@ class DatabaseManager:
                 )
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_processing_history_upload_id ON processing_history(upload_id)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_analytics_date ON analytics(date)"
                 )
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_local_artifacts_reddit_url ON local_artifacts(reddit_url)"
@@ -687,62 +669,11 @@ class DatabaseManager:
             self.logger.error(f"Error getting processing stats: {e}")
             return {}
 
-    def update_daily_analytics(self):
-        """Update daily analytics summary"""
-        try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                today = datetime.now().date()
-
-                # Calculate daily stats
-                cursor.execute(
-                    """
-                    SELECT 
-                        COUNT(*) as videos_processed,
-                        COUNT(CASE WHEN status = 'completed' THEN 1 END) as videos_uploaded,
-                        AVG(processing_duration_seconds) as avg_processing_time,
-                        SUM(processing_duration_seconds) as total_processing_time
-                    FROM uploads 
-                    WHERE DATE(upload_timestamp) = ?
-                """,
-                    (today,),
-                )
-
-                stats = cursor.fetchone()
-
-                if stats and stats[0] > 0:  # If there are videos processed today
-                    success_rate = (stats[1] / stats[0]) * 100 if stats[0] > 0 else 0
-
-                    cursor.execute(
-                        """
-                        INSERT OR REPLACE INTO analytics (
-                            date, videos_processed, videos_uploaded,
-                            total_processing_time_seconds, average_processing_time_seconds,
-                            success_rate
-                        ) VALUES (?, ?, ?, ?, ?, ?)
-                    """,
-                        (
-                            today,
-                            stats[0],
-                            stats[1],
-                            stats[3] or 0,
-                            stats[2] or 0,
-                            success_rate,
-                        ),
-                    )
-
-                    conn.commit()
-                    self.logger.debug(f"Updated daily analytics for {today}")
-
-        except sqlite3.Error as e:
-            self.logger.error(f"Error updating daily analytics: {e}")
-
     def cleanup_old_records(self, days_to_keep: int = 90):
         """Clean up old records to prevent database bloat"""
         try:
             days_int = max(0, int(days_to_keep))
             history_modifier = f"-{days_int} days"
-            analytics_modifier = f"-{days_int * 2} days"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
@@ -757,23 +688,10 @@ class DatabaseManager:
 
                 deleted_history = cursor.rowcount
 
-                # Delete old analytics (keep more of these)
-                cursor.execute(
-                    """
-                    DELETE FROM analytics 
-                    WHERE created_at < datetime('now', ?)
-                """,
-                    (analytics_modifier,),
-                )
-
-                deleted_analytics = cursor.rowcount
-
                 conn.commit()
 
-                if deleted_history > 0 or deleted_analytics > 0:
-                    self.logger.info(
-                        f"Cleaned up {deleted_history} history records and {deleted_analytics} analytics records"
-                    )
+                if deleted_history > 0:
+                    self.logger.info(f"Cleaned up {deleted_history} history records")
 
         except sqlite3.Error as e:
             self.logger.error(f"Error cleaning up old records: {e}")
@@ -812,13 +730,8 @@ class DatabaseManager:
                 cursor.execute("SELECT * FROM uploads")
                 uploads = [dict(row) for row in cursor.fetchall()]
 
-                # Export analytics
-                cursor.execute("SELECT * FROM analytics")
-                analytics = [dict(row) for row in cursor.fetchall()]
-
                 data = {
                     "uploads": uploads,
-                    "analytics": analytics,
                     "export_timestamp": datetime.now().isoformat(),
                 }
 
