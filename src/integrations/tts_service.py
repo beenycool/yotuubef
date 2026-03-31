@@ -304,19 +304,6 @@ class TTSService:
                 if audio_path:
                     self._trim_segment_silence(audio_path, segment_index=i)
 
-                    # FORCE fit to intended duration to prevent overlapping multiple TTS speaking at once
-                    adjusted_path = self.adjust_audio_speed(
-                        audio_path, segment.intended_duration_seconds
-                    )
-                    if adjusted_path and adjusted_path.exists():
-                        # Clean up the original temporary file after creating the adjusted version
-                        if adjusted_path != audio_path:
-                            try:
-                                Path(audio_path).unlink(missing_ok=True)
-                            except Exception:
-                                pass  # Best effort cleanup
-                        audio_path = adjusted_path
-
                     # Get audio duration for timing validation
                     try:
                         clip = AudioFileClip(str(audio_path))
@@ -332,6 +319,7 @@ class TTSService:
                                     audio_path,
                                     target_duration=segment.intended_duration_seconds,
                                     output_path=audio_path.with_suffix(".fit.wav"),
+                                    max_speed_factor=self.MAX_TTS_SPEEDUP_FACTOR,
                                 )
                                 if adjusted_path and adjusted_path.exists():
                                     audio_path = adjusted_path
@@ -345,22 +333,34 @@ class TTSService:
                                     f"Segment {i} requires speedup of {speed_factor:.2f}x "
                                     f"(>{self.MAX_TTS_SPEEDUP_FACTOR}x), applying max speedup and truncating to fit"
                                 )
-                                max_target_duration = actual_duration / self.MAX_TTS_SPEEDUP_FACTOR
+                                max_target_duration = (
+                                    actual_duration / self.MAX_TTS_SPEEDUP_FACTOR
+                                )
                                 adjusted_path = self.adjust_audio_speed(
                                     audio_path,
                                     target_duration=max_target_duration,
                                     output_path=audio_path.with_suffix(".fit.wav"),
+                                    max_speed_factor=self.MAX_TTS_SPEEDUP_FACTOR,
                                 )
                                 if adjusted_path and adjusted_path.exists():
                                     audio_path = adjusted_path
 
                                     adj_clip = AudioFileClip(str(adjusted_path))
                                     try:
-                                        if adj_clip.duration > segment.intended_duration_seconds:
+                                        if (
+                                            adj_clip.duration
+                                            > segment.intended_duration_seconds
+                                        ):
                                             # Truncate to prevent overlap
-                                            trunc_clip = adj_clip.subclip(0, segment.intended_duration_seconds)
-                                            trunc_path = adjusted_path.with_suffix(".trunc.wav")
-                                            trunc_clip.write_audiofile(str(trunc_path), logger=None)
+                                            trunc_clip = adj_clip.subclip(
+                                                0, segment.intended_duration_seconds
+                                            )
+                                            trunc_path = adjusted_path.with_suffix(
+                                                ".trunc.wav"
+                                            )
+                                            trunc_clip.write_audiofile(
+                                                str(trunc_path), logger=None
+                                            )
                                             audio_path = trunc_path
                                             trunc_clip.close()
                                     finally:
@@ -532,6 +532,7 @@ class TTSService:
         audio_path: Path,
         target_duration: float,
         output_path: Optional[Path] = None,
+        max_speed_factor: float = 1.5,
     ) -> Optional[Path]:
         """
         Adjust audio speed to match a target duration using moviepy.
@@ -540,6 +541,7 @@ class TTSService:
             audio_path: Path to source audio file
             target_duration: Target duration in seconds
             output_path: Optional output path
+            max_speed_factor: Maximum speed factor to apply (default: 1.5)
 
         Returns:
             Path to speed-adjusted audio file
@@ -560,7 +562,7 @@ class TTSService:
             speed_factor = current_duration / target_duration
 
             # Apply speed change (limit to reasonable range)
-            speed_factor = max(0.7, min(1.5, speed_factor))
+            speed_factor = max(0.7, min(max_speed_factor, speed_factor))
 
             # Apply speed adjustment with MoviePy API compatibility
             with_speed_scaled = getattr(clip, "with_speed_scaled", None)
