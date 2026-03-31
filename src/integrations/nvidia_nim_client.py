@@ -453,7 +453,6 @@ class NvidiaNimAIClient:
         try:
             title = context.get("title", "Video")
             duration = context.get("duration", 60)
-            context.get("score", 0)
 
             mood = "exciting"
             title_lower = title.lower()
@@ -818,7 +817,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             bm_append = b_roll_moments.append
 
             for item in raw_narrative_segments:
-                if type(item) is not dict:
+                if not isinstance(item, dict):
                     continue
                 text = str(item.get("text", "")).strip()
                 if not text:
