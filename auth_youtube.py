@@ -6,6 +6,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from dotenv import load_dotenv
 
+from src.config.settings import get_config
+
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +42,11 @@ def authenticate_youtube() -> Credentials | None:
     # Load environment variables
     load_dotenv()
 
-    # Configuration
-    client_secrets_file = os.getenv("GOOGLE_CLIENT_SECRETS_FILE")
-    token_file = os.getenv("YOUTUBE_TOKEN_FILE", "youtube_token.json")
+    cfg = get_config()
+    secrets_path = cfg.paths.google_client_secrets_file
+    token_path = cfg.paths.youtube_token_file
+    client_secrets_file = str(secrets_path) if secrets_path else None
+    token_file = str(token_path) if token_path else "youtube_token.json"
 
     # Scopes required for YouTube upload and analytics
     scopes = [
@@ -80,7 +84,8 @@ def authenticate_youtube() -> Credentials | None:
             if not client_secrets_file or not os.path.exists(client_secrets_file):
                 logger.error("Client secrets file '%s' not found.", client_secrets_file)
                 logger.error(
-                    "Please ensure GOOGLE_CLIENT_SECRETS_FILE is set correctly in .env"
+                    "Set api.youtube_client_secrets_file in config.yaml, or "
+                    "GOOGLE_CLIENT_SECRETS_FILE in the environment."
                 )
                 return None
 

@@ -13,7 +13,16 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import requests
-from openai import APITimeoutError, NotFoundError, OpenAI
+
+try:
+    from openai import APITimeoutError, NotFoundError, OpenAI
+
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    OpenAI = None  # type: ignore[misc, assignment]
+    APITimeoutError = Exception  # type: ignore[misc, assignment]
+    NotFoundError = Exception  # type: ignore[misc, assignment]
 
 from src.hybrid_documentary_state_machine import (
     DEFAULT_SUMMARY_MODEL,
@@ -178,6 +187,8 @@ def as_phase(value: str) -> PipelinePhase:
 def nvidia_chat(
     model: str, messages: List[Dict[str, str]], temperature: float = 0.4
 ) -> str:
+    if not OPENAI_AVAILABLE or OpenAI is None:
+        raise RuntimeError("openai package is required but not installed")
     client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=NVIDIA_API_KEY)
     retries = max(1, NVIDIA_CHAT_RETRIES)
     last_err: Exception | None = None

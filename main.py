@@ -801,8 +801,8 @@ Examples:
     return parser
 
 
-async def main():
-    """Main entry point with CLI interface"""
+async def main() -> int:
+    """Main entry point with CLI interface. Returns a process exit code."""
     parser = setup_argparse()
     args = parser.parse_args()
 
@@ -819,12 +819,23 @@ async def main():
         print("  python main.py batch <file>           # Process multiple videos")
         return 1
 
-    # Initialize enhanced generator
+    batch_urls: Optional[List[str]] = None
+    if args.command == "batch":
+        urls_file = Path(args.file)
+        if not urls_file.exists():
+            print(f"❌ File not found: {urls_file}")
+            return 1
+        with open(urls_file, "r") as f:
+            batch_urls = [line.strip() for line in f if line.strip()]
+        if not batch_urls:
+            print("❌ No URLs found in file")
+            return 1
+
     generator = EnhancedYouTubeGenerator()
+    exit_code = 0
 
     try:
         if args.command == "find":
-            # Find and process videos automatically
             options = {
                 "enable_cinematic_effects": not args.no_cinematic,
                 "enable_advanced_audio_ducking": not args.no_audio_ducking,
@@ -840,7 +851,6 @@ async def main():
                 options=options,
             )
 
-            # Save result
             if result.get("success"):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 result_file = Path(f"data/results/results_find_{timestamp}.json")
@@ -850,9 +860,9 @@ async def main():
                 print(f"Results saved to: {result_file}")
             else:
                 print(f"ERROR: Auto video finding failed: {result.get('error')}")
+                exit_code = 1
 
         elif args.command == "single":
-            # Process single video
             options = {
                 "enable_cinematic_effects": not args.no_cinematic,
                 "enable_advanced_audio_ducking": not args.no_audio_ducking,
@@ -861,7 +871,6 @@ async def main():
 
             result = await generator.process_single_video(args.url, options)
 
-            # Save result
             if result.get("success"):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 result_file = Path(f"data/results/results_single_{timestamp}.json")
@@ -869,26 +878,16 @@ async def main():
                 with open(result_file, "w") as f:
                     json.dump(result, f, indent=2)
                 print(f"Results saved to: {result_file}")
+            else:
+                print(f"ERROR: Single video processing failed: {result.get('error')}")
+                exit_code = 1
 
         elif args.command == "batch":
-            # Process batch of videos
-            urls_file = Path(args.file)
-            if not urls_file.exists():
-                print(f"❌ File not found: {urls_file}")
-                return
-
-            with open(urls_file, "r") as f:
-                urls = [line.strip() for line in f if line.strip()]
-
-            if not urls:
-                print("❌ No URLs found in file")
-                return
-
+            assert batch_urls is not None
             options = {"max_concurrent_processing": args.max_concurrent}
 
-            result = await generator.process_batch_videos(urls, options)
+            result = await generator.process_batch_videos(batch_urls, options)
 
-            # Save result
             if result.get("success"):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 result_file = Path(f"data/results/results_batch_{timestamp}.json")
@@ -896,6 +895,9 @@ async def main():
                 with open(result_file, "w") as f:
                     json.dump(result, f, indent=2)
                 print(f"Results saved to: {result_file}")
+            else:
+                print(f"ERROR: Batch processing failed: {result.get('error')}")
+                exit_code = 1
 
         elif args.command == "hybrid":
             result = await generator.process_hybrid_workflow(
@@ -914,26 +916,29 @@ async def main():
             with open(result_file, "w") as f:
                 json.dump(result, f, indent=2)
             print(f"Results saved to: {result_file}")
+            if not result.get("success"):
+                print(f"ERROR: Hybrid workflow failed: {result.get('error')}")
+                exit_code = 1
 
         elif args.command == "manage":
-            # Start proactive management
             await generator.start_proactive_management()
 
         elif args.command == "optimize":
-            # Run optimization
             result = await generator.run_system_optimization(force=args.force)
 
-            # Save result
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             result_file = Path(f"data/results/optimization_{timestamp}.json")
             result_file.parent.mkdir(parents=True, exist_ok=True)
             with open(result_file, "w") as f:
                 json.dump(result, f, indent=2)
             print(f"Optimization results saved to: {result_file}")
+            if result.get("success") is False or result.get("status") == "error":
+                exit_code = 1
 
         elif args.command == "status":
-            # Check system status
-            await generator.get_system_status()
+            status = await generator.get_system_status()
+            if status.get("status") == "error":
+                exit_code = 1
 
         elif args.command == "cleanup":
             print("🧹 Starting cleanup process...")
@@ -946,18 +951,18 @@ async def main():
             print("✅ Cleanup process finished.")
     except KeyboardInterrupt:
         print("\n⏹️ Operation interrupted by user")
-        print("Cleaning up resources...")
-        await generator.cleanup()
+        exit_code = 130
     except Exception as e:
         print(f"🚨 ERROR: Operation failed: {e}")
         logging.getLogger(__name__).exception("Main operation failed")
-        await generator.cleanup()
+        exit_code = 1
     finally:
-        # Ensure cleanup always runs
         try:
             await generator.cleanup()
-        except:
-            pass  # Ignore cleanup errors
+        except Exception:
+            pass
+
+    return exit_code
 
 
 def run_main():
@@ -973,10 +978,11 @@ def run_main():
             pass
 
         # Run the main function
-        return asyncio.run(main())
+        code = asyncio.run(main())
+        return 0 if code is None else code
     except KeyboardInterrupt:
         print("\nStartup interrupted by user")
-        return 0
+        return 130
     except Exception as e:
         print(f"Critical startup error: {e}")
         return 1

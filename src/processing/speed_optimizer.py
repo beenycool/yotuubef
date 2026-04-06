@@ -64,14 +64,14 @@ class SpeedOptimizer:
                     gpu_available = True
                     nvenc_available = True
                     gpu_memory_gb = memory_mb / 1024
-                except:
+                except Exception:
                     pass
             
             # Check for Intel QuickSync
             try:
                 if 'intel' in platform.processor().lower():
                     quicksync_available = True
-            except:
+            except Exception:
                 pass
             
             capabilities = SystemCapabilities(

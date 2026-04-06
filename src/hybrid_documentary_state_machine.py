@@ -551,29 +551,40 @@ class HackclubMediaSearchClient:
             if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
                 continue
 
-    # FIX: Filter out results where thumbnail_url indicates it's a logo
-    if isinstance(thumbnail_url, dict):
-        if thumbnail_url.get("logo"):
-            continue
-        thumbnail_url = (
-            thumbnail_url.get("url") or thumbnail_url.get("src") or str(thumbnail_url)
-        )
-    elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
-            parsed_thumb = None
-            try:
-                parsed_thumb = json.loads(thumbnail_url)
-            except json.JSONDecodeError:
-                try:
-                    parsed_thumb = ast.literal_eval(thumbnail_url)
-                except (ValueError, SyntaxError):
-                    pass  # Not a parsable dict-like string
-
-            if isinstance(parsed_thumb, dict):
-                if parsed_thumb.get("logo"):
+            if isinstance(thumbnail_url, dict):
+                if thumbnail_url.get("logo"):
                     continue
                 thumbnail_url = (
-                    parsed_thumb.get("url") or parsed_thumb.get("src") or thumbnail_url
+                    thumbnail_url.get("url")
+                    or thumbnail_url.get("src")
+                    or str(thumbnail_url)
                 )
+            elif isinstance(thumbnail_url, str):
+                parsed_thumb = None
+                try:
+                    parsed_thumb = json.loads(thumbnail_url)
+                except json.JSONDecodeError:
+                    try:
+                        parsed_thumb = ast.literal_eval(thumbnail_url)
+                    except (ValueError, SyntaxError):
+                        pass
+
+                if isinstance(parsed_thumb, dict):
+                    if parsed_thumb.get("logo"):
+                        continue
+                    thumbnail_url = (
+                        parsed_thumb.get("url")
+                        or parsed_thumb.get("src")
+                        or thumbnail_url
+                    )
+
+            if isinstance(thumbnail_url, str):
+                thumb_path = thumbnail_url.split("?", 1)[0].split("#", 1)[0]
+                thumb_name = (
+                    thumb_path.rsplit("/", 1)[-1] if "/" in thumb_path else thumb_path
+                )
+                if any(kw in thumb_name.lower() for kw in LOGO_FILTER_KEYWORDS):
+                    continue
 
             parsed.append(
                 MediaSearchResult(

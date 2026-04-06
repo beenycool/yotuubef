@@ -427,7 +427,7 @@ class CTAProcessor:
             try:
                 # Try to use a default font, fallback to default if not available
                 font = ImageFont.truetype("arial.ttf", 16)
-            except:
+            except Exception:
                 font = ImageFont.load_default()
             
             text = "SUBSCRIBE"

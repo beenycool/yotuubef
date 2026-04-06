@@ -161,6 +161,9 @@ class APIConfig:
     youtube_upload_category_id: str = "24"
     youtube_upload_privacy_status: str = "public"
     youtube_self_certification: bool = True
+    # OAuth / token file paths (may be set from config.yaml `api` section)
+    youtube_client_secrets_file: str = ""
+    youtube_token_file: str = ""
 
     # NVIDIA NIM
     nvidia_nim_api_key: str = ""
@@ -434,6 +437,11 @@ class PathConfig:
         default_factory=lambda: Path(__file__).parent.parent.parent.resolve()
         / "thumbnails"
     )
+    cache_folder: Path = field(
+        default_factory=lambda: Path(__file__).parent.parent.parent.resolve()
+        / "data"
+        / "cache"
+    )
 
     # Files
     db_file: Path = field(
@@ -450,7 +458,14 @@ class PathConfig:
 
 
 class ConfigManager:
-    """Central configuration manager that loads and validates all settings"""
+    """Load and validate settings from config.yaml, .env, and defaults.
+
+    YAML: only matching dataclass field names are applied (see `_load_yaml_config`).
+    Sections such as ``ai_features`` or ``channel_management`` are ignored at
+    runtime but may remain in ``config.yaml`` for documentation or because
+    ``EnhancementOptimizer`` (``src/processing/enhancement_optimizer.py``)
+    round-trips the full file when updating tunable parameters.
+    """
 
     def __init__(self, config_file: Optional[Union[str, Path]] = None):
         self.config_file = Path(config_file) if config_file else None
@@ -512,6 +527,8 @@ class ConfigManager:
             if not yaml_config:
                 return
 
+            self._apply_yaml_paths_and_database(yaml_config)
+
             # Update configurations from YAML
             self._update_from_dict(self.video, yaml_config.get("video", {}))
             # Also check for video_processing section
@@ -523,6 +540,7 @@ class ConfigManager:
             self._update_from_dict(self.audio, yaml_config.get("audio", {}))
             self._update_from_dict(self.api, yaml_config.get("apis", {}))
             self._update_from_dict(self.api, yaml_config.get("api", {}))
+            self._resolve_credential_paths_from_api()
             self._update_from_dict(self.content, yaml_config.get("content", {}))
 
             # Handle nested audio keys (e.g., audio.background_music.volume)
@@ -559,6 +577,57 @@ class ConfigManager:
 
         except Exception as e:
             self.logger.error(f"Error loading YAML config: {e}")
+
+    def _config_yaml_parent(self) -> Path:
+        if self.config_file and self.config_file.exists():
+            return self.config_file.resolve().parent
+        return Path.cwd()
+
+    def _resolve_path_value(self, raw: Union[str, Path], base: Path) -> Path:
+        p = Path(raw)
+        return (base / p).resolve() if not p.is_absolute() else p.resolve()
+
+    def _apply_yaml_paths_and_database(self, yaml_config: Dict) -> None:
+        """Apply `paths` and `database` sections so PathConfig matches config.yaml."""
+        paths_cfg = yaml_config.get("paths") or {}
+        cfg_parent = self._config_yaml_parent()
+
+        if paths_cfg.get("base_dir") is not None and str(paths_cfg.get("base_dir", "")).strip():
+            self.paths.base_dir = self._resolve_path_value(paths_cfg["base_dir"], cfg_parent)
+
+        base = self.paths.base_dir
+
+        mapping = (
+            ("temp_dir", "temp_dir"),
+            ("processed_dir", "processed_dir"),
+            ("fonts_dir", "fonts_folder"),
+            ("music_dir", "music_folder"),
+            ("sound_effects_dir", "sound_effects_folder"),
+            ("thumbnails_dir", "thumbnails_dir"),
+            ("ai_models_cache_dir", "cache_folder"),
+        )
+        for yaml_key, attr in mapping:
+            val = paths_cfg.get(yaml_key)
+            if val is not None and str(val).strip():
+                setattr(self.paths, attr, self._resolve_path_value(val, base))
+
+        db_cfg = yaml_config.get("database") or {}
+        if db_cfg.get("sqlite_db_path"):
+            self.paths.db_file = self._resolve_path_value(
+                db_cfg["sqlite_db_path"], base
+            )
+
+    def _resolve_credential_paths_from_api(self) -> None:
+        """Map api.youtube_* file entries from YAML onto PathConfig."""
+        base = self.paths.base_dir
+        secrets = (self.api.youtube_client_secrets_file or "").strip()
+        if secrets:
+            self.paths.google_client_secrets_file = self._resolve_path_value(
+                secrets, base
+            )
+        token = (self.api.youtube_token_file or "").strip()
+        if token:
+            self.paths.youtube_token_file = self._resolve_path_value(token, base)
 
     def _load_env_config(self):
         """Load configuration from environment variables"""
@@ -745,6 +814,7 @@ class ConfigManager:
         self.paths.sound_effects_folder.mkdir(parents=True, exist_ok=True)
         self.paths.fonts_folder.mkdir(parents=True, exist_ok=True)
         self.paths.thumbnails_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.cache_folder.mkdir(parents=True, exist_ok=True)
 
         # Log validation results
         if errors:
