@@ -7,15 +7,14 @@ MoviePy API calls without raising AttributeError exceptions.
 import pytest
 import tempfile
 import shutil
+import logging
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, patch, PropertyMock
-import logging
-
-# Configure test logging
-logging.basicConfig(level=logging.DEBUG)
 
 from src.processing.video_processor import VideoProcessor
 from src.config.settings import get_config, ConfigManager
+
+logging.basicConfig(level=logging.DEBUG)
 
 
 class MockResourceManager:
@@ -33,7 +32,7 @@ class MockResourceManager:
             try:
                 if hasattr(clip, 'close'):
                     clip.close()
-            except:
+            except Exception:
                 pass
         self.clips.clear()
 

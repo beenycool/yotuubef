@@ -3482,7 +3482,7 @@ class VideoProcessor:
                     try:
                         if temp_output and temp_output.exists():
                             temp_output.unlink()
-                    except:
+                    except Exception:
                         pass
 
         return False
