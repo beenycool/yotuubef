@@ -559,7 +559,7 @@ class HackclubMediaSearchClient:
                     or thumbnail_url.get("src")
                     or str(thumbnail_url)
                 )
-            elif isinstance(thumbnail_url, str):
+            elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
                 parsed_thumb = None
                 try:
                     parsed_thumb = json.loads(thumbnail_url)
