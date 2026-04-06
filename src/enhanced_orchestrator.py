@@ -322,30 +322,9 @@ class EnhancedVideoOrchestrator:
                     )
         return audio_segments, main_audio, broll_moments
 
-<<<<<<< HEAD
     def _ai_studio_apply_visuals(
         self, video_clip: Any, broll_moments: list[dict[str, Any]], analysis: Any
     ) -> Any:
-=======
-    def _ai_studio_compose_and_render(
-        self,
-        reddit_post: Any,
-        analysis: Any,
-        main_audio: Any,
-        audio_segments: list[Any],
-        broll_moments: list[dict[str, Any]],
-        options: dict[str, Any],
-    ) -> dict[str, Any]:
-        # Step 5: Get background video
-        self.logger.info("Step 5: Background Video")
-        bg_manager = BackgroundManager()
-        video_clip = bg_manager.get_sliced_background(
-            target_duration=main_audio.duration,
-            subreddit=reddit_post.subreddit,
-            text_content=reddit_post.selftext,
-        )
-
->>>>>>> 039617c (⚡ Optimize sequential video downloads using asyncio.gather)
         # Step 6: Apply B-roll images
         if broll_moments:
             self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
@@ -494,7 +473,6 @@ class EnhancedVideoOrchestrator:
                 audio_codec="aac",
             )
         finally:
-<<<<<<< HEAD
             self._ai_studio_cleanup_resources(
                 audio_segments,
                 audio_layers,
@@ -503,43 +481,6 @@ class EnhancedVideoOrchestrator:
                 final_video,
                 combined_audio_path,
             )
-=======
-            for clip in audio_segments:
-                try:
-                    clip.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close audio segment clip: %s", e)
-            for clip in audio_layers:
-                if clip is main_audio:
-                    continue
-                try:
-                    clip.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close audio layer clip: %s", e)
-            if final_audio is not None:
-                try:
-                    final_audio.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close composite audio clip: %s", e)
-            try:
-                main_audio.close()
-            except Exception as e:
-                self.logger.warning("Failed to close main audio clip: %s", e)
-            if final_video is not None:
-                try:
-                    final_video.close()
-                except Exception as e:
-                    self.logger.warning("Failed to close final video clip: %s", e)
-            if combined_audio_path and combined_audio_path.exists():
-                try:
-                    combined_audio_path.unlink()
-                except OSError as e:
-                    self.logger.warning(
-                        "Failed to remove temp caption audio %s: %s",
-                        combined_audio_path,
-                        e,
-                    )
->>>>>>> 039617c (⚡ Optimize sequential video downloads using asyncio.gather)
 
         self.logger.info("AI Production Studio pipeline complete!")
 
