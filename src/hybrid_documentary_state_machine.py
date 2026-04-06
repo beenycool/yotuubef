@@ -572,9 +572,58 @@ class ExaSearchClient:
             if not isinstance(url, str) or not url:
                 continue
 
-            title = item.get("title") or ""
-            description = item.get("text") or item.get("snippet") or ""
-            source = item.get("source") or "unknown"
+            # Filter out logos and icons
+            url_path = url.split("?")[0].split("#")[0]
+            filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
+            filename_lower = filename.lower()
+            if any(kw in filename_lower for kw in LOGO_FILTER_KEYWORDS):
+                continue
+
+            title = item.get("title") or item.get("name") or item.get("title") or ""
+            description = (
+                item.get("text") or item.get("snippet") or item.get("description") or ""
+            )
+            source = item.get("source") or item.get("domain") or "unknown"
+            thumbnail_url = (
+                item.get("thumbnail")
+                or item.get("thumbnail_url")
+                or item.get("image")
+                or ""
+            )
+
+            # Strict filtering for logos, icons, and avatars
+            if item.get("logo") is True:
+                continue
+            title_lower = str(title).lower()
+            if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
+                continue
+
+            if isinstance(thumbnail_url, dict):
+                if thumbnail_url.get("logo"):
+                    continue
+                thumbnail_url = (
+                    thumbnail_url.get("url")
+                    or thumbnail_url.get("src")
+                    or str(thumbnail_url)
+                )
+            elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
+                parsed_thumb = None
+                try:
+                    parsed_thumb = json.loads(thumbnail_url)
+                except json.JSONDecodeError:
+                    try:
+                        parsed_thumb = ast.literal_eval(thumbnail_url)
+                    except (ValueError, SyntaxError):
+                        pass
+
+                if isinstance(parsed_thumb, dict):
+                    if parsed_thumb.get("logo"):
+                        continue
+                    thumbnail_url = (
+                        parsed_thumb.get("url")
+                        or parsed_thumb.get("src")
+                        or thumbnail_url
+                    )
 
             parsed.append(
                 MediaSearchResult(
