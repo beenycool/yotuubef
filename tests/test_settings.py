@@ -120,12 +120,16 @@ def test_config_manager_paths_and_database_from_yaml(clean_config, tmp_path):
                     "ai_models_cache_dir": "custom_cache",
                 },
                 "database": {"sqlite_db_path": "data/custom.db"},
-                "api": {"youtube_client_secrets_file": "secrets.json"},
+                "api": {
+                    "youtube_client_secrets_file": "secrets.json",
+                    "youtube_token_file": "youtube_token.json",
+                },
             }
         ),
         encoding="utf-8",
     )
     (base / "secrets.json").write_text("{}", encoding="utf-8")
+    (base / "youtube_token.json").write_text("{}", encoding="utf-8")
 
     manager = ConfigManager(config_file=config_file)
 
@@ -135,6 +139,7 @@ def test_config_manager_paths_and_database_from_yaml(clean_config, tmp_path):
     assert manager.paths.cache_folder == (base / "custom_cache").resolve()
     assert manager.paths.db_file == (base / "data" / "custom.db").resolve()
     assert manager.paths.google_client_secrets_file == (base / "secrets.json").resolve()
+    assert manager.paths.youtube_token_file == (base / "youtube_token.json").resolve()
 
 
 def test_config_manager_yaml_loading(clean_config, tmp_path, monkeypatch):

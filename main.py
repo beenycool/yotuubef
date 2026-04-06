@@ -819,6 +819,18 @@ async def main() -> int:
         print("  python main.py batch <file>           # Process multiple videos")
         return 1
 
+    batch_urls: Optional[List[str]] = None
+    if args.command == "batch":
+        urls_file = Path(args.file)
+        if not urls_file.exists():
+            print(f"❌ File not found: {urls_file}")
+            return 1
+        with open(urls_file, "r") as f:
+            batch_urls = [line.strip() for line in f if line.strip()]
+        if not batch_urls:
+            print("❌ No URLs found in file")
+            return 1
+
     generator = EnhancedYouTubeGenerator()
     exit_code = 0
 
@@ -871,21 +883,10 @@ async def main() -> int:
                 exit_code = 1
 
         elif args.command == "batch":
-            urls_file = Path(args.file)
-            if not urls_file.exists():
-                print(f"❌ File not found: {urls_file}")
-                return 1
-
-            with open(urls_file, "r") as f:
-                urls = [line.strip() for line in f if line.strip()]
-
-            if not urls:
-                print("❌ No URLs found in file")
-                return 1
-
+            assert batch_urls is not None
             options = {"max_concurrent_processing": args.max_concurrent}
 
-            result = await generator.process_batch_videos(urls, options)
+            result = await generator.process_batch_videos(batch_urls, options)
 
             if result.get("success"):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

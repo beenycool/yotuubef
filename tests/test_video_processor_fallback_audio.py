@@ -14,7 +14,11 @@ from unittest.mock import Mock, MagicMock, patch, PropertyMock
 from src.processing.video_processor import VideoProcessor
 from src.config.settings import get_config, ConfigManager
 
-logging.basicConfig(level=logging.DEBUG)
+
+@pytest.fixture(autouse=True)
+def _video_processor_fallback_audio_log_level():
+    for name in (__name__, "src.processing.video_processor"):
+        logging.getLogger(name).setLevel(logging.DEBUG)
 
 
 class MockResourceManager:

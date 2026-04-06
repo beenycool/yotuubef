@@ -187,6 +187,8 @@ def as_phase(value: str) -> PipelinePhase:
 def nvidia_chat(
     model: str, messages: List[Dict[str, str]], temperature: float = 0.4
 ) -> str:
+    if not OPENAI_AVAILABLE or OpenAI is None:
+        raise RuntimeError("openai package is required but not installed")
     client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=NVIDIA_API_KEY)
     retries = max(1, NVIDIA_CHAT_RETRIES)
     last_err: Exception | None = None
