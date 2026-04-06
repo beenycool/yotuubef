@@ -595,10 +595,7 @@ class ConfigManager:
 
     def _apply_yaml_paths_and_database(self, yaml_config: Dict) -> None:
         """Apply `paths` and `database` sections so PathConfig matches config.yaml."""
-        paths_raw = yaml_config.get("paths")
-        paths_cfg = paths_raw if isinstance(paths_raw, dict) else {}
-        db_raw = yaml_config.get("database")
-        db_cfg = db_raw if isinstance(db_raw, dict) else {}
+        paths_cfg = yaml_config.get("paths") or {}
         cfg_parent = self._config_yaml_parent()
 
         if (
@@ -625,6 +622,7 @@ class ConfigManager:
             if val is not None and str(val).strip():
                 setattr(self.paths, attr, self._resolve_path_value(val, base))
 
+        db_cfg = yaml_config.get("database") or {}
         if db_cfg.get("sqlite_db_path"):
             self.paths.db_file = self._resolve_path_value(
                 db_cfg["sqlite_db_path"], base
