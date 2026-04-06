@@ -158,7 +158,7 @@ class MoviePyCompat:
                                 clip.make_frame, t
                             )
                             return new_clip
-                        except:
+                        except Exception:
                             pass
 
                     # Return original clip if effect can't be applied

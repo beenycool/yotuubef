@@ -13,7 +13,16 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import requests
-from openai import APITimeoutError, NotFoundError, OpenAI
+
+try:
+    from openai import APITimeoutError, NotFoundError, OpenAI
+
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    OpenAI = None  # type: ignore[misc, assignment]
+    APITimeoutError = Exception  # type: ignore[misc, assignment]
+    NotFoundError = Exception  # type: ignore[misc, assignment]
 
 from src.hybrid_documentary_state_machine import (
     DEFAULT_SUMMARY_MODEL,

@@ -103,6 +103,40 @@ def test_config_manager_initialization(clean_config, tmp_path):
     assert manager.effects.enable_seamless_looping is True
 
 
+def test_config_manager_paths_and_database_from_yaml(clean_config, tmp_path):
+    """paths + database sections in YAML update PathConfig."""
+    base = tmp_path / "proj"
+    base.mkdir()
+    music = base / "custom_music"
+    music.mkdir()
+    config_file = base / "config.yaml"
+    config_file.write_text(
+        yaml.dump(
+            {
+                "paths": {
+                    "base_dir": str(base),
+                    "temp_dir": "custom_temp",
+                    "music_dir": str(music),
+                    "ai_models_cache_dir": "custom_cache",
+                },
+                "database": {"sqlite_db_path": "data/custom.db"},
+                "api": {"youtube_client_secrets_file": "secrets.json"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (base / "secrets.json").write_text("{}", encoding="utf-8")
+
+    manager = ConfigManager(config_file=config_file)
+
+    assert manager.paths.base_dir.resolve() == base.resolve()
+    assert manager.paths.temp_dir == (base / "custom_temp").resolve()
+    assert manager.paths.music_folder == music.resolve()
+    assert manager.paths.cache_folder == (base / "custom_cache").resolve()
+    assert manager.paths.db_file == (base / "data" / "custom.db").resolve()
+    assert manager.paths.google_client_secrets_file == (base / "secrets.json").resolve()
+
+
 def test_config_manager_yaml_loading(clean_config, tmp_path, monkeypatch):
     # Ensure env var doesn't override our yaml config
     monkeypatch.delenv("ENABLE_SEAMLESS_LOOPING", raising=False)

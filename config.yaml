@@ -1,3 +1,21 @@
+# =============================================================================
+# config.yaml — shared by ConfigManager and EnhancementOptimizer
+# =============================================================================
+# EnhancementOptimizer loads and atomically rewrites this entire file when it
+# applies tuned parameters (see parameter_yaml_paths in
+# src/processing/enhancement_optimizer.py). Keep sections it may update
+# (audio, effects, text_overlay, video_processing) present so round-trips stay
+# predictable.
+#
+# ConfigManager (src/config/settings.py) applies only a subset at runtime:
+#   paths, database, video, video_processing, text_overlay, subtitles, effects,
+#   looping, fallbacks, audio (+ nested audio.background_music.volume),
+#   api/apis, content, and top-level "subreddits".
+# Other sections (ai_features, channel_management, logging, optimization, etc.)
+# are reserved for future wiring or documentation; env vars still override API
+# paths where documented in settings.py.
+# =============================================================================
+
 ai_features:
   enable_ab_testing: true
   enable_advanced_audio: true
@@ -18,6 +36,7 @@ api:
   reddit_user_agent: YouTubeShorts:v2.0:enhanced (by u/yourusername)
   youtube_api_key: ""
   youtube_client_secrets_file: youtube_credentials.json
+  youtube_token_file: youtube_token.json
 content:
   curated_subreddits:
   - Eve

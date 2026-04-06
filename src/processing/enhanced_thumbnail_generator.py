@@ -233,13 +233,13 @@ class EnhancedThumbnailGenerator(ThumbnailGenerator):
                 'emotional_tone': 'exciting',
                 'optimization_strategy': 'emotional_impact'
             }
-        
-elif strategy == 'curiosity_gap':
+
+        elif strategy == 'curiosity_gap':
             # Use more mysterious/intriguing elements
             CURIOSITY_WORDS = {'secret', 'hidden', 'revealed', 'truth', 'mystery'}
             curiosity_headlines = [h for h in headlines if any(word in h.lower() for word in CURIOSITY_WORDS)]
             headline = curiosity_headlines[0] if curiosity_headlines else (headlines[0] if headlines else "You Won't Believe...")
-            
+
             return {
                 'headline_text': headline,
                 'timestamp_seconds': timestamps[variant_index % len(timestamps)] if timestamps else 20.0,
@@ -248,7 +248,7 @@ elif strategy == 'curiosity_gap':
                 'emotional_tone': 'mysterious',
                 'optimization_strategy': 'curiosity_gap'
             }
-        
+
         else:  # trend_following
             return {
                 'headline_text': headlines[variant_index % len(headlines)] if headlines else "Viral!",

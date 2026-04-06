@@ -26,10 +26,10 @@ jobs:
           pip install -r requirements-ci.txt
 
       - name: Ruff
-        # Temporary exclusions:
-        # - src/integrations/gemini_ai_client.py has unresolved merge markers in this branch.
-        # - tests/test_video_processor_fallback_audio.py has known lint debt queued for cleanup.
-        run: ruff check src/config src/integrations src/database src/management src/utils tests --exclude src/integrations/gemini_ai_client.py,tests/test_video_processor_fallback_audio.py --select E9,F63,F7,F82,E4,E7,W --ignore W291,W292,W293
+        run: ruff check src tests --select E9,F63,F7,F82,E4,E7,W --ignore W291,W292,W293
+
+      - name: Byte-compile Python sources
+        run: python -m compileall -q src main.py test.py
 
       - name: Pytest
         # Temporary CI filter for environment-sensitive fallback audio tests.
