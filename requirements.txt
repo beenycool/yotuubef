@@ -23,6 +23,12 @@ filelock>=3.13
 chromadb>=1.5.0
 sentence-transformers>=2.2.0
 
-# Optional: torch, transformers (uncomment if needed)
-# torch>=2.0.0
-# transformers>=4.30.0
+# Enhanced AI and Machine Learning
+transformers>=4.30.0             # Hugging Face transformers for local AI models
+torch>=2.0.0                     # PyTorch for GPU-accelerated processing
+torchvision>=0.15.0              # Computer vision models
+torchaudio>=2.0.0                # Audio processing models
+
+# Advanced Audio Processing
+librosa>=0.10.0                  # Advanced audio analysis and processing
+soundfile>=0.12.1                # Audio file I/O

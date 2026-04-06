@@ -1,5 +1,14 @@
 # =============================================================================
-# config.yaml — shared by ConfigManager and EnhancementOptimizer
+# config.yaml — application configuration
+# =============================================================================
+# ConfigManager (src/config/settings.py) applies only a subset of sections at
+# runtime:
+#   paths, database, video, video_processing, text_overlay, subtitles, effects, tts,
+#   looping, fallbacks, audio (+ nested audio.background_music.volume),
+#   api/apis, content, and top-level "subreddits".
+# Other sections (ai_features, channel_management, logging, optimization, etc.)
+# are reserved for future wiring or documentation; env vars still override API
+# paths where documented in settings.py.
 # =============================================================================
 # EnhancementOptimizer loads and atomically rewrites this entire file when it
 # applies tuned parameters (see parameter_yaml_paths in

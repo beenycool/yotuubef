@@ -223,31 +223,47 @@ async def main() -> int:
     try:
         async with HybridYouTubeGenerator() as generator:
             result = await generator.run_hybrid_workflow(
-                project_name=args.project,
-                reddit_url=args.reddit_url,
-                resume=args.resume,
-                phase_override=args.phase,
-                gemini_report_path=args.gemini_report,
-                no_upload=args.no_upload,
-                no_auto_research=args.no_auto_research,
-            )
+        elif args.command == "manage":
+            await generator.start_proactive_management()
+
+        elif args.command == "optimize":
+            result = await generator.run_system_optimization(force=args.force)
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
+            result_file = Path(f"data/results/optimization_{timestamp}.json")
             result_file.parent.mkdir(parents=True, exist_ok=True)
             with open(result_file, "w") as f:
                 json.dump(result, f, indent=2)
-            print(f"Results saved to: {result_file}")
-            if not result.get("success"):
-                print(f"ERROR: Hybrid workflow failed: {result.get('error')}")
+            print(f"Optimization results saved to: {result_file}")
+            if result.get("success") is False or result.get("status") == "error":
                 exit_code = 1
+
+        elif args.command == "status":
+            status = await generator.get_system_status()
+            if status.get("status") == "error":
+                exit_code = 1
+
+        elif args.command == "cleanup":
+            print("🧹 Starting cleanup process...")
+            clear_temp_files()
+            clear_results()
+            if args.logs or args.all:
+                clear_logs()
+            if args.all:
+                pass
+            print("✅ Cleanup process finished.")
     except KeyboardInterrupt:
-        print("\nInterrupted by user", flush=True)
+        print("\n⏹️ Operation interrupted by user", flush=True)
         exit_code = 130
     except Exception as e:
         print(f"ERROR: Operation failed: {e}", flush=True)
         logging.getLogger(__name__).exception("Main operation failed")
         exit_code = 1
+    finally:
+        try:
+            await generator.cleanup()
+        except Exception:
+            pass
 
     return exit_code
 
