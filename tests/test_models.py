@@ -342,3 +342,32 @@ def test_sound_effect_invalid_timestamp():
     assert len(errors) == 1
     assert errors[0]["loc"] == ("timestamp_seconds",)
     assert errors[0]["type"] == "greater_than_equal"
+
+
+def test_narrative_segment_strips_whitespace():
+    seg = NarrativeSegment(
+        text="  This is a story  ",
+        time_seconds=0.0,
+        intended_duration_seconds=5.0,
+    )
+    assert seg.text == "This is a story"
+
+
+def test_narrative_segment_empty_string():
+    with pytest.raises(ValidationError) as exc_info:
+        NarrativeSegment(
+            text="",
+            time_seconds=0.0,
+            intended_duration_seconds=5.0,
+        )
+    assert "String should have at least 1 character" in str(exc_info.value)
+
+
+def test_narrative_segment_whitespace_only():
+    with pytest.raises(ValidationError) as exc_info:
+        NarrativeSegment(
+            text="   ",
+            time_seconds=0.0,
+            intended_duration_seconds=5.0,
+        )
+    assert "Narrative text cannot be empty" in str(exc_info.value)
