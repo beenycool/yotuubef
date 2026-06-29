@@ -80,6 +80,15 @@ config/optimal_parameters.json
 *.csr
 .roo
 .roomodes
+
+# Patch / diff files
+*.patch
+*.diff
+
+# Ad-hoc scripts (use pytest directly)
+run_*.sh
+install_and_test.py
+test_runner.py
 aigi.md
 /.cursor
 /thumbnails
