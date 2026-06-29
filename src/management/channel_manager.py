@@ -16,7 +16,7 @@ from src.config.settings import get_config
 from src.models import CommentEngagement, ThumbnailVariant, PerformanceMetrics
 from src.integrations.youtube_client import YouTubeClient
 from src.integrations.ai_client import AIClient
-from src.processing.thumbnail_generator import ThumbnailGenerator
+from src.processing.enhanced_thumbnail_generator import EnhancedThumbnailGenerator
 from src.monitoring.engagement_metrics import EngagementMonitor
 from src.database.db_manager import get_db_manager, DatabaseManager
 
@@ -65,11 +65,8 @@ class ChannelManager:
         # Initialize services
         self.youtube_client = YouTubeClient()
         self.ai_client = AIClient()
-        self.thumbnail_generator = ThumbnailGenerator()
+        self.thumbnail_generator = EnhancedThumbnailGenerator()
         self.engagement_monitor = EngagementMonitor()
-
-        # Database manager (lazy-initialized in _get_db_manager)
-        self._db_manager: Optional[DatabaseManager] = None
 
         # Management parameters
         self.comment_analysis_interval = 300  # 5 minutes
@@ -720,7 +717,7 @@ class ChannelManager:
                 return
 
             # Generate A/B test thumbnails
-            video_path = await self._get_video_path(video_id)
+            video_path = self._get_video_path(video_id)  # Would need to implement
             if not video_path or not video_path.exists():
                 return
 
@@ -755,10 +752,9 @@ class ChannelManager:
 
             self.active_thumbnail_tests[video_id] = test_info
 
-            db_manager = await self._get_db_manager()
-            upload_row = await db_manager.get_upload_by_video_id(video_id)
+            upload_row = self._get_db_manager().get_upload_by_video_id(video_id)
             if upload_row:
-                await db_manager.start_thumbnail_ab_test(upload_row["id"])
+                self._get_db_manager().start_thumbnail_ab_test(upload_row["id"])
 
             self.logger.info(
                 f"Started thumbnail A/B test for video {video_id} with {len(variants)} variants"
@@ -1057,9 +1053,7 @@ class ChannelManager:
         )
         winner_label = self._variant_label_for_index(winner_index)
         self._archive_loser_variants(variants, winner_index)
-        await self._record_thumbnail_test_completion(
-            video_id, winner_label, winner_analysis
-        )
+        self._record_thumbnail_test_completion(video_id, winner_label, winner_analysis)
 
         test_result = ThumbnailTestResult(
             test_id=f"{video_id}_{int(datetime.now().timestamp())}",
@@ -1149,15 +1143,15 @@ class ChannelManager:
                 if config_path.exists():
                     shutil.move(str(config_path), str(archive_dir / config_path.name))
 
-    async def _record_thumbnail_test_completion(
+    def _record_thumbnail_test_completion(
         self,
         video_id: str,
         winner_label: str,
         winner_analysis: Dict[str, Any],
     ):
         """Persist winner and CTR details where upload mapping exists."""
-        db_manager = await self._get_db_manager()
-        upload_row = await db_manager.get_upload_by_video_id(video_id)
+        db_manager = self._get_db_manager()
+        upload_row = db_manager.get_upload_by_video_id(video_id)
         if not upload_row:
             self.logger.info(
                 "No upload row found for %s; winner persisted only in local test result",
@@ -1168,15 +1162,11 @@ class ChannelManager:
         upload_id = upload_row["id"]
         variant_ctrs = winner_analysis.get("variant_ctrs", {})
         if 0 in variant_ctrs:
-            await db_manager.update_thumbnail_ctr(
-                upload_id, "A", float(variant_ctrs[0])
-            )
+            db_manager.update_thumbnail_ctr(upload_id, "A", float(variant_ctrs[0]))
         if 1 in variant_ctrs:
-            await db_manager.update_thumbnail_ctr(
-                upload_id, "B", float(variant_ctrs[1])
-            )
+            db_manager.update_thumbnail_ctr(upload_id, "B", float(variant_ctrs[1]))
 
-        await db_manager.complete_thumbnail_ab_test(upload_id, winner_label)
+        db_manager.complete_thumbnail_ab_test(upload_id, winner_label)
 
     def _variant_label_for_index(self, index: int) -> str:
         """Map 0 -> A, 1 -> B, 2 -> C, ... for DB winner storage."""
@@ -1187,23 +1177,23 @@ class ChannelManager:
             return alphabet[index]
         return f"V{index + 1}"
 
-    async def _get_db_manager(self) -> DatabaseManager:
-        from src.database.db_manager import get_db_manager as _get_shared_db
+    def _get_db_manager(self) -> DatabaseManager:
+        db_manager = getattr(self, "_db_manager", None)
+        if db_manager is None:
+            db_manager = get_db_manager()
+            self._db_manager = db_manager
+        return db_manager
 
-        if self._db_manager is None:
-            self._db_manager = await _get_shared_db()
-        return self._db_manager
-
-    async def _get_video_path(self, video_id: str) -> Optional[Path]:
+    def _get_video_path(self, video_id: str) -> Optional[Path]:
         """Get local path for video file using database mapping."""
         if not video_id:
             self.logger.warning("Cannot resolve local video path: empty video_id")
             return None
 
         try:
-            db_manager = await self._get_db_manager()
+            db_manager = self._get_db_manager()
 
-            artifacts = await db_manager.get_local_artifacts_by_video_id(video_id)
+            artifacts = db_manager.get_local_artifacts_by_video_id(video_id)
             if not artifacts:
                 self.logger.info(f"No local artifacts found for video ID: {video_id}")
                 return None

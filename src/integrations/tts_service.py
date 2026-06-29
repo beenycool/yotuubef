@@ -254,8 +254,7 @@ class TTSService:
             "The same narrator is speaking. Keep the voice identity identical."
         )
 
-        raw_cue = getattr(segment, "expression_cue", None)
-        expression_cue = (raw_cue or "").strip()
+        expression_cue = getattr(segment, "expression_cue", "").strip()
         if expression_cue:
             return f"{base_instructions} Deliver this line with this expression: {expression_cue}."
 

@@ -3,7 +3,7 @@ aiohttp>=3.14.1
 asyncpraw>=7.7
 moviepy>=2.0
 numpy>=1.24
-opencv-python>=4.8
+# opencv-python>=4.8  # removed — not needed
 pillow>=10
 psutil>=5.9
 pydantic>=2.0
@@ -20,15 +20,6 @@ google-auth-httplib2>=0.1
 aiosqlite>=0.19
 filelock>=3.13
 
-chromadb>=1.5.0
-sentence-transformers>=2.2.0
-
-# Enhanced AI and Machine Learning
-transformers>=4.30.0             # Hugging Face transformers for local AI models
-torch>=2.0.0                     # PyTorch for GPU-accelerated processing
-torchvision>=0.15.0              # Computer vision models
-torchaudio>=2.0.0                # Audio processing models
-
-# Advanced Audio Processing
-librosa>=0.10.0                  # Advanced audio analysis and processing
-soundfile>=0.12.1                # Audio file I/O
+# Optional: torch, transformers (uncomment if needed)
+# torch>=2.0.0
+# transformers>=4.30.0

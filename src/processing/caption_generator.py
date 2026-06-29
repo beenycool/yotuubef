@@ -243,38 +243,28 @@ class CaptionGenerator:
         from moviepy import CompositeVideoClip
 
         overlays = []
-        try:
-            for evt in caption_events:
-                txt = MoviePyCompat.create_text_clip(
-                    evt["word"],
-                    font="Arial",
-                    font_size=48,
-                    color="white",
-                    stroke_color="black",
-                    stroke_width=1,
-                )
-                if txt is None:
-                    continue
-                txt = MoviePyCompat.with_position(txt, ("center", "center"))
-                txt = MoviePyCompat.with_start(
-                    MoviePyCompat.with_duration(txt, evt["end"] - evt["start"]),
-                    evt["start"],
-                )
-                overlays.append(txt)
+        for evt in caption_events:
+            txt = MoviePyCompat.create_text_clip(
+                evt["word"],
+                font="Arial",
+                font_size=48,
+                color="white",
+                stroke_color="black",
+                stroke_width=1,
+            )
+            if txt is None:
+                continue
+            txt = MoviePyCompat.with_position(txt, ("center", "center"))
+            txt = MoviePyCompat.with_start(
+                MoviePyCompat.with_duration(txt, evt["end"] - evt["start"]),
+                evt["start"],
+            )
+            overlays.append(txt)
 
-            if overlays:
-                self.logger.info(
-                    f"Generated {len(overlays)} word captions from known text"
-                )
-                return CompositeVideoClip([video_clip, *overlays])
-            return None
-        except Exception:
-            for clip in overlays:
-                try:
-                    clip.close()
-                except Exception:
-                    pass
-            raise
+        if overlays:
+            self.logger.info(f"Generated {len(overlays)} word captions from known text")
+            return CompositeVideoClip([video_clip, *overlays])
+        return None
 
     def get_word_count_and_duration(self, audio_path: Path) -> Dict[str, Any]:
         """Get quick stats about the audio"""

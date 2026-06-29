@@ -3,9 +3,10 @@ Pydantic models for robust data validation and type checking.
 Replaces dataclasses with validated models for AI analysis results.
 """
 
-from typing import Optional, Dict, List, Any
-from pydantic import BaseModel, Field, field_validator, ConfigDict
+from typing import Dict, List, Optional, Union, Any, Tuple
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 from enum import Enum
+from datetime import datetime
 
 
 class PositionType(str, Enum):
@@ -27,6 +28,15 @@ class TextStyle(str, Enum):
     DRAMATIC = "dramatic"
 
 
+class EffectType(str, Enum):
+    """Valid visual effect types"""
+
+    ZOOM = "zoom"
+    HIGHLIGHT = "highlight"
+    TEXT_OVERLAY = "text_overlay"
+    COLOR_GRADE = "color_grade"
+
+
 class EmotionType(str, Enum):
     """Valid emotion types for TTS"""
 
@@ -42,6 +52,33 @@ class PacingType(str, Enum):
     SLOW = "slow"
     NORMAL = "normal"
     FAST = "fast"
+
+
+class VisualCue(BaseModel):
+    """Visual cue for video enhancement with validation"""
+
+    timestamp_seconds: float = Field(
+        ..., ge=0, description="Timestamp in seconds (must be non-negative)"
+    )
+    description: str = Field(
+        ..., min_length=1, description="Description of the visual cue"
+    )
+    effect_type: EffectType = Field(..., description="Type of effect to apply")
+    intensity: float = Field(
+        default=1.0, ge=0.1, le=2.0, description="Effect intensity (0.1-2.0)"
+    )
+    duration: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=10.0,
+        description="Effect duration in seconds (0.1-10.0)",
+    )
+    visual_directive: Optional[str] = Field(
+        default=None,
+        description="Optional precise directive (e.g., callout coordinates) for receipt-style highlights",
+    )
+
+    model_config = ConfigDict(use_enum_values=True)
 
 
 class TextOverlay(BaseModel):
@@ -108,6 +145,300 @@ class NarrativeSegment(BaseModel):
     model_config = ConfigDict(use_enum_values=True)
 
 
+class FocusPoint(BaseModel):
+    """Key focus point in video with validation"""
+
+    x: float = Field(..., ge=0.0, le=1.0, description="X coordinate (0.0-1.0)")
+    y: float = Field(..., ge=0.0, le=1.0, description="Y coordinate (0.0-1.0)")
+    timestamp_seconds: float = Field(..., ge=0, description="Timestamp in seconds")
+    description: str = Field(
+        ..., min_length=1, description="Description of the focus point"
+    )
+
+
+class SpeedEffect(BaseModel):
+    """Speed effect configuration with validation"""
+
+    start_seconds: float = Field(..., ge=0, description="Start time in seconds")
+    end_seconds: float = Field(..., ge=0, description="End time in seconds")
+    speed_factor: float = Field(
+        ..., ge=0.1, le=5.0, description="Speed multiplier (0.1-5.0)"
+    )
+    effect_type: str = Field(default="speed_change", description="Type of speed effect")
+
+    @field_validator("end_seconds")
+    @classmethod
+    def validate_time_range(cls, v, info):
+        start = info.data.get("start_seconds")
+        if start is not None and v <= start:
+            raise ValueError("End time must be greater than start time")
+        return v
+
+
+class SoundEffect(BaseModel):
+    """Sound effect configuration with validation"""
+
+    timestamp_seconds: float = Field(
+        ..., ge=0, description="Timestamp for sound effect"
+    )
+    effect_name: str = Field(..., min_length=1, description="Name of the sound effect")
+    volume: float = Field(
+        default=0.7, ge=0.0, le=1.0, description="Volume level (0.0-1.0)"
+    )
+
+
+class VideoSegment(BaseModel):
+    """Video segment information with validation"""
+
+    start_seconds: float = Field(..., ge=0, description="Start time in seconds")
+    end_seconds: float = Field(..., ge=0, description="End time in seconds")
+    reason: str = Field(
+        ..., min_length=1, description="Reason for this segment selection"
+    )
+
+    @field_validator("end_seconds")
+    @classmethod
+    def validate_segment_range(cls, v, info):
+        start = info.data.get("start_seconds")
+        if start is not None and v <= start:
+            raise ValueError("End time must be greater than start time")
+        return v
+
+
+class HookMoment(BaseModel):
+    """Visual hook moment with validation"""
+
+    timestamp_seconds: float = Field(..., ge=0, description="Timestamp of hook moment")
+    description: str = Field(
+        ..., min_length=1, description="Description of the hook moment"
+    )
+
+
+class AudioHook(BaseModel):
+    """Audio hook configuration with validation"""
+
+    type: str = Field(..., min_length=1, description="Type of audio hook")
+    sound_name: str = Field(..., min_length=1, description="Name of the sound")
+    timestamp_seconds: float = Field(..., ge=0, description="Timestamp for audio hook")
+
+
+class ThumbnailInfo(BaseModel):
+    """Thumbnail information with validation"""
+
+    timestamp_seconds: float = Field(..., ge=0, description="Timestamp for thumbnail")
+    reason: str = Field(..., min_length=1, description="Reason for thumbnail selection")
+    headline_text: str = Field(default="", description="Headline text for thumbnail")
+
+
+class CallToAction(BaseModel):
+    """Call to action configuration with validation"""
+
+    text: str = Field(
+        ..., min_length=1, max_length=100, description="CTA text (1-100 characters)"
+    )
+    type: str = Field(..., min_length=1, description="Type of call to action")
+
+
+class VideoAnalysis(BaseModel):
+    """Complete video analysis result from AI with comprehensive validation"""
+
+    # Basic information
+    suggested_title: str = Field(
+        ..., min_length=1, max_length=100, description="Video title (1-100 characters)"
+    )
+    summary_for_description: str = Field(
+        ..., min_length=1, max_length=500, description="Description (1-500 characters)"
+    )
+    mood: str = Field(..., min_length=1, description="Overall mood of the video")
+    has_clear_narrative: bool = Field(
+        ..., description="Whether video has clear narrative"
+    )
+    original_audio_is_key: bool = Field(
+        ..., description="Whether original audio is important"
+    )
+
+    # Hook content
+    hook_text: str = Field(
+        ..., min_length=1, max_length=200, description="Hook text (1-200 characters)"
+    )
+    hook_variations: List[str] = Field(
+        ..., min_length=1, max_length=10, description="Alternative hooks (1-10 items)"
+    )
+    visual_hook_moment: HookMoment = Field(
+        ..., description="Most engaging visual moment"
+    )
+    audio_hook: AudioHook = Field(..., description="Audio hook configuration")
+
+    # Video segments
+    best_segment: VideoSegment = Field(..., description="Best video segment")
+    segments: List[VideoSegment] = Field(
+        ..., min_length=1, description="All video segments"
+    )
+
+    # Enhancement elements
+    key_focus_points: List[FocusPoint] = Field(
+        default_factory=list, description="Key focus points in video"
+    )
+    text_overlays: List[TextOverlay] = Field(
+        default_factory=list, description="Text overlays to add"
+    )
+    narrative_script_segments: List[NarrativeSegment] = Field(
+        default_factory=list, description="TTS segments"
+    )
+    visual_cues: List[VisualCue] = Field(
+        default_factory=list, description="Visual enhancement cues"
+    )
+    speed_effects: List[SpeedEffect] = Field(
+        default_factory=list, description="Speed effects to apply"
+    )
+
+    # Audio and effects
+    music_genres: List[str] = Field(
+        ..., min_length=1, description="Suitable music genres"
+    )
+    sound_effects: List[SoundEffect] = Field(
+        default_factory=list, description="Sound effects to add"
+    )
+    hashtags: List[str] = Field(
+        ..., min_length=1, max_length=30, description="Relevant hashtags (1-30 items)"
+    )
+    original_duration: float = Field(
+        default=0.0, ge=0, description="Original video duration"
+    )
+    tts_pacing: PacingType = Field(default=PacingType.NORMAL, description="TTS pacing")
+    emotional_keywords: List[str] = Field(
+        default_factory=list, description="Emotional keywords"
+    )
+
+    # Engagement and metadata
+    thumbnail_info: ThumbnailInfo = Field(..., description="Thumbnail configuration")
+    call_to_action: CallToAction = Field(..., description="Call to action")
+    retention_tactics: List[str] = Field(
+        default_factory=list, description="Viewer retention tactics"
+    )
+
+    # Content safety
+    is_explicitly_age_restricted: bool = Field(
+        default=False, description="Whether content is age-restricted"
+    )
+    fallback: bool = Field(
+        default=False, description="Whether this is fallback analysis"
+    )
+
+    @field_validator("hook_variations")
+    @classmethod
+    def validate_hook_variations(cls, v):
+        # Ensure all hook variations are non-empty and unique
+        cleaned = [hook.strip() for hook in v if hook.strip()]
+        if len(cleaned) != len(set(cleaned)):
+            raise ValueError("Hook variations must be unique")
+        return cleaned
+
+    @field_validator("hashtags")
+    @classmethod
+    def validate_hashtags(cls, v):
+        # Ensure hashtags start with # and are properly formatted
+        validated = []
+        for tag in v:
+            tag = tag.strip()
+            if not tag:
+                continue
+            if not tag.startswith("#"):
+                tag = f"#{tag}"
+
+            # Split by # and process each part separately to handle cases like "#special!@#"
+            parts = tag.split("#")
+            if len(parts) >= 2:  # Should have at least ['', 'content'] after split
+                # Take the first non-empty part after #
+                content = next((part for part in parts[1:] if part), "")
+                # Remove spaces and special characters except underscore
+                clean_content = "".join(c for c in content if c.isalnum() or c == "_")
+                if clean_content:  # Must have content after cleaning
+                    validated.append(f"#{clean_content}")
+
+        if not validated:
+            raise ValueError("At least one valid hashtag is required")
+        return validated
+
+    @model_validator(mode="after")
+    def validate_analysis_consistency(self):
+        """Validate consistency across the entire analysis"""
+
+        # Ensure visual cues don't exceed reasonable bounds
+        if len(self.visual_cues) > 20:
+            raise ValueError("Too many visual cues (maximum 20)")
+
+        # Ensure text overlays don't overlap too much
+        if len(self.text_overlays) > 15:
+            raise ValueError("Too many text overlays (maximum 15)")
+
+        # Validate that segments make sense
+        if self.segments:
+            total_duration = max([seg.end_seconds for seg in self.segments])
+            if total_duration > 300:  # 5 minutes max
+                raise ValueError("Total video duration seems unreasonable (>5 minutes)")
+
+        return self
+
+    def get_fallback_defaults(self) -> Dict[str, Any]:
+        """Get fallback default values for missing or invalid data"""
+        return {
+            "suggested_title": "Amazing Video Content",
+            "summary_for_description": "Check out this incredible video!",
+            "mood": "exciting",
+            "has_clear_narrative": False,
+            "original_audio_is_key": True,
+            "hook_text": "Watch this amazing moment!",
+            "hook_variations": ["Incredible!", "Must see!", "Amazing!"],
+            "music_genres": ["upbeat"],
+            "hashtags": ["#shorts", "#viral"],
+            "tts_pacing": PacingType.NORMAL,
+            "fallback": True,
+        }
+
+    model_config = ConfigDict(
+        use_enum_values=True,
+        validate_assignment=True,
+        extra="forbid",  # Don't allow extra fields
+    )
+
+
+class CameraMovement(BaseModel):
+    """AI-suggested camera movement for dynamic effects"""
+
+    start_time: float = Field(..., ge=0, description="Start time in seconds")
+    end_time: float = Field(..., ge=0, description="End time in seconds")
+    movement_type: str = Field(
+        ..., description="Type of movement (pan, zoom, pan_zoom)"
+    )
+    start_position: Tuple[float, float] = Field(
+        ..., description="Starting position (x, y) as ratios 0-1"
+    )
+    end_position: Tuple[float, float] = Field(
+        ..., description="Ending position (x, y) as ratios 0-1"
+    )
+    zoom_factor: float = Field(
+        default=1.0, ge=0.5, le=3.0, description="Zoom factor (0.5-3.0)"
+    )
+    easing: str = Field(
+        default="ease_in_out", description="Easing function for smooth movement"
+    )
+    intensity: float = Field(
+        default=1.0, ge=0.1, le=2.0, description="Movement intensity"
+    )
+
+    @field_validator("end_time")
+    @classmethod
+    def validate_time_range(cls, v, info):
+        if (
+            hasattr(info, "data")
+            and "start_time" in info.data
+            and v <= info.data["start_time"]
+        ):
+            raise ValueError("End time must be greater than start time")
+        return v
+
+
 class AudioDuckingConfig(BaseModel):
     """Configuration for intelligent audio ducking during narration"""
 
@@ -128,200 +459,169 @@ class AudioDuckingConfig(BaseModel):
     )
 
 
-class CallToAction(BaseModel):
-    text: str = ""
-    type: str = "subscribe"
-
-
-class HookMoment(BaseModel):
-    timestamp_seconds: float = 0.0
-    description: str = ""
-
-
-class AudioHook(BaseModel):
-    type: str = "dramatic"
-    sound_name: str = "whoosh"
-    timestamp_seconds: float = 0.0
-
-
-class VideoSegment(BaseModel):
-    start_seconds: float = 0.0
-    end_seconds: float = 0.0
-    reason: str = ""
-
-
-class ThumbnailInfo(BaseModel):
-    timestamp_seconds: float = 0.0
-    reason: str = ""
-    headline_text: str = ""
-
-
-class CameraMovement(BaseModel):
-    start_time: float = Field(0.0, ge=0)
-    end_time: float = Field(0.0, ge=0)
-    movement_type: str = "pan"
-    start_position: tuple = (0.5, 0.5)
-    end_position: tuple = (0.5, 0.5)
-    zoom_factor: float = 1.0
-    easing: str = "linear"
-    intensity: float = Field(0.5, ge=0, le=1.0)
-
-
-class FocusPoint(BaseModel):
-    x: float = Field(0.5, ge=0, le=1)
-    y: float = Field(0.5, ge=0, le=1)
-    timestamp_seconds: float = 0.0
-    description: str = ""
-
-
-class SpeedEffect(BaseModel):
-    start_seconds: float = 0.0
-    end_seconds: float = 0.0
-    speed_factor: float = 1.0
-    effect_type: str = "slow_motion"
-
-
 class ThumbnailVariant(BaseModel):
-    variant_id: str = ""
-    headline_text: str = ""
-    timestamp_seconds: float = 0.0
-    text_style: str = "bold_impact"
-    color_scheme: str = "high_contrast"
-    emotional_tone: str = "exciting"
-    performance_score: Optional[float] = None
+    """A/B test thumbnail variant configuration"""
 
-
-class PerformanceMetrics(BaseModel):
-    video_id: str = ""
-    views: int = 0
-    likes: int = 0
-    comments: int = 0
-    shares: int = 0
-    watch_time_percentage: float = 0.0
-    click_through_rate: float = 0.0
-
-
-class CommentEngagement(BaseModel):
-    comment_id: str = ""
-    engagement_score: float = 0.0
-    sentiment: str = "neutral"
-    toxicity_score: float = 0.0
-
-
-class EnhancementOptimization(BaseModel):
-    last_optimization_date: Optional[str] = None
-    parameter_history: Dict[str, Any] = Field(default_factory=dict)
-    performance_trends: Dict[str, Any] = Field(default_factory=dict)
-
-
-class VideoAnalysis(BaseModel):
-    suggested_title: str = ""
-    summary_for_description: str = ""
-    mood: str = "exciting"
-    has_clear_narrative: bool = True
-    original_audio_is_key: bool = False
-    hook_text: str = ""
-    hook_variations: List[str] = Field(default_factory=list)
-    visual_hook_moment: Optional[HookMoment] = None
-    audio_hook: Optional[AudioHook] = None
-    best_segment: Optional[VideoSegment] = None
-    segments: List[VideoSegment] = Field(default_factory=list)
-    text_overlays: List[TextOverlay] = Field(default_factory=list)
-    narrative_script_segments: List[NarrativeSegment] = Field(default_factory=list)
-    thumbnail_info: Optional[ThumbnailInfo] = None
-    call_to_action: Optional[CallToAction] = None
-    music_genres: List[str] = Field(default_factory=list)
-    hashtags: List[str] = Field(default_factory=list)
-    audio_ducking_config: Optional[AudioDuckingConfig] = None
-    camera_movements: List[CameraMovement] = Field(default_factory=list)
-    speed_effects: List[SpeedEffect] = Field(default_factory=list)
-    dynamic_focus_points: List[FocusPoint] = Field(default_factory=list)
-    cinematic_transitions: List[Dict[str, Any]] = Field(default_factory=list)
-    key_focus_points: List[FocusPoint] = Field(default_factory=list)
-    original_duration: Optional[float] = None
-
-    model_config = ConfigDict(use_enum_values=True)
-
-
-class VideoAnalysisEnhanced(VideoAnalysis):
-    model_config = ConfigDict(use_enum_values=True)
-
-
-class ScriptSegment(BaseModel):
-    """Validated script segment from AI generation."""
-
-    time_seconds: float = Field(default=0.0, ge=0)
-    intended_duration_seconds: float = Field(default=6.0, ge=0.1, le=30.0)
-    narration: str = Field(..., min_length=1, max_length=500)
-    expression_cue: Optional[str] = None
-    visual_asset_path: Optional[str] = None
-    visual_directive: Optional[str] = None
-    text_overlay: Optional[str] = None
-    evidence_refs: List[str] = Field(default_factory=list)
-    pace: str = Field(default="fast", pattern=r"^(fast|normal|slow)$")
-    emotion: str = Field(
-        default="dramatic", pattern=r"^(excited|calm|dramatic|neutral)$"
+    variant_id: str = Field(..., description="Unique variant identifier")
+    headline_text: str = Field(..., description="Headline text for this variant")
+    timestamp_seconds: float = Field(
+        ..., ge=0, description="Frame timestamp for thumbnail"
+    )
+    text_style: str = Field(default="bold", description="Text styling approach")
+    color_scheme: str = Field(
+        default="high_contrast", description="Color scheme for text"
+    )
+    emotional_tone: str = Field(
+        default="exciting", description="Emotional tone of design"
+    )
+    click_through_rate: Optional[float] = Field(
+        default=None, ge=0.0, le=1.0, description="Measured CTR"
+    )
+    performance_score: Optional[float] = Field(
+        default=None, ge=0.0, le=100.0, description="Overall performance score"
     )
 
 
-class ScriptSchema(BaseModel):
-    """Validated AI generation output for SCRIPTING phase."""
+class EnhancementOptimization(BaseModel):
+    """Performance-based enhancement optimization settings"""
 
-    phase: str = Field(default="SCRIPTING", pattern=r"^SCRIPTING$")
-    title: str = Field(..., min_length=1, max_length=200)
-    hook: str = Field(..., min_length=1, max_length=500)
-    loop_bridge: str = Field(default="", max_length=500)
-    segments: List[ScriptSegment] = Field(..., min_length=1)
-    sources_to_check: List[str] = Field(default_factory=list)
-    hashtags: List[str] = Field(default_factory=list)
-
-
-class IdeaAngle(BaseModel):
-    id: str = Field(default="A1", pattern=r"^A\d+$")
-    title: str = Field(..., min_length=1, max_length=200)
-    hook: str = Field(..., min_length=1, max_length=500)
-    viability_score: int = Field(default=50, ge=0, le=100)
-    source_urls: List[str] = Field(default_factory=list)
-
-
-class IdeaGenerationSchema(BaseModel):
-    """Validated AI generation output for IDEA_GENERATION phase."""
-
-    phase: str = Field(default="IDEA_GENERATION", pattern=r"^IDEA_GENERATION$")
-    angles: List[IdeaAngle] = Field(..., min_length=1, max_length=10)
-    gemini_deep_research_prompt: str = Field(..., min_length=20)
-    next_phase: str = Field(default="WAIT_FOR_GEMINI_REPORT")
+    effect_type: str = Field(..., description="Type of enhancement effect")
+    current_intensity: float = Field(
+        ..., ge=0.0, le=2.0, description="Current intensity setting"
+    )
+    performance_score: float = Field(
+        ..., ge=0.0, le=100.0, description="Performance score (0-100)"
+    )
+    usage_frequency: float = Field(
+        ..., ge=0.0, le=1.0, description="How often this effect is used"
+    )
+    retention_impact: float = Field(
+        default=0.0, description="Impact on viewer retention"
+    )
+    engagement_impact: float = Field(
+        default=0.0, description="Impact on engagement metrics"
+    )
+    recommended_adjustment: float = Field(
+        default=0.0, description="Recommended intensity adjustment"
+    )
 
 
-class ScriptJudgeResult(BaseModel):
-    """Result from the LLM Judge evaluating script quality."""
+class CommentEngagement(BaseModel):
+    """AI-analyzed comment for engagement boosting"""
 
-    score: int = Field(..., ge=1, le=10)
-    hook_under_3_seconds: bool = True
-    sounds_natural: bool = True
-    sentences_too_long: bool = False
-    has_forbidden_phrases: bool = False
-    feedback: str = Field(default="", max_length=1000)
-    passes_quality_bar: bool = Field(default=True)
-
-
-class EvidencePlanItem(BaseModel):
-    claim: str = Field(..., min_length=1)
-    evidence_needed: List[str] = Field(default_factory=list)
-    priority: str = Field(default="medium", pattern=r"^(high|medium|low)$")
-
-
-class EvidenceGatheringSchema(BaseModel):
-    """Validated AI generation output for EVIDENCE_GATHERING phase."""
-
-    phase: str = Field(default="EVIDENCE_GATHERING", pattern=r"^EVIDENCE_GATHERING$")
-    evidence_plan: List[EvidencePlanItem] = Field(..., min_length=1)
-    media_queries: List[str] = Field(..., min_length=1)
-    next_phase: str = Field(default="SCRIPTING")
+    comment_id: str = Field(..., description="YouTube comment ID")
+    comment_text: str = Field(..., description="Comment content")
+    engagement_score: float = Field(
+        ..., ge=0.0, le=100.0, description="AI-calculated engagement potential"
+    )
+    sentiment: str = Field(
+        ..., description="Comment sentiment (positive, negative, neutral)"
+    )
+    reply_suggestion: Optional[str] = Field(
+        default=None, description="AI-suggested reply"
+    )
+    should_pin: bool = Field(default=False, description="Whether to pin this comment")
+    interaction_type: str = Field(
+        default="like", description="Recommended interaction type"
+    )
 
 
-PHASE_SCHEMA_MAP = {
-    "SCRIPTING": ScriptSchema,
-    "IDEA_GENERATION": IdeaGenerationSchema,
-    "EVIDENCE_GATHERING": EvidenceGatheringSchema,
-}
+class PerformanceMetrics(BaseModel):
+    """Enhanced performance tracking for optimization"""
+
+    video_id: str = Field(..., description="Video identifier")
+    timestamp: datetime = Field(
+        default_factory=datetime.now, description="Metrics timestamp"
+    )
+
+    # Core metrics
+    views: int = Field(default=0, ge=0, description="View count")
+    likes: int = Field(default=0, ge=0, description="Like count")
+    comments: int = Field(default=0, ge=0, description="Comment count")
+    shares: int = Field(default=0, ge=0, description="Share count")
+
+    # Advanced metrics
+    watch_time_percentage: float = Field(
+        default=0.0, ge=0.0, le=100.0, description="Average watch percentage"
+    )
+    retention_curve: List[float] = Field(
+        default_factory=list, description="Retention at each 10% of video"
+    )
+    click_through_rate: float = Field(
+        default=0.0, ge=0.0, le=1.0, description="Thumbnail CTR"
+    )
+    audience_retention_peaks: List[float] = Field(
+        default_factory=list, description="Timestamps of retention peaks"
+    )
+
+    # Enhancement correlation
+    active_enhancements: List[str] = Field(
+        default_factory=list, description="Enhancements used in this video"
+    )
+    enhancement_performance: Dict[str, float] = Field(
+        default_factory=dict, description="Per-enhancement performance scores"
+    )
+
+
+# Enhanced VideoAnalysis with new AI-powered features
+class VideoAnalysisEnhanced(VideoAnalysis):
+    """Enhanced video analysis with AI-powered cinematic and engagement features"""
+
+    # AI-powered cinematic editing
+    camera_movements: List[CameraMovement] = Field(
+        default_factory=list, description="AI-suggested camera movements"
+    )
+    dynamic_focus_points: List[FocusPoint] = Field(
+        default_factory=list, description="Dynamic focus points for attention"
+    )
+    cinematic_transitions: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Transition effects between segments"
+    )
+
+    # Advanced audio processing
+    audio_ducking_config: AudioDuckingConfig = Field(
+        default_factory=AudioDuckingConfig, description="Audio ducking settings"
+    )
+    voice_enhancement_params: Dict[str, float] = Field(
+        default_factory=dict, description="Voice processing parameters"
+    )
+    background_audio_zones: List[Dict[str, Any]] = Field(
+        default_factory=list, description="Background audio management zones"
+    )
+
+    # Engagement-driven thumbnails
+    thumbnail_variants: List[ThumbnailVariant] = Field(
+        default_factory=list, description="A/B test thumbnail variants"
+    )
+    optimal_thumbnail_elements: Dict[str, Any] = Field(
+        default_factory=dict, description="AI-optimized thumbnail elements"
+    )
+
+    # Performance optimization
+    enhancement_recommendations: List[EnhancementOptimization] = Field(
+        default_factory=list, description="Performance-based recommendations"
+    )
+    predicted_performance: Dict[str, float] = Field(
+        default_factory=dict, description="AI-predicted performance metrics"
+    )
+
+    # Channel management
+    comment_engagement_targets: List[CommentEngagement] = Field(
+        default_factory=list, description="Comments to engage with"
+    )
+    auto_response_triggers: List[str] = Field(
+        default_factory=list, description="Trigger phrases for auto-responses"
+    )
+
+    # Perfect Loop & B-Roll features (Improvement 2 & 3)
+    b_roll_moments: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="B-roll moments with image paths and timestamps",
+    )
+    loop_bridge_text: Optional[str] = Field(
+        default=None, description="Text that connects end to beginning for perfect loop"
+    )
+
+    model_config = ConfigDict(
+        use_enum_values=True, validate_assignment=True, extra="forbid"
+    )

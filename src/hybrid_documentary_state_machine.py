@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import ast
 import json
 import logging
@@ -30,7 +29,7 @@ import aiohttp
 
 if TYPE_CHECKING:
     from src.utils.search_audit_logger import SearchAuditLogger
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 OpenAI = None
 try:
@@ -44,67 +43,10 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-
-# ── AI Output Validation & Auto-Retry ──────────────────────────────────────────
-
-PHASE_VALIDATION_SCHEMAS: dict[str, type[BaseModel]] = {}
-
-try:
-    from src.models import (
-        ScriptSchema,
-        IdeaGenerationSchema,
-        EvidenceGatheringSchema,
-    )
-
-    PHASE_VALIDATION_SCHEMAS = {
-        "SCRIPTING": ScriptSchema,
-        "IDEA_GENERATION": IdeaGenerationSchema,
-        "EVIDENCE_GATHERING": EvidenceGatheringSchema,
-    }
-except ImportError:
-    pass
-
-
-def validate_phase_output(
-    phase_name: str, raw_data: dict
-) -> tuple[dict | None, str | None]:
-    """Validate AI phase output against its Pydantic schema.
-
-    Returns (validated_dict, error_message).
-    If valid, error_message is None. If invalid, returns (None, error_string).
-    """
-    schema = PHASE_VALIDATION_SCHEMAS.get(phase_name)
-    if schema is None:
-        return raw_data, None
-    try:
-        validated = schema.model_validate(raw_data)
-        return validated.model_dump(), None
-    except ValidationError as e:
-        error_msg = f"Phase {phase_name} validation failed: {e}"
-        logger.error(error_msg)
-        return None, error_msg
-
-
-def build_validation_feedback_prompt(
-    phase_name: str, raw_data: dict, error: str
-) -> str:
-    """Build a prompt fragment telling the LLM to fix its JSON output."""
-    return (
-        f"\n\nPREVIOUS OUTPUT FOR PHASE '{phase_name}' FAILED VALIDATION.\n"
-        f"Error: {error}\n\n"
-        f"Raw output that failed:\n{json.dumps(raw_data, indent=2, ensure_ascii=True)[:2000]}\n\n"
-        "Fix the JSON structure according to the phase contract. "
-        "Ensure all required fields are present with correct types. "
-        "Return ONLY valid JSON matching the contract."
-    )
-
-
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
 DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen2.5-7b-instruct")
-DEFAULT_TRANSCRIBE_MODEL = os.getenv(
-    "NVIDIA_TRANSCRIBE_MODEL", "nvidia/parakeet-ctc-1.1b"
-)
+DEFAULT_TRANSCRIBE_MODEL = os.getenv("NVIDIA_TRANSCRIBE_MODEL", "whisper-1")
 
 LOGO_FILTER_KEYWORDS = frozenset({"logo", "icon", "favicon"})
 
@@ -282,15 +224,10 @@ Context:
 Hard rules:
 1) Return ONLY valid JSON matching the schema for CURRENT_PIPELINE_PHASE.
 2) Never invent sources, dates, or quotes. If you don't know the exact date or username, don't write it.
-3) In SCRIPTING, the first segment (the hook) MUST be under 3 seconds. Intended_duration_seconds must be <= 3.0 for the hook.
-4) In SCRIPTING, match word count to intended_duration_seconds to avoid TTS speedup:
-   - intended_duration_seconds 3-5s: max 8 words
-   - intended_duration_seconds 6-8s: max 15 words  
-   - intended_duration_seconds 9-12s: max 22 words
-   Use conversational language. Short sentences only.
-5) In SCRIPTING, map each segment to a concrete local asset path when available to prove the facts.
-6) In EVIDENCE_GATHERING, prioritize searching for primary sources: forum screenshots, archive.org links, and exact timestamps.
-7) Every segment must advance the detective narrative. If a segment does not reveal new evidence or advance the hook, delete it.
+3) In SCRIPTING, write short, punchy sentences (max 10-15 words per segment). Use conversational language.
+4) In SCRIPTING, map each segment to a concrete local asset path when available to prove the facts.
+5) In EVIDENCE_GATHERING, prioritize searching for primary sources: forum screenshots, archive.org links, and exact timestamps.
+6) Every segment must advance the detective narrative. If a segment does not reveal new evidence or advance the hook, delete it.
 
 FORBIDDEN PHRASES (DO NOT USE THESE):
 - "Did you know?"
@@ -328,6 +265,27 @@ def _ensure_text(
     return str(value), False
 
 
+def _write_research_readme(research_dir: Path) -> None:
+    """Write a README explaining the research folder structure."""
+    readme = research_dir / "README.md"
+    content = """# Research Folder Structure
+
+| Folder | Purpose |
+|--------|---------|
+| `ideas/` | Idea generation output, raw scout data |
+| `reports/` | Gemini deep research report, deep research prompt |
+| `synthesis/` | Synthesis JSON (chosen angle, queries) |
+| `evidence/` | Media search results, evidence index |
+| `scripts/` | Final script JSON |
+| `transcripts/` | Transcripts from downloaded media |
+| `summaries/` | Script context summary |
+| `logs/` | Search audit logs |
+| `media_images/` | Downloaded broll images |
+| `media_videos/` | Reserved for video assets |
+"""
+    readme.write_text(content, encoding="utf-8")
+
+
 def setup_project_workspace(project_name: str) -> Path:
     """Create findings workspace and initialize run state if absent."""
     sanitized_project = _sanitize_project_name(project_name)
@@ -351,6 +309,7 @@ def setup_project_workspace(project_name: str) -> Path:
     for folder in folders:
         (research_dir / folder).mkdir(parents=True, exist_ok=True)
     (project_dir / "raw_media").mkdir(parents=True, exist_ok=True)
+    _write_research_readme(research_dir)
 
     state_path = _state_path(project_dir)
     if not state_path.exists():
@@ -377,32 +336,13 @@ def load_run_state(project_dir: Union[str, Path]) -> RunState:
 
 def save_run_state(state: RunState) -> Path:
     import os as _os
-    import tempfile as _tempfile
 
     state.updated_at = datetime.now(UTC).isoformat()
     state_path = _state_path(state.project_dir)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = None
-    try:
-        with _tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=state_path.parent,
-            prefix=f"{state_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp_file:
-            tmp_file.write(state.model_dump_json(indent=2))
-            tmp_file.flush()
-            _os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-        _os.replace(str(tmp_path), str(state_path))  # atomic on POSIX & Windows
-    finally:
-        if tmp_path and tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
+    tmp = state_path.with_suffix(".json.tmp")
+    tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    _os.replace(str(tmp), str(state_path))  # atomic on POSIX & Windows
     logger.debug("Saved run state to %s", state_path)
     return state_path
 
@@ -468,16 +408,12 @@ class ExaSearchClient:
         self.timeout_seconds = timeout_seconds
         self.audit_logger = audit_logger
         self._session: Optional[aiohttp.ClientSession] = None
-        self._session_lock = asyncio.Lock()
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is not None and not self._session.closed:
-            return self._session
-        async with self._session_lock:
-            if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
-                )
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
+            )
         return self._session
 
     async def close(self) -> None:
@@ -529,88 +465,35 @@ class ExaSearchClient:
         if self.audit_logger:
             self.audit_logger.log_request("POST", url, body, headers)
 
-        max_retries = 3
-        base_delay = 1.0
-        last_exc = None
-        for attempt in range(max_retries):
-            start = time.perf_counter()
-            try:
-                async with session.post(url, headers=headers, json=body) as response:
-                    resp_body = await response.text()
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            response.status,
-                            resp_body,
-                            duration_ms,
-                            url=url,
-                        )
-                    if response.status >= 400:
-                        if 500 <= response.status < 600 or response.status == 429:
-                            last_exc = Exception(f"HTTP {response.status}")
-                            delay = base_delay * (attempt + 1)
-                            logger.warning(
-                                "Exa search attempt %d/%d failed status=%s, retrying in %.1fs",
-                                attempt + 1,
-                                max_retries,
-                                response.status,
-                                delay,
-                            )
-                            await asyncio.sleep(delay)
-                            continue
-                        logger.warning(
-                            "Exa search failed status=%s body=%s",
-                            response.status,
-                            resp_body[:300],
-                        )
-                        return []
-                    try:
-                        payload = json.loads(resp_body)
-                        return self._parse_search_results(payload)
-                    except json.JSONDecodeError:
-                        return []
-            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    logger.warning(
-                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
-                        attempt + 1,
-                        max_retries,
-                        exc,
-                        delay,
-                    )
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            500, str(exc), duration_ms, url=url
-                        )
-                    await asyncio.sleep(delay)
-                    continue
+        start = time.perf_counter()
+        try:
+            async with session.post(url, headers=headers, json=body) as response:
+                resp_body = await response.text()
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
-                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-                logger.error("Exa search request failed: %s", exc)
-                return []
-            except Exception as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    logger.warning(
-                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
-                        attempt + 1,
-                        max_retries,
-                        exc,
-                        delay,
+                    self.audit_logger.log_response(
+                        response.status,
+                        resp_body,
+                        duration_ms,
+                        url=url,
                     )
-                    await asyncio.sleep(delay)
-                    continue
-                duration_ms = (time.perf_counter() - start) * 1000
-                if self.audit_logger:
-                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-                logger.error("Exa search request failed: %s", exc)
-                return []
-        logger.warning("Exa search failed after %d attempts: %s", max_retries, last_exc)
+                if response.status >= 400:
+                    logger.warning(
+                        "Exa search failed status=%s body=%s",
+                        response.status,
+                        resp_body[:300],
+                    )
+                    return []
+                try:
+                    payload = json.loads(resp_body)
+                except json.JSONDecodeError:
+                    return []
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
+            logger.error("Exa search request failed: %s", exc)
+            return []
 
         return self._parse_search_results(payload)
 
@@ -633,58 +516,9 @@ class ExaSearchClient:
             if not isinstance(url, str) or not url:
                 continue
 
-            # Filter out logos and icons
-            url_path = url.split("?")[0].split("#")[0]
-            filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
-            filename_lower = filename.lower()
-            if any(kw in filename_lower for kw in LOGO_FILTER_KEYWORDS):
-                continue
-
-            title = item.get("title") or item.get("name") or item.get("title") or ""
-            description = (
-                item.get("text") or item.get("snippet") or item.get("description") or ""
-            )
-            source = item.get("source") or item.get("domain") or "unknown"
-            thumbnail_url = (
-                item.get("thumbnail")
-                or item.get("thumbnail_url")
-                or item.get("image")
-                or ""
-            )
-
-            # Strict filtering for logos, icons, and avatars
-            if item.get("logo") is True:
-                continue
-            title_lower = str(title).lower()
-            if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
-                continue
-
-            if isinstance(thumbnail_url, dict):
-                if thumbnail_url.get("logo"):
-                    continue
-                thumbnail_url = (
-                    thumbnail_url.get("url")
-                    or thumbnail_url.get("src")
-                    or str(thumbnail_url)
-                )
-            elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
-                parsed_thumb = None
-                try:
-                    parsed_thumb = json.loads(thumbnail_url)
-                except json.JSONDecodeError:
-                    try:
-                        parsed_thumb = ast.literal_eval(thumbnail_url)
-                    except (ValueError, SyntaxError):
-                        pass
-
-                if isinstance(parsed_thumb, dict):
-                    if parsed_thumb.get("logo"):
-                        continue
-                    thumbnail_url = (
-                        parsed_thumb.get("url")
-                        or parsed_thumb.get("src")
-                        or thumbnail_url
-                    )
+            title = item.get("title") or ""
+            description = item.get("text") or item.get("snippet") or ""
+            source = item.get("source") or "unknown"
 
             parsed.append(
                 MediaSearchResult(
@@ -698,6 +532,10 @@ class ExaSearchClient:
 
         logger.debug("Parsed %d Exa search results", len(parsed))
         return parsed
+
+
+# Backward-compatible alias
+HackclubMediaSearchClient = ExaSearchClient
 
 
 def transcribe_media_file(
@@ -837,7 +675,7 @@ def estimate_tokens_conservative(text: str) -> int:
     return max(1, int((len(text) / 3.2) + 32))
 
 
-async def summarize_if_needed(
+def summarize_if_needed(
     context: str,
     max_tokens: int,
     *,
@@ -881,27 +719,23 @@ async def summarize_if_needed(
     )
 
     try:
-
-        def _do_summarize() -> str:
-            client = OpenAI(api_key=api_key or NVIDIA_API_KEY, base_url=base_url)
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a careful research summarizer. Preserve exact entity strings "
-                            "for names, dates, URLs, and direct quotes."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=max(200, int(max_tokens * 0.6)),
-            )
-            return response.choices[0].message.content or context
-
-        summarized = await asyncio.to_thread(_do_summarize)
+        client = OpenAI(api_key=api_key or NVIDIA_API_KEY, base_url=base_url)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a careful research summarizer. Preserve exact entity strings "
+                        "for names, dates, URLs, and direct quotes."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+            max_tokens=max(200, int(max_tokens * 0.6)),
+        )
+        summarized = response.choices[0].message.content or context
     except Exception as exc:
         logger.error("Context summarization failed: %s", exc)
         summarized = context
@@ -935,10 +769,10 @@ __all__ = [
     "DEFAULT_SUMMARY_MODEL",
     "DEFAULT_TRANSCRIBE_MODEL",
     "ExaSearchClient",
+    "HackclubMediaSearchClient",
     "MediaSearchResult",
     "NVIDIA_BASE_URL",
     "PHASE_JSON_CONTRACTS",
-    "PHASE_VALIDATION_SCHEMAS",
     "PipelinePhase",
     "ResearchArtifact",
     "RunState",
@@ -946,7 +780,6 @@ __all__ = [
     "SummaryResult",
     "TranscriptArtifacts",
     "build_state_machine_prompt",
-    "build_validation_feedback_prompt",
     "estimate_tokens_conservative",
     "load_run_state",
     "save_finding",
@@ -955,5 +788,4 @@ __all__ = [
     "setup_project_workspace",
     "summarize_if_needed",
     "transcribe_media_file",
-    "validate_phase_output",
 ]
