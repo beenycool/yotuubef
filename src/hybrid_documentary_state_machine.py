@@ -46,7 +46,9 @@ logger = logging.getLogger(__name__)
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
 DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen2.5-7b-instruct")
-DEFAULT_TRANSCRIBE_MODEL = os.getenv("NVIDIA_TRANSCRIBE_MODEL", "whisper-1")
+DEFAULT_TRANSCRIBE_MODEL = os.getenv(
+    "NVIDIA_TRANSCRIBE_MODEL", "nvidia/parakeet-ctc-1.1b"
+)
 
 LOGO_FILTER_KEYWORDS = frozenset({"logo", "icon", "favicon"})
 
@@ -408,12 +410,16 @@ class ExaSearchClient:
         self.timeout_seconds = timeout_seconds
         self.audit_logger = audit_logger
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_lock = asyncio.Lock()
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
-            )
+        if self._session is not None and not self._session.closed:
+            return self._session
+        async with self._session_lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
+                )
         return self._session
 
     async def close(self) -> None:
@@ -675,7 +681,7 @@ def estimate_tokens_conservative(text: str) -> int:
     return max(1, int((len(text) / 3.2) + 32))
 
 
-def summarize_if_needed(
+async def summarize_if_needed(
     context: str,
     max_tokens: int,
     *,
@@ -719,23 +725,27 @@ def summarize_if_needed(
     )
 
     try:
-        client = OpenAI(api_key=api_key or NVIDIA_API_KEY, base_url=base_url)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a careful research summarizer. Preserve exact entity strings "
-                        "for names, dates, URLs, and direct quotes."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=max(200, int(max_tokens * 0.6)),
-        )
-        summarized = response.choices[0].message.content or context
+
+        def _do_summarize() -> str:
+            client = OpenAI(api_key=api_key or NVIDIA_API_KEY, base_url=base_url)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a careful research summarizer. Preserve exact entity strings "
+                            "for names, dates, URLs, and direct quotes."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=max(200, int(max_tokens * 0.6)),
+            )
+            return response.choices[0].message.content or context
+
+        summarized = await asyncio.to_thread(_do_summarize)
     except Exception as exc:
         logger.error("Context summarization failed: %s", exc)
         summarized = context
