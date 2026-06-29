@@ -1,5 +1,5 @@
 openai>=1.0.0
-aiohttp>=3.9.0
+aiohttp>=3.14.1
 asyncpraw>=7.7
 moviepy>=2.0
 numpy>=1.24
@@ -8,8 +8,8 @@ pillow>=10
 psutil>=5.9
 pydantic>=2.0
 pyyaml>=6
-python-dotenv>=1.0
-yt-dlp>=2024.0
+python-dotenv>=1.2.2
+yt-dlp>=2026.6.9
 faster-whisper>=1.0
 scipy>=1.10
 librosa>=0.10
