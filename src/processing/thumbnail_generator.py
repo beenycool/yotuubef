@@ -156,7 +156,6 @@ class ThumbnailGenerator:
         self, video_path: Path, analysis: VideoAnalysis
     ) -> Optional[np.ndarray]:
         """Extract the best frame for thumbnail based on AI analysis"""
-        timestamp = 0.0
         try:
             timestamp = analysis.thumbnail_info.timestamp_seconds
 
@@ -394,7 +393,7 @@ class ThumbnailGenerator:
 
             for i, timestamp in enumerate(timestamps):
                 # Create modified analysis for this variant
-                    variant_analysis = analysis.model_copy(deep=True)
+                variant_analysis = analysis.copy(deep=True)
                 variant_analysis.thumbnail_info.timestamp_seconds = timestamp
 
                 # Modify headline text for variants
@@ -1006,24 +1005,8 @@ class ThumbnailGenerator:
             # Calculate performance score
             performance_score = self._calculate_performance_score(performance_metrics)
 
-            # Map PerformanceMetrics to VideoMetrics
-            from src.monitoring.engagement_metrics import VideoMetrics
-
-            video_metrics = VideoMetrics(
-                video_id=performance_metrics.video_id,
-                title="",
-                upload_date=datetime.now(),
-                duration_seconds=0.0,
-                views=performance_metrics.views,
-                likes=performance_metrics.likes,
-                comments=performance_metrics.comments,
-                shares=performance_metrics.shares,
-                retention_rate=performance_metrics.watch_time_percentage / 100.0,
-                click_through_rate=performance_metrics.click_through_rate,
-            )
-
             # Store performance data
-            self.engagement_db.store_video_metrics(video_metrics)
+            self.engagement_db.store_video_metrics(performance_metrics)
 
             # Update variant with performance data
             # This would integrate with the variant tracking system

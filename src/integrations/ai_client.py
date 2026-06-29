@@ -21,7 +21,6 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 from src.config.settings import get_config
-from src.integrations.ai_provider import OpenAIProvider, ProviderRegistry
 from src.models import (
     AudioDuckingConfig,
     AudioHook,
@@ -39,8 +38,6 @@ class RateLimiter:
     """Rate limiter for API requests"""
 
     def __init__(self, max_requests_per_minute: int = 60):
-        if max_requests_per_minute < 1:
-            raise ValueError("max_requests_per_minute must be at least 1")
         self.max_rpm = max_requests_per_minute
         self.requests_this_minute = []
         self.last_reset = time.time()
@@ -130,12 +127,6 @@ class AIClient:
         self._max_cache_size = 128
         self._model_supports_vision: Optional[bool] = None
 
-        # Backward-compatible active_client reference (orchestrator accesses it)
-        self.active_client = self
-
-        # Initialize provider registry for multi-provider support
-        self.provider_registry = ProviderRegistry()
-
         # Initialize NVIDIA NIM client if available
         if OPENAI_AVAILABLE and hasattr(self.config.api, "nvidia_nim_api_key"):
             api_key = self.config.api.nvidia_nim_api_key
@@ -157,15 +148,6 @@ class AIClient:
                 self.alt_model = getattr(self.config.api, "nvidia_nim_alt_model", None)
                 self.nim_available = True
                 self.ai_available = True
-
-                # Register NVIDIA NIM as primary provider
-                self.active_provider = OpenAIProvider(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=self.model,
-                    alt_model=self.alt_model,
-                )
-                self.provider_registry.register(self.active_provider, make_default=True)
 
                 # Setup rate limiting
                 rpm_limit = getattr(self.config.api, "nvidia_nim_rate_limit_rpm", 60)
@@ -195,13 +177,11 @@ class AIClient:
         Research Facts: {deep_research}
 
         CRITICAL SCRIPTING FORMULA (Follow exactly):
-        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff. Hook segment intended_duration_seconds <= 3.0.
-        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date.
-        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs.
+        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff.
+        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date. (e.g., "You might think it's [X], but if you look at the data...")
+        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs. Make the viewer feel like they are solving the mystery alongside you.
         4. THE REVEAL (35-45s): Reveal the final answer, referencing the visual evidence.
-        5. THE PERFECT LOOP: The final sentence MUST grammatically flow back into the hook.
-        WORD-COUNT LIMITS (per segment, based on intended_duration_seconds):
-        - 3-5s: max 8 words | 6-8s: max 15 words | 9-12s: max 22 words
+        5. THE PERFECT LOOP: The final sentence MUST grammatically and sonically flow perfectly back into the first word of the hook.
 
         FORBIDDEN PHRASES (DO NOT USE THESE):
         - "Did you know?"
@@ -420,8 +400,6 @@ Comments to analyze:
 Return a JSON object with a single key "comments" containing an array of the 3 most engaging comments.
 Each object in the array should have:
 - comment_id: string
-- engagement_score: number (0-100)
-- toxicity_score: number (0-100)
 - interaction_priority: integer (0-100)
 - suggested_reply: string
 - sentiment: string (positive/negative/neutral)
@@ -709,10 +687,6 @@ Example:
                 if content.strip():
                     parsed_response = json.loads(content)
                     if isinstance(parsed_response, dict):
-                        if not self._validate_script_safety(
-                            parsed_response, self.config
-                        ):
-                            return self._analyze_with_fallback(context)
                         return parsed_response
                     else:
                         self.logger.error(
@@ -726,15 +700,10 @@ Example:
                 )
                 parsed_json = self._extract_json_object(content)
                 if isinstance(parsed_json, dict):
-                    if not self._validate_script_safety(parsed_json, self.config):
-                        return self._analyze_with_fallback(context)
                     return parsed_json
 
             # If JSON parsing fails, create structured response from text
-            parsed_text = self._parse_nim_text_response(content, context)
-            if not self._validate_script_safety(parsed_text, self.config):
-                return self._analyze_with_fallback(context)
-            return parsed_text
+            return self._parse_nim_text_response(content, context)
 
         except Exception as e:
             self.logger.error(f"NVIDIA NIM analysis failed: {e}")
@@ -1237,32 +1206,29 @@ Example:
                 if not text:
                     continue
 
-                try:
-                    b_roll_query = item.get("b_roll_search_query")
-                    expression_cue = item.get("expression_cue")
-                    time_sec = float(item.get("time_seconds", 0.0))
-                    duration = float(item.get("intended_duration_seconds", 4.0))
+                b_roll_query = item.get("b_roll_search_query")
+                expression_cue = item.get("expression_cue")
+                time_sec = float(item.get("time_seconds", 0.0))
+                duration = float(item.get("intended_duration_seconds", 4.0))
 
-                    ns_append(
-                        NarrativeSegment(
-                            text=text,
-                            time_seconds=time_sec,
-                            intended_duration_seconds=duration,
-                            b_roll_search_query=b_roll_query,
-                            expression_cue=expression_cue,
-                        )
+                ns_append(
+                    NarrativeSegment(
+                        text=text,
+                        time_seconds=time_sec,
+                        intended_duration_seconds=duration,
+                        b_roll_search_query=b_roll_query,
+                        expression_cue=expression_cue,
                     )
+                )
 
-                    if b_roll_query:
-                        bm_append(
-                            {
-                                "search_query": b_roll_query,
-                                "timestamp_seconds": time_sec,
-                                "duration": duration,
-                            }
-                        )
-                except (ValueError, TypeError) as e:
-                    self.logger.warning("Skipping malformed segment item: %s", e)
+                if b_roll_query:
+                    bm_append(
+                        {
+                            "search_query": b_roll_query,
+                            "timestamp_seconds": time_sec,
+                            "duration": duration,
+                        }
+                    )
 
             if not narrative_segments:
                 narrative_segments = [
@@ -1324,16 +1290,13 @@ Example:
                 text = str(item.get("text", "")).strip()
                 if not text:
                     continue
-                try:
-                    text_overlays.append(
-                        TextOverlay(
-                            text=text,
-                            timestamp_seconds=float(item.get("timestamp_seconds", 0.0)),
-                            duration=float(item.get("duration", 2.0)),
-                        )
+                text_overlays.append(
+                    TextOverlay(
+                        text=text,
+                        timestamp_seconds=float(item.get("timestamp_seconds", 0.0)),
+                        duration=float(item.get("duration", 2.0)),
                     )
-                except (ValueError, TypeError) as e:
-                    self.logger.warning("Skipping malformed overlay item: %s", e)
+                )
 
             if (
                 hasattr(reddit_content, "__dict__")

@@ -267,27 +267,6 @@ def _ensure_text(
     return str(value), False
 
 
-def _write_research_readme(research_dir: Path) -> None:
-    """Write a README explaining the research folder structure."""
-    readme = research_dir / "README.md"
-    content = """# Research Folder Structure
-
-| Folder | Purpose |
-|--------|---------|
-| `ideas/` | Idea generation output, raw scout data |
-| `reports/` | Gemini deep research report, deep research prompt |
-| `synthesis/` | Synthesis JSON (chosen angle, queries) |
-| `evidence/` | Media search results, evidence index |
-| `scripts/` | Final script JSON |
-| `transcripts/` | Transcripts from downloaded media |
-| `summaries/` | Script context summary |
-| `logs/` | Search audit logs |
-| `media_images/` | Downloaded broll images |
-| `media_videos/` | Reserved for video assets |
-"""
-    readme.write_text(content, encoding="utf-8")
-
-
 def setup_project_workspace(project_name: str) -> Path:
     """Create findings workspace and initialize run state if absent."""
     sanitized_project = _sanitize_project_name(project_name)
@@ -311,7 +290,6 @@ def setup_project_workspace(project_name: str) -> Path:
     for folder in folders:
         (research_dir / folder).mkdir(parents=True, exist_ok=True)
     (project_dir / "raw_media").mkdir(parents=True, exist_ok=True)
-    _write_research_readme(research_dir)
 
     state_path = _state_path(project_dir)
     if not state_path.exists():
@@ -538,10 +516,6 @@ class ExaSearchClient:
 
         logger.debug("Parsed %d Exa search results", len(parsed))
         return parsed
-
-
-# Backward-compatible alias
-HackclubMediaSearchClient = ExaSearchClient
 
 
 def transcribe_media_file(
@@ -779,7 +753,6 @@ __all__ = [
     "DEFAULT_SUMMARY_MODEL",
     "DEFAULT_TRANSCRIBE_MODEL",
     "ExaSearchClient",
-    "HackclubMediaSearchClient",
     "MediaSearchResult",
     "NVIDIA_BASE_URL",
     "PHASE_JSON_CONTRACTS",
