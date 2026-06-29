@@ -625,13 +625,24 @@ class TTSService:
 
     def is_available(self) -> bool:
         """Check if any TTS service is available"""
-        return QWEN_TTS_AVAILABLE
+        if QWEN_TTS_AVAILABLE:
+            return True
+        try:
+            importlib.import_module("pyttsx3")
+            return True
+        except ModuleNotFoundError:
+            return False
 
     def get_available_services(self) -> List[str]:
         """Get list of available TTS services"""
         services = []
         if QWEN_TTS_AVAILABLE:
             services.append("qwen3_tts")
+        try:
+            importlib.import_module("pyttsx3")
+            services.append("pyttsx3")
+        except ModuleNotFoundError:
+            pass
         return services
 
     def _generate_with_pyttsx3(
