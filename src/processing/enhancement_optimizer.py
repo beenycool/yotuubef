@@ -189,30 +189,20 @@ class EnhancementOptimizer:
             # For now, we'll simulate based on typical optimization patterns
 
             correlations = {
-                "sound_effects_volume": {
-                    "engagement_correlation": 0.15,  # Moderate positive correlation
-                    "retention_correlation": 0.08,  # Small positive correlation
-                    "completion_correlation": 0.05,  # Small positive correlation
-                },
-                "visual_effects_intensity": {
-                    "engagement_correlation": 0.22,  # Strong positive correlation
-                    "retention_correlation": -0.05,  # Slight negative (can be distracting)
-                    "completion_correlation": 0.10,
-                },
-                "text_overlay_duration": {
-                    "engagement_correlation": 0.18,
-                    "retention_correlation": 0.12,
-                    "completion_correlation": 0.15,
-                },
-                "speed_effect_factor": {
-                    "engagement_correlation": 0.25,  # Strong correlation with engagement
-                    "retention_correlation": 0.20,
-                    "completion_correlation": 0.18,
-                },
                 "zoom_intensity": {
                     "engagement_correlation": 0.20,
                     "retention_correlation": 0.15,
                     "completion_correlation": 0.12,
+                },
+                "color_grading_strength": {
+                    "engagement_correlation": 0.18,
+                    "retention_correlation": 0.10,
+                    "completion_correlation": 0.08,
+                },
+                "background_music_volume": {
+                    "engagement_correlation": 0.12,
+                    "retention_correlation": 0.22,
+                    "completion_correlation": 0.18,
                 },
             }
 

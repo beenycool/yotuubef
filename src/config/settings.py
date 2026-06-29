@@ -188,13 +188,6 @@ class ContentConfig:
     max_reddit_posts_to_fetch: int = 10
 
     curated_subreddits: List[str] = field(default_factory=list)
-    forbidden_words: List[str] = field(default_factory=list)
-    hard_disallowed: List[str] = field(default_factory=list)
-    demonetization_risk: List[str] = field(default_factory=list)
-    caution: List[str] = field(default_factory=list)
-    unsuitable_content_types: List[str] = field(default_factory=list)
-    monetization_tags: List[str] = field(default_factory=list)
-
     forbidden_words: List[str] = field(
         default_factory=lambda: [
             "fuck",

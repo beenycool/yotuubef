@@ -393,7 +393,7 @@ class ThumbnailGenerator:
 
             for i, timestamp in enumerate(timestamps):
                 # Create modified analysis for this variant
-                variant_analysis = analysis.copy(deep=True)
+                variant_analysis = analysis.model_copy(deep=True)
                 variant_analysis.thumbnail_info.timestamp_seconds = timestamp
 
                 # Modify headline text for variants

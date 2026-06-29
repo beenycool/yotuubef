@@ -70,7 +70,6 @@ from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
-from src.processing.advanced_audio_processor import AdvancedAudioProcessor
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.speed_optimizer import create_speed_optimizer
@@ -2112,7 +2111,6 @@ class VideoProcessor:
         self.downloader = VideoDownloader()
         self.effects = VideoEffects()
         self.text_processor = TextOverlayProcessor()
-        self.audio_processor = AdvancedAudioProcessor()
         self.advanced_enhancer = AdvancedVideoEnhancer()
         self.cta_processor = CTAProcessor()
         self.thumbnail_generator = ThumbnailGenerator()

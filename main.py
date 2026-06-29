@@ -163,12 +163,6 @@ Examples:
         help="Clean up temporary files, results, and logs",
     )
     parser.add_argument(
-        "--keep",
-        type=int,
-        default=5,
-        help="Keep last N project directories when cleaning",
-    )
-    parser.add_argument(
         "--logs",
         action="store_true",
         help="Also clear log files (use with --cleanup)",
@@ -189,9 +183,19 @@ async def main() -> int:
         clear_results()
         if args.logs:
             clear_logs()
-        if args.keep:
-            print(f"Keeping last {args.keep} project directories.", flush=True)
         print("Cleanup complete.", flush=True)
+        return 0
+
+    # Handle dry-run
+    if args.dry_run:
+        print("Dry run: configuration loaded successfully.", flush=True)
+        print(f"Project: {args.project or '(none)'}", flush=True)
+        print(f"Reddit URL: {args.reddit_url or '(none)'}", flush=True)
+        print(f"Resume: {args.resume}", flush=True)
+        print(f"Phase override: {args.phase or '(none)'}", flush=True)
+        print(f"Gemini report: {args.gemini_report or '(none)'}", flush=True)
+        print(f"No upload: {args.no_upload}", flush=True)
+        print(f"No auto research: {args.no_auto_research}", flush=True)
         return 0
 
     # Require project name

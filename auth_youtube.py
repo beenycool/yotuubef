@@ -17,5 +17,7 @@ if __name__ == "__main__":
     if creds:
         logger.info("Authentication successful")
         logger.info("You can now use the YouTube features in your application")
+        raise SystemExit(0)
     else:
         logger.error("Authentication failed")
+        raise SystemExit(1)

@@ -64,8 +64,14 @@ def get_youtube_credentials() -> Credentials | None:
     flow as a last resort.
     """
     load_dotenv()
+    config = get_config()
 
-    token_file = os.getenv("YOUTUBE_TOKEN_FILE", "youtube_token.json")
+    token_file = os.getenv(
+        "YOUTUBE_TOKEN_FILE",
+        str(config.paths.youtube_token_file)
+        if config.paths.youtube_token_file
+        else "youtube_token.json",
+    )
 
     token_json = os.getenv("YOUTUBE_TOKEN_JSON", "").strip()
     if token_json and not os.path.exists(token_file):
@@ -74,11 +80,14 @@ def get_youtube_credentials() -> Credentials | None:
 
     client_secrets_file = os.getenv("GOOGLE_CLIENT_SECRETS_FILE")
 
-    scopes = [
-        "https://www.googleapis.com/auth/youtube.upload",
-        "https://www.googleapis.com/auth/youtube.force-ssl",
-        "https://www.googleapis.com/auth/youtubepartner",
-    ]
+    scopes = list(
+        getattr(config.api, "youtube_scopes", None)
+        or [
+            "https://www.googleapis.com/auth/youtube.upload",
+            "https://www.googleapis.com/auth/youtube.force-ssl",
+            "https://www.googleapis.com/auth/youtubepartner",
+        ]
+    )
 
     creds = None
     if os.path.exists(token_file):

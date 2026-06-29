@@ -316,13 +316,32 @@ def load_run_state(project_dir: Union[str, Path]) -> RunState:
 
 def save_run_state(state: RunState) -> Path:
     import os as _os
+    import tempfile as _tempfile
 
     state.updated_at = datetime.now(UTC).isoformat()
     state_path = _state_path(state.project_dir)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = state_path.with_suffix(".json.tmp")
-    tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
-    _os.replace(str(tmp), str(state_path))  # atomic on POSIX & Windows
+    tmp_path = None
+    try:
+        with _tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=state_path.parent,
+            prefix=f"{state_path.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as tmp_file:
+            tmp_file.write(state.model_dump_json(indent=2))
+            tmp_file.flush()
+            _os.fsync(tmp_file.fileno())
+            tmp_path = Path(tmp_file.name)
+        _os.replace(str(tmp_path), str(state_path))  # atomic on POSIX & Windows
+    finally:
+        if tmp_path and tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
     logger.debug("Saved run state to %s", state_path)
     return state_path
 
@@ -449,35 +468,88 @@ class ExaSearchClient:
         if self.audit_logger:
             self.audit_logger.log_request("POST", url, body, headers)
 
-        start = time.perf_counter()
-        try:
-            async with session.post(url, headers=headers, json=body) as response:
-                resp_body = await response.text()
+        max_retries = 3
+        base_delay = 1.0
+        last_exc = None
+        for attempt in range(max_retries):
+            start = time.perf_counter()
+            try:
+                async with session.post(url, headers=headers, json=body) as response:
+                    resp_body = await response.text()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if self.audit_logger:
+                        self.audit_logger.log_response(
+                            response.status,
+                            resp_body,
+                            duration_ms,
+                            url=url,
+                        )
+                    if response.status >= 400:
+                        if 500 <= response.status < 600 or response.status == 429:
+                            last_exc = Exception(f"HTTP {response.status}")
+                            delay = base_delay * (attempt + 1)
+                            logger.warning(
+                                "Exa search attempt %d/%d failed status=%s, retrying in %.1fs",
+                                attempt + 1,
+                                max_retries,
+                                response.status,
+                                delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        logger.warning(
+                            "Exa search failed status=%s body=%s",
+                            response.status,
+                            resp_body[:300],
+                        )
+                        return []
+                    try:
+                        payload = json.loads(resp_body)
+                        return self._parse_search_results(payload)
+                    except json.JSONDecodeError:
+                        return []
+            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    logger.warning(
+                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        exc,
+                        delay,
+                    )
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if self.audit_logger:
+                        self.audit_logger.log_response(
+                            500, str(exc), duration_ms, url=url
+                        )
+                    await asyncio.sleep(delay)
+                    continue
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
-                    self.audit_logger.log_response(
-                        response.status,
-                        resp_body,
-                        duration_ms,
-                        url=url,
-                    )
-                if response.status >= 400:
+                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
+                logger.error("Exa search request failed: %s", exc)
+                return []
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
                     logger.warning(
-                        "Exa search failed status=%s body=%s",
-                        response.status,
-                        resp_body[:300],
+                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        exc,
+                        delay,
                     )
-                    return []
-                try:
-                    payload = json.loads(resp_body)
-                except json.JSONDecodeError:
-                    return []
-        except Exception as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            if self.audit_logger:
-                self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-            logger.error("Exa search request failed: %s", exc)
-            return []
+                    await asyncio.sleep(delay)
+                    continue
+                duration_ms = (time.perf_counter() - start) * 1000
+                if self.audit_logger:
+                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
+                logger.error("Exa search request failed: %s", exc)
+                return []
+        logger.warning("Exa search failed after %d attempts: %s", max_retries, last_exc)
 
         return self._parse_search_results(payload)
 

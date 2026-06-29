@@ -74,8 +74,10 @@ class RedditPost:
                         "scanned_size": getattr(reddit_video, "scanned_size", None),
                     }
 
-                video_url = reddit_video.get("fallback_url") or reddit_video.get(
-                    "hls_url"
+                video_url = (
+                    reddit_video.get("fallback_url")
+                    or reddit_video.get("hls_url")
+                    or (submission.url if "v.redd.it" in str(submission.url) else None)
                 )
                 duration = reddit_video.get("duration")
                 width = reddit_video.get("width", 0)

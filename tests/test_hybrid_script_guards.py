@@ -91,6 +91,24 @@ def test_hybrid_phase_payload_validation_allows_extra_fields():
     )
 
 
+def test_coerce_hybrid_phase_payload_preserves_extra_fields():
+    payload = {
+        "phase": "SYNTHESIS",
+        "chosen_angle": "Angle",
+        "reasoning": "Reasoning",
+        "image_queries": ["img one"],
+        "video_queries": ["video one"],
+        "evidence_questions": ["What is the primary source?"],
+        "next_phase": "EVIDENCE_GATHERING",
+        "extra_debug": {"model": "qwen"},
+    }
+
+    coerced = EnhancedVideoOrchestrator._coerce_hybrid_phase_payload(
+        PipelinePhase.SYNTHESIS, payload
+    )
+    assert coerced.get("extra_debug") == {"model": "qwen"}
+
+
 def test_research_relevance_guard_filters_generic_text():
     orchestrator = _build_orchestrator_stub()
     report_text = (
