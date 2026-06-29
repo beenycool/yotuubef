@@ -17,11 +17,7 @@ class DeepResearchClient:
 
     def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
-        self.api_key = (
-            os.getenv("HACKCLUB_SEARCH_API_KEY")
-            or os.getenv("HACKCLUB_SEARCH_KEY")
-            or ""
-        )
+        self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY")
         self.base_url = "https://ai.hackclub.com/proxy/v1/exa/search"
         self.audit_logger = audit_logger
         self._session = None
@@ -49,47 +45,107 @@ class DeepResearchClient:
         if self.audit_logger:
             self.audit_logger.log_request("POST", self.base_url, body, headers)
 
-        start = time.perf_counter()
-        try:
-            session = await self._ensure_session()
-            async with session.post(
-                self.base_url,
-                headers=headers,
-                json=body,
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as response:
-                resp_body = await response.text()
+        max_retries = 3
+        base_delay = 1.0
+        last_error = None
+        for attempt in range(max_retries):
+            start = time.perf_counter()
+            try:
+                session = await self._ensure_session()
+                async with session.post(
+                    self.base_url,
+                    headers=headers,
+                    json=body,
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as response:
+                    resp_body = await response.text()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if self.audit_logger:
+                        self.audit_logger.log_response(
+                            response.status,
+                            resp_body,
+                            duration_ms,
+                            url=self.base_url,
+                        )
+                    if response.status == 200:
+                        try:
+                            data = json.loads(resp_body)
+                        except json.JSONDecodeError:
+                            data = {}
+                        return self._compile_report(data)
+                    if 500 <= response.status < 600 or response.status == 429:
+                        last_error = f"HTTP {response.status}"
+                        delay = base_delay * (attempt + 1)
+                        self.logger.warning(
+                            "Exa search attempt %d/%d failed with status %s, retrying in %.1fs",
+                            attempt + 1,
+                            max_retries,
+                            response.status,
+                            delay,
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                    self.logger.warning(
+                        "Exa search failed with status %s", response.status
+                    )
+                    return "Research failed."
+            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
+                last_error = str(e)
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    self.logger.warning(
+                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        e,
+                        delay,
+                    )
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if self.audit_logger:
+                        self.audit_logger.log_response(
+                            500, str(e), duration_ms, url=self.base_url
+                        )
+                    await asyncio.sleep(delay)
+                    continue
+                self.logger.error("Deep research error: %s", e)
+                return "Research error."
+            except Exception as e:
+                last_error = str(e)
+                if attempt < max_retries - 1:
+                    delay = base_delay * (attempt + 1)
+                    self.logger.warning(
+                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
+                        attempt + 1,
+                        max_retries,
+                        e,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
                     self.audit_logger.log_response(
-                        response.status,
-                        resp_body,
-                        duration_ms,
-                        url=self.base_url,
+                        500, str(e), duration_ms, url=self.base_url
                     )
-                if response.status == 200:
-                    try:
-                        data = json.loads(resp_body)
-                    except json.JSONDecodeError:
-                        data = {}
-                    return self._compile_report(data)
-                self.logger.warning("Exa search failed with status %s", response.status)
-                return "Research failed."
-        except Exception as e:
-            duration_ms = (time.perf_counter() - start) * 1000
-            if self.audit_logger:
-                self.audit_logger.log_response(
-                    500, str(e), duration_ms, url=self.base_url
-                )
-            self.logger.error("Deep research error: %s", e)
-            return "Research error."
+                self.logger.error("Deep research error: %s", e)
+                return "Research error."
+        self.logger.warning(
+            "Exa search failed after %d attempts: %s", max_retries, last_error
+        )
+        return "Research failed."
 
     def _compile_report(self, data: dict) -> str:
         compiled_lore = "EXTERNAL FACTS:\n"
         for result in data.get("results", []):
+            if not isinstance(result, dict):
+                continue
+            title = str(result.get("title", "")).strip()
+            url = str(result.get("url", "")).strip()
             text = result.get("text", "").strip()
             if text:
-                compiled_lore += f"- {text}\n"
+                source = f" Source: {url}" if url else ""
+                heading = f"{title}: " if title else ""
+                compiled_lore += f"- {heading}{text}{source}\n"
         return compiled_lore
 
 

@@ -40,33 +40,20 @@ def clear_directory(directory: Path, file_pattern: str = "*"):
     logger.info(f"Deleted {files_deleted} items from '{directory}'.")
 
 
-def clear_temp_files(keep: int = 0):
+def clear_temp_files():
     """Clears all files and subdirectories from the temporary data directory."""
     clear_directory(config.paths.temp_dir)
 
 
-def clear_results(keep: int = 0):
-    """Clears .json files from the results directory, keeping the newest `keep` files."""
+def clear_results():
+    """Clears all .json files from the results directory."""
     results_dir = config.paths.base_dir / "data" / "results"
-    if keep > 0:
-        files = sorted(
-            results_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-        )
-        keep_set = set(files[:keep])
-        for f in files:
-            if f not in keep_set:
-                try:
-                    f.unlink()
-                except Exception as e:
-                    logger.error(f"Failed to delete result file {f}: {e}")
-    else:
-        clear_directory(results_dir, file_pattern="*.json")
+    clear_directory(results_dir, file_pattern="*.json")
 
 
-def clear_logs(keep: int = 0):
+def clear_logs():
     """Clears the main log file."""
-    logs_dir = config.paths.base_dir / "data" / "logs"
-    log_file = logs_dir / "youtube_generator.log"
+    log_file = Path("youtube_generator.log")
     if log_file.exists():
         try:
             with open(log_file, "w") as f:

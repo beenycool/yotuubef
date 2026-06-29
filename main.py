@@ -14,7 +14,6 @@ import logging
 import argparse
 import json
 import sys
-from typing import Optional
 from datetime import datetime
 
 from src.enhanced_orchestrator import EnhancedVideoOrchestrator
@@ -38,10 +37,10 @@ class HybridYouTubeGenerator:
     async def run_hybrid_workflow(
         self,
         project_name: str,
-        reddit_url: Optional[str] = None,
+        reddit_url: str = None,
         resume: bool = False,
-        phase_override: Optional[str] = None,
-        gemini_report_path: Optional[str] = None,
+        phase_override: str = None,
+        gemini_report_path: str = None,
         no_upload: bool = False,
         no_auto_research: bool = False,
     ) -> dict:
@@ -164,12 +163,6 @@ Examples:
         help="Clean up temporary files, results, and logs",
     )
     parser.add_argument(
-        "--keep",
-        type=int,
-        default=5,
-        help="Keep last N project directories when cleaning",
-    )
-    parser.add_argument(
         "--logs",
         action="store_true",
         help="Also clear log files (use with --cleanup)",
@@ -186,14 +179,23 @@ async def main() -> int:
     # Handle cleanup
     if args.cleanup:
         print("Cleaning up...", flush=True)
-        clear_temp_files(keep=args.keep)
-        clear_results(keep=args.keep)
+        clear_temp_files()
+        clear_results()
         if args.logs:
-            clear_logs(keep=args.keep)
-        print(
-            f"Cleanup complete (keeping last {args.keep} project directories).",
-            flush=True,
-        )
+            clear_logs()
+        print("Cleanup complete.", flush=True)
+        return 0
+
+    # Handle dry-run
+    if args.dry_run:
+        print("Dry run: configuration loaded successfully.", flush=True)
+        print(f"Project: {args.project or '(none)'}", flush=True)
+        print(f"Reddit URL: {args.reddit_url or '(none)'}", flush=True)
+        print(f"Resume: {args.resume}", flush=True)
+        print(f"Phase override: {args.phase or '(none)'}", flush=True)
+        print(f"Gemini report: {args.gemini_report or '(none)'}", flush=True)
+        print(f"No upload: {args.no_upload}", flush=True)
+        print(f"No auto research: {args.no_auto_research}", flush=True)
         return 0
 
     # Require project name
@@ -202,19 +204,6 @@ async def main() -> int:
         print("\nError: No project name specified.")
         print("Example: python main.py my_documentary --reddit-url <url>")
         return 1
-
-    # Dry-run mode: validate and report without executing
-    if args.dry_run:
-        print("=== DRY RUN ===")
-        print(f"Project: {args.project}")
-        print(f"Reddit URL: {args.reddit_url or '(not set)'}")
-        print(f"Resume: {args.resume}")
-        print(f"Phase: {args.phase or '(default)'}")
-        print(f"Gemini report: {args.gemini_report or '(not set)'}")
-        print(f"No upload: {args.no_upload}")
-        print(f"No auto research: {args.no_auto_research}")
-        print("=== DRY RUN COMPLETE ===")
-        return 0
 
     generator = HybridYouTubeGenerator()
     exit_code = 0
@@ -231,8 +220,7 @@ async def main() -> int:
         )
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        results_dir = Path(generator.config.paths.base_dir) / "data" / "results"
-        result_file = results_dir / f"results_hybrid_{timestamp}.json"
+        result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
         result_file.parent.mkdir(parents=True, exist_ok=True)
         with open(result_file, "w") as f:
             json.dump(result, f, indent=2)

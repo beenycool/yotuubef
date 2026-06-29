@@ -2042,12 +2042,79 @@ class TextOverlayProcessor:
             return MoviePyCompat.crossfadeout(text_clip, 0.2)  # Fallback animation
 
 
-class AudioProcessor:
-    """Handles audio processing and mixing"""
+class TemporaryFileManager:
+    """Manages temporary files created during video processing"""
+
+    def __init__(self):
+        self.temp_files = []
+        self.temp_dirs = []
+        self.logger = logging.getLogger(__name__)
+
+    def register_file(self, file_path: Path) -> Path:
+        """Register a temporary file for cleanup"""
+        self.temp_files.append(file_path)
+        return file_path
+
+    def register_dir(self, dir_path: Path) -> Path:
+        """Register a temporary directory for cleanup"""
+        self.temp_dirs.append(dir_path)
+        return dir_path
+
+    def create_temp_file(self, suffix: str = "", prefix: str = "video_proc_") -> Path:
+        """Create and register a temporary file"""
+        fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
+        os.close(fd)
+        temp_file = Path(temp_path)
+        return self.register_file(temp_file)
+
+    def create_temp_dir(self, prefix: str = "video_proc_") -> Path:
+        """Create and register a temporary directory"""
+        temp_dir = Path(tempfile.mkdtemp(prefix=prefix))
+        return self.register_dir(temp_dir)
+
+    def cleanup(self):
+        """Clean up all registered temporary files and directories"""
+        # Clean up files
+        for file_path in self.temp_files:
+            try:
+                if file_path.exists():
+                    file_path.unlink()
+                    self.logger.debug(f"Cleaned up temp file: {file_path}")
+            except Exception as e:
+                self.logger.warning(f"Error cleaning up temp file {file_path}: {e}")
+
+        # Clean up directories
+        for dir_path in self.temp_dirs:
+            try:
+                if dir_path.exists():
+                    shutil.rmtree(dir_path)
+                    self.logger.debug(f"Cleaned up temp dir: {dir_path}")
+            except Exception as e:
+                self.logger.warning(f"Error cleaning up temp dir {dir_path}: {e}")
+
+        self.temp_files.clear()
+        self.temp_dirs.clear()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.cleanup()
+
+
+class VideoProcessor:
+    """Main video processing orchestrator with enhanced error handling and modular design"""
 
     def __init__(self):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
+        self.downloader = VideoDownloader()
+        self.effects = VideoEffects()
+        self.text_processor = TextOverlayProcessor()
+        self.advanced_enhancer = AdvancedVideoEnhancer()
+        self.cta_processor = CTAProcessor()
+        self.thumbnail_generator = ThumbnailGenerator()
+        self.speed_optimizer = create_speed_optimizer()
         self.sound_effects_manager = SoundEffectsManager()
         self.tts_service = TTSService()
 
@@ -2474,81 +2541,11 @@ class AudioProcessor:
         """Process TTS narrative segments (deprecated - use _process_narrative_segments_safe)"""
         return self._process_narrative_segments_safe(segments)
 
-
-class TemporaryFileManager:
-    """Manages temporary files created during video processing"""
-
-    def __init__(self):
-        self.temp_files = []
-        self.temp_dirs = []
-        self.logger = logging.getLogger(__name__)
-
-    def register_file(self, file_path: Path) -> Path:
-        """Register a temporary file for cleanup"""
-        self.temp_files.append(file_path)
-        return file_path
-
-    def register_dir(self, dir_path: Path) -> Path:
-        """Register a temporary directory for cleanup"""
-        self.temp_dirs.append(dir_path)
-        return dir_path
-
-    def create_temp_file(self, suffix: str = "", prefix: str = "video_proc_") -> Path:
-        """Create and register a temporary file"""
-        fd, temp_path = tempfile.mkstemp(suffix=suffix, prefix=prefix)
-        os.close(fd)
-        temp_file = Path(temp_path)
-        return self.register_file(temp_file)
-
-    def create_temp_dir(self, prefix: str = "video_proc_") -> Path:
-        """Create and register a temporary directory"""
-        temp_dir = Path(tempfile.mkdtemp(prefix=prefix))
-        return self.register_dir(temp_dir)
-
-    def cleanup(self):
-        """Clean up all registered temporary files and directories"""
-        # Clean up files
-        for file_path in self.temp_files:
-            try:
-                if file_path.exists():
-                    file_path.unlink()
-                    self.logger.debug(f"Cleaned up temp file: {file_path}")
-            except Exception as e:
-                self.logger.warning(f"Error cleaning up temp file {file_path}: {e}")
-
-        # Clean up directories
-        for dir_path in self.temp_dirs:
-            try:
-                if dir_path.exists():
-                    shutil.rmtree(dir_path)
-                    self.logger.debug(f"Cleaned up temp dir: {dir_path}")
-            except Exception as e:
-                self.logger.warning(f"Error cleaning up temp dir {dir_path}: {e}")
-
-        self.temp_files.clear()
-        self.temp_dirs.clear()
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.cleanup()
-
-
-class VideoProcessor:
-    """Main video processing orchestrator with enhanced error handling and modular design"""
-
-    def __init__(self):
-        self.config = get_config()
-        self.logger = logging.getLogger(__name__)
-        self.downloader = VideoDownloader()
-        self.effects = VideoEffects()
-        self.text_processor = TextOverlayProcessor()
-        self.audio_processor = AudioProcessor()
-        self.advanced_enhancer = AdvancedVideoEnhancer()
-        self.cta_processor = CTAProcessor()
-        self.thumbnail_generator = ThumbnailGenerator()
-        self.speed_optimizer = create_speed_optimizer()
+    def process_narrative_segments(
+        self, segments: List[NarrativeSegment]
+    ) -> List[AudioFileClip]:
+        """Process TTS narrative segments"""
+        return self._process_narrative_segments_safe(segments)
 
     def process_video(
         self,
@@ -2759,10 +2756,8 @@ class VideoProcessor:
             narrative_clips = []
             if analysis.narrative_script_segments:
                 try:
-                    narrative_clips = (
-                        self.audio_processor._process_narrative_segments_safe(
-                            analysis.narrative_script_segments
-                        )
+                    narrative_clips = self._process_narrative_segments_safe(
+                        analysis.narrative_script_segments
                     )
                     self.logger.info(f"Generated {len(narrative_clips)} TTS segments")
                     for clip in narrative_clips:
@@ -2776,7 +2771,7 @@ class VideoProcessor:
             music_clip = None
             if background_music_path and background_music_path.exists():
                 try:
-                    music_clip = self.audio_processor._add_background_music_safe(
+                    music_clip = self._add_background_music_safe(
                         background_music_path,
                         video_duration,
                         analysis.narrative_script_segments,
@@ -2802,7 +2797,7 @@ class VideoProcessor:
                             def __init__(self, audio_clip):
                                 self.audio = audio_clip
 
-                        original_audio = self.audio_processor._process_original_audio(
+                        original_audio = self._process_original_audio(
                             MockVideoClip(source_audio)
                         )
                     except Exception as e:
@@ -2837,7 +2832,7 @@ class VideoProcessor:
             # Add sound effects to the composite
             if base_composite and analysis.sound_effects:
                 try:
-                    final_audio = self.audio_processor.add_sound_effects(
+                    final_audio = self.add_sound_effects(
                         base_composite,
                         [effect.dict() for effect in analysis.sound_effects],
                         video_duration,
@@ -3025,12 +3020,17 @@ class VideoProcessor:
                     music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
                     resource_manager.register_clip(music_clip)
 
-                # Apply volume adjustment
+                # Apply volume adjustment (using correct method)
                 background_volume = self.config.audio.background_music_volume
                 try:
                     music_clip = music_clip.with_volume_scaled(background_volume)
                 except Exception as e:
                     self.logger.warning(f"Error applying volume to fallback music: {e}")
+                    # Fallback to trying volumex method
+                    try:
+                        music_clip = music_clip.with_volume_scaled(background_volume)
+                    except Exception as e2:
+                        self.logger.warning(f"Error with volumex fallback: {e2}")
                 resource_manager.register_clip(music_clip)
 
                 self.logger.info(
@@ -3257,7 +3257,7 @@ class VideoProcessor:
         Returns:
             List of generated audio clips
         """
-        return self.audio_processor.process_narrative_segments(segments)
+        return self.process_narrative_segments(segments)
 
     def _cleanup(self):
         """Perform final cleanup operations"""
@@ -3444,7 +3444,7 @@ class VideoProcessor:
         """Process audio with comprehensive error handling"""
         try:
             # Process audio
-            final_audio = self.audio_processor.process_audio(
+            final_audio = self.process_audio(
                 video_clip, analysis.narrative_script_segments, background_music_path
             )
 

@@ -31,39 +31,25 @@ from moviepy import (
 
 from src.config.settings import get_config
 from src.models import (
-    AudioDuckingConfig,
     EmotionType,
     NarrativeSegment,
     PacingType,
     PositionType,
     TextOverlay,
     TextStyle,
-    VideoAnalysis,
-    VideoAnalysisEnhanced,
 )
-from src.integrations.reddit_client import RedditClient
 from src.integrations.search_client import DeepResearchClient, AgenticResearcher
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
-from src.processing.cinematic_editor import CinematicEditor
 from src.processing.advanced_audio_processor import AdvancedAudioProcessor
-from src.processing.enhanced_thumbnail_generator import EnhancedThumbnailGenerator
-from src.processing.enhancement_optimizer import EnhancementOptimizer
-from src.management.channel_manager import ChannelManager
-from src.monitoring.engagement_metrics import EngagementMonitor
 from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.video_processor import VideoProcessor
 from src.processing.background_manager import BackgroundManager
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
-from src.processing.image_search_client import BraveImageClient
-from src.processing.caption_generator import CaptionGenerator
-from src.processing.sound_effects_manager import SoundEffectsManager
 from src.hybrid_documentary_state_machine import (
     ExaSearchClient,
-    HackclubMediaSearchClient,
     PipelinePhase,
     build_state_machine_prompt,
-    estimate_tokens_conservative,
     load_run_state,
     save_finding,
     save_run_state,
@@ -91,368 +77,10 @@ class EnhancedVideoOrchestrator:
         self.youtube_client = YouTubeClient()
         self.video_processor = VideoProcessor()
 
-        # Initialize enhanced components
-        self.cinematic_editor = CinematicEditor()
         self.advanced_audio_processor = AdvancedAudioProcessor()
-        self.enhanced_thumbnail_generator = EnhancedThumbnailGenerator()
-        self.enhancement_optimizer = EnhancementOptimizer()
-        self.channel_manager = ChannelManager()
-        self.engagement_monitor = EngagementMonitor()
-
-        # Enhanced GPU memory management
         self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)
 
-        # Enhanced workflow parameters
-        self.enable_cinematic_editing = True
-        self.enable_advanced_audio = True
-        self.enable_ab_testing = True
-        self.enable_auto_optimization = True
-        self.enable_proactive_management = True
-
         self.logger.info("Enhanced AI-powered video orchestrator initialized")
-
-    async def _ai_studio_fetch_and_analyze(self, reddit_url: str) -> tuple[Any, Any]:
-        # Step 1: Get Reddit post
-        async with RedditClient() as reddit_client:
-            reddit_post = await reddit_client.get_post_by_url(reddit_url)
-
-        if not reddit_post:
-            return None, {"success": False, "error": "Failed to load Reddit post"}
-        if reddit_post.is_video:
-            return None, {
-                "success": False,
-                "error": "Text posts only for this pipeline",
-            }
-
-        # Improvement 1: Multi-Turn Agentic Research
-        self.logger.info("Step 1: Agentic Research (Improvement 1)")
-        researcher = AgenticResearcher()
-        query = f"{reddit_post.title} {reddit_post.subreddit} history"
-        initial_context = f"{reddit_post.title}: {reddit_post.selftext[:500]}"
-
-        research_facts = await researcher.deep_dive(
-            topic=query, initial_context=initial_context, max_turns=2
-        )
-
-        # Step 2: Generate script with Perfect Loop + B-roll queries
-        self.logger.info("Step 2: Script Generation with Perfect Loop (Improvement 2)")
-        reddit_content_dict = {
-            "title": reddit_post.title,
-            "selftext": reddit_post.selftext,
-            "subreddit": reddit_post.subreddit,
-            "score": reddit_post.score,
-            "num_comments": reddit_post.num_comments,
-            "deep_research": research_facts,
-        }
-        analysis = await self.ai_client.analyze_video_content(None, reddit_content_dict)
-        if not analysis:
-            return None, {"success": False, "error": "Script generation failed"}
-
-        return reddit_post, analysis
-
-    async def _ai_studio_generate_audio_and_broll(
-        self, analysis: Any
-    ) -> tuple[list[Any], Any, list[dict[str, Any]] | dict[str, Any]]:
-        # Step 3: Generate TTS audio
-        self.logger.info("Step 3: TTS Generation")
-        tts_results = (
-            self.advanced_audio_processor.tts_service.generate_multiple_segments(
-                analysis.narrative_script_segments
-            )
-        )
-        tts_paths = [
-            item.get("audio_path")
-            for item in tts_results
-            if item.get("success") and item.get("audio_path")
-        ]
-        if not tts_paths:
-            return [], None, {"success": False, "error": "TTS generation failed"}
-
-        # Concatenate TTS segments
-        audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
-        main_audio = concatenate_audioclips(audio_segments)
-
-        # Step 4: Download B-roll images (Improvement 3)
-        self.logger.info("Step 4: B-Roll Image Search (Improvement 3)")
-        broll_queries = []
-        for segment in analysis.narrative_script_segments:
-            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
-                broll_queries.append(segment.b_roll_search_query)
-
-        async with BraveImageClient() as image_client:
-            broll_images = await image_client.get_broll_images(
-                broll_queries, max_per_query=1
-            )
-
-        # Map images to moments
-        broll_moments = []
-        for segment in analysis.narrative_script_segments:
-            if hasattr(segment, "b_roll_search_query") and segment.b_roll_search_query:
-                query = segment.b_roll_search_query
-                if query in broll_images and broll_images[query]:
-                    broll_moments.append(
-                        {
-                            "image_path": str(broll_images[query][0]),
-                            "timestamp_seconds": segment.time_seconds,
-                            "duration": segment.intended_duration_seconds,
-                        }
-                    )
-        return audio_segments, main_audio, broll_moments
-
-    def _ai_studio_apply_visuals(
-        self, video_clip: Any, broll_moments: list[dict[str, Any]], analysis: Any
-    ) -> Any:
-        # Step 6: Apply B-roll images
-        if broll_moments:
-            self.logger.info("Step 6: Applying B-Roll Overlays (Improvement 3)")
-            apply_broll = getattr(self.video_processor, "apply_broll_images", None)
-            if callable(apply_broll):
-                video_clip = apply_broll(video_clip, broll_moments)
-            else:
-                text_apply_broll = getattr(
-                    self.video_processor.text_processor, "apply_broll_images", None
-                )
-                if callable(text_apply_broll):
-                    video_clip = text_apply_broll(video_clip, broll_moments)
-
-        # Step 7: Add text overlays
-        if analysis.text_overlays:
-            video_clip = self.video_processor.text_processor.add_text_overlays(
-                video_clip, analysis.text_overlays
-            )
-        return video_clip
-
-    def _ai_studio_apply_captions(
-        self,
-        video_clip: Any,
-        main_audio: Any,
-        options: dict[str, Any],
-        analysis: Any = None,
-    ) -> tuple[Any, Optional[Path]]:
-        # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
-        combined_audio_path = None
-        if options.get("enable_word_captions", True):
-            self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
-            caption_gen = CaptionGenerator()
-
-            # Try known-text captions first (skips Whisper)
-            if (
-                analysis
-                and hasattr(analysis, "narrative_script_segments")
-                and analysis.narrative_script_segments
-            ):
-                result = caption_gen.generate_captions_from_known_text(
-                    video_clip, analysis.narrative_script_segments
-                )
-                if result is not None:
-                    return result, None
-
-            # Fallback: combine TTS audio and transcribe with Whisper
-            combined_audio_path = self.config.paths.temp_dir / "combined_tts.wav"
-            combined_audio_path.parent.mkdir(parents=True, exist_ok=True)
-            main_audio.write_audiofile(
-                str(combined_audio_path), verbose=False, logger=None
-            )
-
-            video_clip = (
-                caption_gen.generate_word_captions(video_clip, combined_audio_path)
-                or video_clip
-            )
-        return video_clip, combined_audio_path
-
-    def _ai_studio_build_audio(
-        self, main_audio: Any, broll_moments: list[dict[str, Any]], analysis: Any
-    ) -> list[Any]:
-        # Step 9: Add sound effects (Improvement 5)
-        self.logger.info("Step 9: Sound Design (Improvement 5)")
-        sfx_manager = SoundEffectsManager()
-        audio_layers = [main_audio]
-
-        # Add whoosh for each B-roll moment
-        for moment in broll_moments:
-            whoosh_path = sfx_manager.get_whoosh_sound()
-            if whoosh_path:
-                whoosh_clip = (
-                    AudioFileClip(str(whoosh_path))
-                    .with_start(moment["timestamp_seconds"])
-                    .with_volume_scaled(0.4)
-                )
-                audio_layers.append(whoosh_clip)
-
-        # Add boom for hook (increased volume to 0.8 for high-impact 0-3s retention)
-        boom_path = sfx_manager.get_boom_sound()
-        if boom_path and analysis.narrative_script_segments:
-            hook_time = analysis.narrative_script_segments[0].time_seconds
-            boom_clip = (
-                AudioFileClip(str(boom_path))
-                .with_start(hook_time)
-                .with_volume_scaled(0.8)
-            )
-            audio_layers.append(boom_clip)
-        return audio_layers
-
-    def _ai_studio_cleanup_resources(
-        self,
-        audio_segments: list[Any],
-        audio_layers: list[Any],
-        final_audio: Any,
-        main_audio: Any,
-        final_video: Any,
-        combined_audio_path: Optional[Path],
-    ) -> None:
-        resource_groups = [
-            (audio_segments, "audio segment"),
-            ([c for c in audio_layers if c is not main_audio], "audio layer"),
-            ([final_audio], "composite audio"),
-            ([main_audio], "main audio"),
-            ([final_video], "final video"),
-        ]
-
-        for clips, name in resource_groups:
-            for clip in clips:
-                if clip:
-                    try:
-                        clip.close()
-                    except Exception as e:
-                        self.logger.warning("Failed to close %s clip: %s", name, e)
-
-        if combined_audio_path and combined_audio_path.exists():
-            try:
-                combined_audio_path.unlink()
-            except OSError as e:
-                self.logger.warning(
-                    "Failed to remove temp caption audio %s: %s",
-                    combined_audio_path,
-                    e,
-                )
-
-    def _ai_studio_compose_and_render(
-        self,
-        reddit_post: Any,
-        analysis: Any,
-        main_audio: Any,
-        audio_segments: list[Any],
-        broll_moments: list[dict[str, Any]],
-        options: dict[str, Any],
-    ) -> dict[str, Any]:
-        # Step 5: Get background video
-        self.logger.info("Step 5: Background Video")
-        bg_manager = BackgroundManager()
-        video_clip = bg_manager.get_sliced_background(
-            target_duration=main_audio.duration,
-            subreddit=reddit_post.subreddit,
-            text_content=reddit_post.selftext,
-        )
-
-        video_clip = self._ai_studio_apply_visuals(video_clip, broll_moments, analysis)
-        video_clip, combined_audio_path = self._ai_studio_apply_captions(
-            video_clip, main_audio, options, analysis=analysis
-        )
-        audio_layers = self._ai_studio_build_audio(main_audio, broll_moments, analysis)
-
-        # Composite audio
-        final_audio = None
-        final_video = None
-        output_file = (
-            self.config.paths.processed_dir / f"production_studio_{reddit_post.id}.mp4"
-        )
-        try:
-            final_audio = CompositeAudioClip(audio_layers)
-            loopable_audio = EnhancedVideoOrchestrator.make_loopable_audio(final_audio)
-            final_video = MoviePyCompat.with_audio(video_clip, loopable_audio)
-
-            # Step 10: Write output
-            output_file.parent.mkdir(parents=True, exist_ok=True)
-
-            self.logger.info("Step 10: Rendering final video")
-            final_video.write_videofile(
-                str(output_file),
-                fps=30,
-                codec="libx264",
-                audio_codec="aac",
-            )
-        finally:
-            self._ai_studio_cleanup_resources(
-                audio_segments,
-                audio_layers,
-                final_audio,
-                main_audio,
-                final_video,
-                combined_audio_path,
-            )
-
-        self.logger.info("AI Production Studio pipeline complete!")
-
-        return {
-            "success": True,
-            "video_path": str(output_file),
-            "pipeline": "ai_production_studio",
-            "features_used": [
-                feature
-                for feature in [
-                    "agentic_research",
-                    "perfect_loop",
-                    "broll_injection",
-                    "word_captions"
-                    if options.get("enable_word_captions", True)
-                    else None,
-                    "sound_design",
-                ]
-                if feature is not None
-            ],
-            "broll_moments": len(broll_moments),
-            "research_turns": 2,
-        }
-
-    async def process_ai_production_studio(
-        self, reddit_url: str, options: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        """
-        AI Production Studio Pipeline - Uses all 5 Improvements:
-        1. Multi-Turn Agentic Research
-        2. Perfect Loop Retention
-        3. Dynamic B-Roll Injection
-        4. Word-Level Dynamic Captions
-        5. Sound Design Architecture
-        """
-        try:
-            self.logger.info(
-                "Starting AI Production Studio pipeline for: %s", reddit_url
-            )
-            options = options or {}
-
-            reddit_post, analysis_or_err = await self._ai_studio_fetch_and_analyze(
-                reddit_url
-            )
-            if reddit_post is None:
-                return analysis_or_err
-
-            (
-                audio_segments,
-                main_audio,
-                broll_moments_or_err,
-            ) = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
-            if main_audio is None:
-                err = (
-                    broll_moments_or_err
-                    if isinstance(broll_moments_or_err, dict)
-                    else {"success": False, "error": "TTS generation failed"}
-                )
-                return err
-
-            return self._ai_studio_compose_and_render(
-                reddit_post,
-                analysis_or_err,
-                main_audio,
-                audio_segments,
-                broll_moments_or_err,
-                options,
-            )
-
-        except Exception as e:
-            self.logger.error("AI Production Studio failed: %s", e, exc_info=True)
-            self.gpu_manager.clear_gpu_cache()
-            return {"success": False, "error": str(e), "stage": "ai_production_studio"}
 
     async def process_hybrid_documentary_studio(
         self,
@@ -608,6 +236,21 @@ class EnhancedVideoOrchestrator:
             "Idea package generated",
         )
 
+    def _phase_result(self, state, **overrides) -> Dict[str, Any]:
+        base = {
+            "success": False,
+            "paused": True,
+            "status": state.status,
+            "current_phase": state.current_phase.value
+            if hasattr(state.current_phase, "value")
+            else state.current_phase,
+            "project_name": state.project_name,
+            "pipeline": "hybrid_documentary_studio",
+            "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
+        }
+        base.update(overrides)
+        return base
+
     async def _handle_wait_for_gemini_report_phase(
         self, state: Any, gemini_report_path: Optional[str], no_auto_research: bool
     ) -> tuple[Any, Optional[Dict[str, Any]]]:
@@ -625,34 +268,23 @@ class EnhancedVideoOrchestrator:
         if not report_candidate:
             state.status = "paused_waiting_for_gemini_report"
             save_run_state(state)
-            return state, {
-                "success": True,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                "deep_research_prompt_path": state.metadata.get(
+            return state, self._phase_result(
+                state,
+                success=True,
+                deep_research_prompt_path=state.metadata.get(
                     "deep_research_prompt_path"
                 ),
-                "message": "Waiting for Gemini report. Resume with --gemini-report.",
-            }
+                message="Waiting for Gemini report. Resume with --gemini-report.",
+            )
 
         report_file = Path(report_candidate)
         if not report_file.exists() or not report_file.is_file():
             state.status = "paused_waiting_for_gemini_report"
             save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "error": f"Gemini report not found: {report_file}",
-                "status": state.status,
-                "current_phase": PipelinePhase.WAIT_FOR_GEMINI_REPORT.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-            }
+            return state, self._phase_result(
+                state,
+                error=f"Gemini report not found: {report_file}",
+            )
 
         report_text = report_file.read_text(encoding="utf-8", errors="replace")
         copied_report = save_finding(
@@ -867,7 +499,7 @@ class EnhancedVideoOrchestrator:
             flush=True,
         )
         print(
-            f"  python main.py {state.project_name} --resume --phase VIDEO_RENDER",
+            f"  python main.py hybrid {state.project_name} --resume --phase VIDEO_RENDER",
             flush=True,
         )
         return state
@@ -879,65 +511,41 @@ class EnhancedVideoOrchestrator:
         if not final_script_path:
             state.status = "paused_render_failed"
             save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                "error": "Missing final_script_path in state metadata",
-            }
+            return state, self._phase_result(
+                state,
+                error="Missing final_script_path in state metadata",
+            )
 
         script_path = Path(final_script_path)
         if not script_path.exists() or not script_path.is_file():
             state.status = "paused_render_failed"
             save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                "final_script_path": final_script_path,
-                "error": f"Final script not found: {script_path}",
-            }
+            return state, self._phase_result(
+                state,
+                final_script_path=final_script_path,
+                error=f"Final script not found: {script_path}",
+            )
 
         try:
             script_payload = json.loads(script_path.read_text(encoding="utf-8"))
         except Exception as exc:
             state.status = "paused_render_failed"
             save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                "final_script_path": final_script_path,
-                "error": f"Failed to parse final script JSON: {exc}",
-            }
+            return state, self._phase_result(
+                state,
+                final_script_path=final_script_path,
+                error=f"Failed to parse final script JSON: {exc}",
+            )
 
         render_result = await self._render_hybrid_local_video(state, script_payload)
         if not render_result.get("success"):
             state.status = "paused_render_failed"
             save_run_state(state)
-            return state, {
-                "success": False,
-                "paused": True,
-                "status": state.status,
-                "current_phase": PipelinePhase.VIDEO_RENDER.value,
-                "project_name": state.project_name,
-                "pipeline": "hybrid_documentary_studio",
-                "no_upload": bool(state.metadata.get("hybrid_no_upload", False)),
-                "final_script_path": final_script_path,
-                "error": str(render_result.get("error", "Hybrid render failed")),
-            }
+            return state, self._phase_result(
+                state,
+                final_script_path=final_script_path,
+                error=str(render_result.get("error", "Hybrid render failed")),
+            )
 
         final_video_path = str(render_result.get("video_path", "") or "")
         render_manifest_path = str(render_result.get("render_manifest_path", "") or "")
@@ -1055,13 +663,8 @@ class EnhancedVideoOrchestrator:
                 max_tokens=400,
                 response_format={"type": "json_object"},
             )
-            raw_queries = json.loads(resp.choices[0].message.content).get("queries", [])
-            queries = [
-                q
-                for q in raw_queries
-                if isinstance(q, str) and len(q.strip()) > 0 and len(q) <= 200
-            ]
-            if len(queries) >= 3:
+            queries = json.loads(resp.choices[0].message.content).get("queries", [])
+            if queries and len(queries) >= 3:
                 return queries[:8]
         except Exception as exc:
             self.logger.warning("LLM query generation failed, using defaults: %s", exc)
@@ -1403,8 +1006,7 @@ Search results:
             relevant_keywords = keywords
 
         keyword_hits = sum(1 for token in relevant_keywords if token in text)
-        threshold = min(3, len(relevant_keywords))
-        if keyword_hits >= threshold:
+        if keyword_hits >= 3:
             return True
 
         if isinstance(angles, list):
@@ -2127,23 +1729,11 @@ Search results:
                 for query in image_queries:
                     web_hits = await client.search_web(query, count=min(count, 4))
                     results["web"][query] = [hit.__dict__ for hit in web_hits]
-                    for hit in web_hits:
-                        img_url = getattr(hit, "image_url", None) or getattr(
-                            hit, "link", ""
-                        )
-                        if img_url:
-                            results["image"].setdefault(query, []).append(str(img_url))
                 for query in video_queries:
                     web_hits = await client.search_web(query, count=min(count, 4))
                     existing = results["web"].get(query, [])
                     existing.extend([hit.__dict__ for hit in web_hits])
                     results["web"][query] = existing
-                    for hit in web_hits:
-                        vid_url = getattr(hit, "video_url", None) or getattr(
-                            hit, "link", ""
-                        )
-                        if vid_url:
-                            results["video"].setdefault(query, []).append(str(vid_url))
 
         if brave_api_key and (image_queries or video_queries):
             brave_results = await self._run_brave_media_queries(
@@ -2223,72 +1813,28 @@ Search results:
     ) -> List[Dict[str, str]]:
         url = f"https://api.search.brave.com/res/v1/{endpoint.lstrip('/')}"
         params = {"q": query, "count": max(1, min(int(count or 1), 20))}
-        max_attempts = 3
-        base_delay = 1.0
 
-        for attempt in range(max_attempts):
-            try:
-                async with session.get(url, headers=headers, params=params) as response:
-                    if response.status == 429:
-                        retry_after = response.headers.get("Retry-After")
-                        wait = (
-                            float(retry_after)
-                            if retry_after
-                            else base_delay * (2**attempt)
-                        )
-                        self.logger.warning(
-                            "Brave %s rate-limited (429) for query=%s, retrying in %.1fs",
-                            endpoint,
-                            query,
-                            wait,
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-                    if 500 <= response.status < 600:
-                        wait = base_delay * (2**attempt)
-                        self.logger.warning(
-                            "Brave %s server error %s for query=%s, retrying in %.1fs",
-                            endpoint,
-                            response.status,
-                            query,
-                            wait,
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-                    if response.status >= 400:
-                        self.logger.warning(
-                            "Brave %s failed status=%s for query=%s",
-                            endpoint,
-                            response.status,
-                            query,
-                        )
-                        return []
-                    payload = await response.json(content_type=None)
-                    return self._parse_brave_search_results(endpoint, payload)
-            except Exception as exc:
-                if attempt < max_attempts - 1:
-                    wait = base_delay * (2**attempt)
+        try:
+            async with session.get(url, headers=headers, params=params) as response:
+                if response.status >= 400:
                     self.logger.warning(
-                        "Brave %s request failed for query=%s (attempt %d/%d): %s. Retrying in %.1fs",
+                        "Brave %s failed status=%s for query=%s",
                         endpoint,
+                        response.status,
                         query,
-                        attempt + 1,
-                        max_attempts,
-                        exc,
-                        wait,
-                    )
-                    await asyncio.sleep(wait)
-                else:
-                    self.logger.warning(
-                        "Brave %s request failed for query=%s after %d attempts: %s",
-                        endpoint,
-                        query,
-                        max_attempts,
-                        exc,
                     )
                     return []
+                payload = await response.json(content_type=None)
+        except Exception as exc:
+            self.logger.warning(
+                "Brave %s request failed for query=%s: %s",
+                endpoint,
+                query,
+                exc,
+            )
+            return []
 
-        return []
+        return self._parse_brave_search_results(endpoint, payload)
 
     @staticmethod
     def _parse_brave_search_results(
@@ -3374,7 +2920,7 @@ Search results:
 
         created_clips: List[Any] = []
         timeline_clips: List[Any] = []
-        overlays: List[tuple] = []
+        overlays: List[TextOverlay] = []
         timeline_manifest: List[Dict[str, Any]] = []
         tts_jobs: List[Dict[str, Any]] = []
 
@@ -3455,15 +3001,12 @@ Search results:
                 if text_overlay:
                     try:
                         overlays.append(
-                            (
-                                idx,
-                                TextOverlay(
-                                    text=text_overlay[:200],
-                                    timestamp_seconds=0.0,  # will patch after real timing
-                                    duration=max(0.8, min(estimate, 4.0)),
-                                    position=PositionType.CENTER,
-                                    style=TextStyle.HIGHLIGHT,
-                                ),
+                            TextOverlay(
+                                text=text_overlay[:200],
+                                timestamp_seconds=0.0,  # will patch after real timing
+                                duration=max(0.8, min(estimate, 4.0)),
+                                position=PositionType.CENTER,
+                                style=TextStyle.HIGHLIGHT,
                             )
                         )
                     except Exception:
@@ -3498,7 +3041,6 @@ Search results:
                             {
                                 "index": idx,
                                 "segment": tts_segment,
-                                "meta": meta_entry,
                             }
                         )
                     except Exception:
@@ -3517,15 +3059,16 @@ Search results:
                 )
                 for job, tts_result in zip(tts_jobs, tts_results):
                     idx = job["index"]
-                    meta = job.get("meta", {})
                     if not isinstance(tts_result, dict) or not tts_result.get(
                         "success"
                     ):
-                        actual_durations[idx] = max(meta.get("estimate", 2.0), 0.5)
+                        meta = segment_meta[idx]
+                        actual_durations[idx] = max(meta["estimate"], 0.5)
                         continue
                     audio_path = tts_result.get("audio_path")
                     if not audio_path:
-                        actual_durations[idx] = max(meta.get("estimate", 2.0), 0.5)
+                        meta = segment_meta[idx]
+                        actual_durations[idx] = max(meta["estimate"], 0.5)
                         continue
                     try:
                         clip = AudioFileClip(str(audio_path))
@@ -3556,8 +3099,8 @@ Search results:
                 cursor += duration
 
                 # Update overlay timestamp
-                for seg_idx, ov in overlays:
-                    if seg_idx == idx and ov.timestamp_seconds == 0.0:
+                for ov in overlays:
+                    if ov.timestamp_seconds == 0.0 and idx == m["idx"]:
                         ov.timestamp_seconds = start_time
                         break
 
@@ -3622,7 +3165,16 @@ Search results:
                             subreddit="hybrid",
                             text_content=m["narration"],
                         )
-                        segment_clip = background_clip
+                        from moviepy import ColorClip as _ColorClip
+
+                        overlay = _ColorClip(
+                            size=(1080, 1920),
+                            color=(0, 0, 0),
+                            duration=duration,
+                        )
+                        from moviepy import CompositeVideoClip as _CompositeVideoClip
+
+                        segment_clip = _CompositeVideoClip([background_clip, overlay])
                         source_type = "background"
                     except Exception as exc:
                         self.logger.warning(
@@ -3733,7 +3285,7 @@ Search results:
                     rendered_clip = (
                         self.video_processor.text_processor.add_text_overlays(
                             rendered_clip,
-                            [ov for _, ov in overlays],
+                            overlays,
                         )
                     )
                     _register_clip(rendered_clip)
@@ -3817,27 +3369,6 @@ Search results:
         cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", text.strip())
         cleaned = cleaned.strip("-._")
         return cleaned or "asset"
-
-    @staticmethod
-    def _filter_image_assets(assets: List[str]) -> List[str]:
-        image_extensions = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-        return [
-            asset for asset in assets if Path(asset).suffix.lower() in image_extensions
-        ]
-
-    @staticmethod
-    def _is_image_asset_path(asset_path: str) -> bool:
-        return Path(str(asset_path or "")).suffix.lower() in {
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".webp",
-            ".gif",
-            ".bmp",
-        }
-
-    def _load_hybrid_image_metadata(self, state: Any) -> Dict[str, Dict[str, str]]:
-        return self._load_hybrid_media_metadata(state)
 
     def _load_hybrid_media_metadata(self, state: Any) -> Dict[str, Dict[str, str]]:
         metadata: Dict[str, Dict[str, str]] = {}
@@ -3975,21 +3506,6 @@ Search results:
             visual_assets, key=lambda asset: (_score(asset), asset), reverse=True
         )
         return ranked[: max(1, top_k)]
-
-    def _rank_image_candidates_for_segment(
-        self,
-        segment: Dict[str, Any],
-        image_assets: List[str],
-        image_metadata: Dict[str, Dict[str, str]],
-        *,
-        top_k: int,
-    ) -> List[str]:
-        return self._rank_visual_candidates_for_segment(
-            segment,
-            image_assets,
-            image_metadata,
-            top_k=top_k,
-        )
 
     async def _score_hybrid_visual_relevance(
         self,
@@ -4416,7 +3932,14 @@ Search results:
             ]
         )
         body = audio_clip.subclipped(crossfade, duration - crossfade)
-        return concatenate_audioclips([crossfaded_head, body.with_start(crossfade)])
+        result = concatenate_audioclips([crossfaded_head, body.with_start(crossfade)])
+        # Close intermediate clips to prevent memory leaks
+        for clip in (head, tail, crossfaded_head, body):
+            try:
+                clip.close()
+            except Exception:
+                pass
+        return result if result.duration > 0 else audio_clip
 
     @staticmethod
     def _distribute_segment_padding(
@@ -4519,10 +4042,3 @@ Search results:
         except ValueError:
             return default
         return max(minimum, min(maximum, value))
-
-    @staticmethod
-    def _estimate_tokens_or_default(text: str) -> int:
-        try:
-            return estimate_tokens_conservative(text)
-        except Exception:
-            return max(1, int((len(text) / 3.5) + 32))
