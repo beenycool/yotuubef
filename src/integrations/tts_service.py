@@ -254,9 +254,9 @@ class TTSService:
             "The same narrator is speaking. Keep the voice identity identical."
         )
 
-        expression_cue = getattr(segment, "expression_cue", None)
-        if expression_cue and expression_cue.strip():
-            return f"{base_instructions} Deliver this line with this expression: {expression_cue.strip()}."
+        expression_cue = (getattr(segment, "expression_cue", None) or "").strip()
+        if expression_cue:
+            return f"{base_instructions} Deliver this line with this expression: {expression_cue}."
 
         emotion = str(segment.emotion).lower()
         pacing = str(segment.pacing).lower()
@@ -625,13 +625,24 @@ class TTSService:
 
     def is_available(self) -> bool:
         """Check if any TTS service is available"""
-        return QWEN_TTS_AVAILABLE
+        if QWEN_TTS_AVAILABLE:
+            return True
+        try:
+            importlib.import_module("pyttsx3")
+            return True
+        except ModuleNotFoundError:
+            return False
 
     def get_available_services(self) -> List[str]:
         """Get list of available TTS services"""
         services = []
         if QWEN_TTS_AVAILABLE:
             services.append("qwen3_tts")
+        try:
+            importlib.import_module("pyttsx3")
+            services.append("pyttsx3")
+        except ModuleNotFoundError:
+            pass
         return services
 
     def _generate_with_pyttsx3(

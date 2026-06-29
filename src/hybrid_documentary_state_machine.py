@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import ast
-import asyncio
 import json
 import logging
 import os
-import random
 import re
 import time
 from dataclasses import dataclass
@@ -48,7 +46,9 @@ logger = logging.getLogger(__name__)
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
 DEFAULT_SUMMARY_MODEL = os.getenv("NVIDIA_SUMMARY_MODEL", "qwen/qwen2.5-7b-instruct")
-DEFAULT_TRANSCRIBE_MODEL = os.getenv("NVIDIA_TRANSCRIBE_MODEL", "whisper-1")
+DEFAULT_TRANSCRIBE_MODEL = os.getenv(
+    "NVIDIA_TRANSCRIBE_MODEL", "nvidia/parakeet-ctc-1.1b"
+)
 
 LOGO_FILTER_KEYWORDS = frozenset({"logo", "icon", "favicon"})
 
@@ -337,14 +337,12 @@ def load_run_state(project_dir: Union[str, Path]) -> RunState:
 
 
 def save_run_state(state: RunState) -> Path:
-    import os as _os
-
     state.updated_at = datetime.now(UTC).isoformat()
     state_path = _state_path(state.project_dir)
     state_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = state_path.with_suffix(".json.tmp")
     tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
-    _os.replace(str(tmp), str(state_path))  # atomic on POSIX & Windows
+    os.replace(str(tmp), str(state_path))  # atomic on POSIX & Windows
     logger.debug("Saved run state to %s", state_path)
     return state_path
 
@@ -410,12 +408,16 @@ class ExaSearchClient:
         self.timeout_seconds = timeout_seconds
         self.audit_logger = audit_logger
         self._session: Optional[aiohttp.ClientSession] = None
+        self._session_lock = asyncio.Lock()
 
     async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
-            )
+        if self._session is not None and not self._session.closed:
+            return self._session
+        async with self._session_lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
+                )
         return self._session
 
     async def close(self) -> None:
@@ -468,49 +470,34 @@ class ExaSearchClient:
             self.audit_logger.log_request("POST", url, body, headers)
 
         start = time.perf_counter()
-        max_retries = 3
-        for retry in range(max_retries):
-            try:
-                async with session.post(url, headers=headers, json=body) as response:
-                    resp_body = await response.text()
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            response.status,
-                            resp_body,
-                            duration_ms,
-                            url=url,
-                        )
-                    if response.status >= 400:
-                        if response.status in (429,) or 500 <= response.status < 600:
-                            if retry < max_retries - 1:
-                                delay = (2**retry) + random.uniform(0, 0.5)
-                                logger.warning(
-                                    "Exa search transient error %d, retrying in %.1fs (attempt %d/%d)",
-                                    response.status,
-                                    delay,
-                                    retry + 2,
-                                    max_retries,
-                                )
-                                await asyncio.sleep(delay)
-                                continue
-                        logger.warning(
-                            "Exa search failed status=%s body=%s",
-                            response.status,
-                            resp_body[:300],
-                        )
-                        return []
-                    try:
-                        payload = json.loads(resp_body)
-                    except json.JSONDecodeError:
-                        return []
-                    break
-            except Exception as exc:
+        try:
+            async with session.post(url, headers=headers, json=body) as response:
+                resp_body = await response.text()
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
-                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-                logger.error("Exa search request failed: %s", exc)
-                return []
+                    self.audit_logger.log_response(
+                        response.status,
+                        resp_body,
+                        duration_ms,
+                        url=url,
+                    )
+                if response.status >= 400:
+                    logger.warning(
+                        "Exa search failed status=%s body=%s",
+                        response.status,
+                        resp_body[:300],
+                    )
+                    return []
+                try:
+                    payload = json.loads(resp_body)
+                except json.JSONDecodeError:
+                    return []
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
+            logger.error("Exa search request failed: %s", exc)
+            return []
 
         return self._parse_search_results(payload)
 
@@ -536,14 +523,6 @@ class ExaSearchClient:
             title = item.get("title") or ""
             description = item.get("text") or item.get("snippet") or ""
             source = item.get("source") or "unknown"
-
-            if isinstance(thumbnail_url, str):
-                thumb_path = thumbnail_url.split("?", 1)[0].split("#", 1)[0]
-                thumb_name = (
-                    thumb_path.rsplit("/", 1)[-1] if "/" in thumb_path else thumb_path
-                )
-                if any(kw in thumb_name.lower() for kw in LOGO_FILTER_KEYWORDS):
-                    continue
 
             parsed.append(
                 MediaSearchResult(
@@ -700,7 +679,7 @@ def estimate_tokens_conservative(text: str) -> int:
     return max(1, int((len(text) / 3.2) + 32))
 
 
-def summarize_if_needed(
+async def summarize_if_needed(
     context: str,
     max_tokens: int,
     *,
@@ -744,23 +723,27 @@ def summarize_if_needed(
     )
 
     try:
-        client = OpenAI(api_key=api_key or NVIDIA_API_KEY, base_url=base_url)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a careful research summarizer. Preserve exact entity strings "
-                        "for names, dates, URLs, and direct quotes."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.2,
-            max_tokens=max(200, int(max_tokens * 0.6)),
-        )
-        summarized = response.choices[0].message.content or context
+
+        def _do_summarize() -> str:
+            client = OpenAI(api_key=api_key or NVIDIA_API_KEY, base_url=base_url)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a careful research summarizer. Preserve exact entity strings "
+                            "for names, dates, URLs, and direct quotes."
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.2,
+                max_tokens=max(200, int(max_tokens * 0.6)),
+            )
+            return response.choices[0].message.content or context
+
+        summarized = await asyncio.to_thread(_do_summarize)
     except Exception as exc:
         logger.error("Context summarization failed: %s", exc)
         summarized = context

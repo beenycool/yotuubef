@@ -129,7 +129,6 @@ class NarrativeSegment(BaseModel):
     pacing: PacingType = Field(default=PacingType.NORMAL, description="Pacing for TTS")
     expression_cue: Optional[str] = Field(
         default=None,
-        max_length=200,
         description="Expression/delivery cue for TTS, e.g. 'whispered, intense, conspiratorial'",
     )
     b_roll_search_query: Optional[str] = Field(
@@ -142,15 +141,6 @@ class NarrativeSegment(BaseModel):
         if not v.strip():
             raise ValueError("Narrative text cannot be empty")
         return v.strip()
-
-    @field_validator("expression_cue")
-    @classmethod
-    def validate_expression_cue(cls, v):
-        if v is not None:
-            v = v.strip()
-            if not v:
-                return None
-        return v
 
     model_config = ConfigDict(use_enum_values=True)
 

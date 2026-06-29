@@ -1,15 +1,15 @@
 openai>=1.0.0
-aiohttp>=3.9
+aiohttp>=3.9.0
 asyncpraw>=7.7
 moviepy>=2.0
 numpy>=1.24
-opencv-python>=4.9
-pillow>=10.4
+opencv-python>=4.8
+pillow>=10
 psutil>=5.9
 pydantic>=2.0
 pyyaml>=6
-python-dotenv>=1.1
-yt-dlp>=2025.0
+python-dotenv>=1.0
+yt-dlp>=2024.0
 faster-whisper>=1.0
 scipy>=1.10
 librosa>=0.10
@@ -18,8 +18,9 @@ google-api-python-client>=2.88
 google-auth-oauthlib>=1.0
 google-auth-httplib2>=0.1
 aiosqlite>=0.19
-filelock>=3.16
+filelock>=3.13
 
+pyttsx3>=2.90
 # Optional: torch, transformers (uncomment if needed)
 # torch>=2.0.0
 # transformers>=4.30.0

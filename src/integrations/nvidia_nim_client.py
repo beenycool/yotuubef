@@ -8,7 +8,6 @@ import json
 import asyncio
 import random
 import time
-from functools import wraps
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
@@ -71,37 +70,6 @@ class RateLimiter:
                 await asyncio.sleep(0)
 
 
-def with_retry(max_attempts=3, base_delay=1.5, exceptions=(Exception,)):
-    """Decorator: retry async function with exponential backoff."""
-
-    def deco(fn):
-        @wraps(fn)
-        async def wrapper(*args, **kwargs):
-            last_exc = None
-            for attempt in range(max_attempts):
-                try:
-                    return await fn(*args, **kwargs)
-                except exceptions as e:
-                    last_exc = e
-                    if attempt == max_attempts - 1:
-                        raise
-                    delay = base_delay * (attempt + 1)
-                    logging.getLogger(__name__).warning(
-                        "Retry %d/%d for %s after %.1fs: %s",
-                        attempt + 1,
-                        max_attempts,
-                        fn.__name__,
-                        delay,
-                        e,
-                    )
-                    await asyncio.sleep(delay)
-            raise last_exc  # type: ignore
-
-        return wrapper
-
-    return deco
-
-
 class NvidiaNimAIClient:
     """
     NVIDIA NIM AI client for enhanced video analysis and processing tasks
@@ -122,6 +90,11 @@ class NvidiaNimAIClient:
         self._HASHTAG_WORDS_HOWTO = {"how to", "tutorial", "guide"}
         self._HASHTAG_WORDS_REACTION = {"reaction", "responds"}
 
+        self._response_cache: Dict[str, Any] = {}
+        self._max_cache_size = 128
+        self._model_supports_vision: Optional[bool] = None
+        self._check_model_supports_vision()
+
         # Initialize NVIDIA NIM client if available
         if OPENAI_AVAILABLE and hasattr(self.config.api, "nvidia_nim_api_key"):
             api_key = self.config.api.nvidia_nim_api_key
@@ -140,7 +113,7 @@ class NvidiaNimAIClient:
                 self.model = getattr(
                     self.config.api, "nvidia_nim_model", "moonshotai/kimi-k2.6"
                 )
-                self.alt_model = None
+                self.alt_model = getattr(self.config.api, "nvidia_nim_alt_model", None)
                 self.nim_available = True
 
                 # Setup rate limiting
@@ -150,7 +123,8 @@ class NvidiaNimAIClient:
                 self.nim_available = False
                 self.client = None
                 self.logger.warning(
-                    "NVIDIA NIM API key not configured - some AI features will be limited"
+                    "NVIDIA_NIM_API_KEY not set. "
+                    "Get one from https://build.nvidia.com/ and set it in .env"
                 )
         else:
             self.nim_available = False
@@ -220,6 +194,42 @@ class NvidiaNimAIClient:
         Interaction Priority: [1-10]
         Comment Type: [question/praise/criticism/spam/other]
         """
+
+    def _check_model_supports_vision(self) -> bool:
+        if self._model_supports_vision is not None:
+            return self._model_supports_vision
+        model_lower = (self.model or "").lower()
+        self._model_supports_vision = any(
+            kw in model_lower
+            for kw in ("kimi", "llava", "vision", "gemini", "claude-3", "gpt-4v")
+        )
+        return self._model_supports_vision
+
+    @staticmethod
+    def _validate_script_safety(script: Any, config: Any) -> bool:
+        content_config = getattr(config, "content", None) or getattr(
+            config, "hard_disallowed", None
+        )
+        if content_config is None:
+            return True
+        hard_disallowed = getattr(content_config, "hard_disallowed", [])
+        if not hard_disallowed:
+            return True
+        text = ""
+        if isinstance(script, dict):
+            text = " ".join(str(v) for v in script.values())
+        elif isinstance(script, str):
+            text = script
+        else:
+            text = str(script)
+        lower = text.lower()
+        for word in hard_disallowed:
+            if word.lower() in lower:
+                logging.getLogger(__name__).warning(
+                    "Script contains disallowed word: %s", word
+                )
+                return False
+        return True
 
     @staticmethod
     def _get_content_field(content: Any, field: str, default: Any = "") -> Any:
@@ -650,12 +660,16 @@ Video Context: {json.dumps(video_context)}
 Comments to analyze:
 {json.dumps(comments, indent=2)}
 
-Return a JSON array of the top 3 most engaging comments. Each object in the array should have:
+Return a JSON object with a single key "comments" containing an array of the 3 most engaging comments.
+Each object in the array should have:
 - comment_id: string
 - interaction_priority: integer (0-100)
 - suggested_reply: string
 - sentiment: string (positive/negative/neutral)
 - category: string (question/feedback/praise/complaint)
+
+Example:
+{{"comments": [{{"comment_id": "abc123", "interaction_priority": 85, ...}}]}}
 """
             response = await self._chat_completion_with_fallback(
                 messages=[{"role": "user", "content": prompt}],
@@ -687,6 +701,26 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
         return []
 
+    def _make_cache_key(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        model: str,
+        response_format: Optional[Dict[str, str]] = None,
+    ) -> str:
+        import hashlib
+
+        text = json.dumps(
+            {
+                "messages": messages,
+                "temperature": temperature,
+                "model": model,
+                "response_format": response_format,
+            },
+            sort_keys=True,
+        )
+        return hashlib.md5(text.encode()).hexdigest()
+
     async def _chat_completion_with_fallback(
         self,
         messages: List[Dict[str, str]],
@@ -699,6 +733,18 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             raise RuntimeError("NVIDIA NIM client is not configured")
 
         models_to_try = [self.model]
+        if self.alt_model:
+            models_to_try.append(self.alt_model)
+
+        # Check cache
+        for model_name in models_to_try:
+            cache_key = self._make_cache_key(
+                messages, temperature, model_name, response_format
+            )
+            cached = self._response_cache.get(cache_key)
+            if cached is not None:
+                self.logger.debug("NVIDIA NIM cache hit for model %s", model_name)
+                return cached
 
         max_retries = 6
         base_delay = 1.0
@@ -717,16 +763,44 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                         request_kwargs["response_format"] = response_format
 
                     response = await self.client.chat.completions.create(
-                        timeout=120.0, **request_kwargs
+                        **request_kwargs
                     )
                     if model_name != self.model:
                         self.logger.warning(
                             "NVIDIA NIM request succeeded with fallback model: %s",
                             model_name,
                         )
+                    # Cache response
+                    cache_key = self._make_cache_key(
+                        messages, temperature, model_name, response_format
+                    )
+                    if len(self._response_cache) >= self._max_cache_size:
+                        self._response_cache.clear()
+                    self._response_cache[cache_key] = response
                     return response
                 except Exception as exc:
                     last_error = exc
+                    error_str = str(exc).lower()
+                    # Graceful response_format degradation
+                    if (
+                        response_format
+                        and attempt == 0
+                        and ("response_format" in error_str or "json" in error_str)
+                    ):
+                        self.logger.warning(
+                            "Model %s does not support response_format, retrying without it",
+                            model_name,
+                        )
+                        response_format = None
+                        request_kwargs.pop("response_format", None)
+                        try:
+                            response = await self.client.chat.completions.create(
+                                **request_kwargs
+                            )
+                            return response
+                        except Exception:
+                            pass
+
                     if attempt < max_retries - 1 and self._is_retryable_error(exc):
                         delay = min(
                             base_delay * (2**attempt), max_delay
@@ -837,6 +911,12 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
     ) -> VideoAnalysisEnhanced:
         """Convert NVIDIA NIM analysis result to VideoAnalysisEnhanced model"""
         try:
+            if not self._validate_script_safety(analysis_result, self.config):
+                self.logger.warning(
+                    "Script safety validation failed, falling back to minimal analysis"
+                )
+                return self._create_minimal_analysis(reddit_content)
+
             raw_narrative_segments = analysis_result.get(
                 "narrative_script_segments", []
             )
