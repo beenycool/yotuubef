@@ -16,7 +16,7 @@ from src.config.settings import get_config
 from src.models import CommentEngagement, ThumbnailVariant, PerformanceMetrics
 from src.integrations.youtube_client import YouTubeClient
 from src.integrations.ai_client import AIClient
-from src.processing.enhanced_thumbnail_generator import EnhancedThumbnailGenerator
+from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.monitoring.engagement_metrics import EngagementMonitor
 from src.database.db_manager import get_db_manager, DatabaseManager
 
@@ -65,7 +65,7 @@ class ChannelManager:
         # Initialize services
         self.youtube_client = YouTubeClient()
         self.ai_client = AIClient()
-        self.thumbnail_generator = EnhancedThumbnailGenerator()
+        self.thumbnail_generator = ThumbnailGenerator()
         self.engagement_monitor = EngagementMonitor()
 
         # Management parameters

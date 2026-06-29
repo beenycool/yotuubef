@@ -187,47 +187,13 @@ class ContentConfig:
 
     max_reddit_posts_to_fetch: int = 10
 
-    curated_subreddits: List[str] = field(
-        default_factory=lambda: [
-            "oddlysatisfying",
-            "nextfuckinglevel",
-            "BeAmazed",
-            "woahdude",
-            "MadeMeSmile",
-            "Eyebleach",
-            "interestingasfuck",
-            "Damnthatsinteresting",
-            "AnimalsBeingBros",
-            "HumansBeingBros",
-            "wholesomememes",
-            "ContagiousLaughter",
-            "foodporn",
-            "CookingVideos",
-            "ArtisanVideos",
-            "educationalgifs",
-            "DIY",
-            "gardening",
-            "science",
-            "space",
-            "NatureIsCool",
-            "aww",
-            "AnimalsBeingDerps",
-            "rarepuppers",
-            "LifeProTips",
-            "GetMotivated",
-            "toptalent",
-            "BetterEveryLoop",
-            "childrenfallingover",
-            "instantregret",
-            "wholesomegifs",
-            "Unexpected",
-            "nevertellmetheodds",
-            "whatcouldgoright",
-            "holdmymilk",
-            "maybemaybemaybe",
-            "mildlyinteresting",
-        ]
-    )
+    curated_subreddits: List[str] = field(default_factory=list)
+    forbidden_words: List[str] = field(default_factory=list)
+    hard_disallowed: List[str] = field(default_factory=list)
+    demonetization_risk: List[str] = field(default_factory=list)
+    caution: List[str] = field(default_factory=list)
+    unsuitable_content_types: List[str] = field(default_factory=list)
+    monetization_tags: List[str] = field(default_factory=list)
 
     forbidden_words: List[str] = field(
         default_factory=lambda: [
@@ -929,44 +895,14 @@ def init_config(config_file: Optional[Union[str, Path]] = None) -> ConfigManager
 
 
 def setup_logging(level: str = "INFO") -> None:
-    """Set up logging configuration with Unicode support"""
-    import sys
-    import codecs
-
-    # Create handlers with proper encoding
+    """Set up logging configuration"""
     console_handler = logging.StreamHandler()
-
-    # For Windows, wrap stdout to handle Unicode properly
-    if sys.platform.startswith("win"):
-        # Ensure console can handle UTF-8
-        if hasattr(console_handler.stream, "reconfigure"):
-            try:
-                console_handler.stream.reconfigure(encoding="utf-8", errors="replace")
-            except Exception:
-                # If reconfigure fails, use a wrapper
-                console_handler.stream = codecs.getwriter("utf-8")(
-                    console_handler.stream.buffer, errors="replace"
-                )
-        else:
-            # Fallback for older Python versions
-            console_handler.stream = codecs.getwriter("utf-8")(
-                console_handler.stream.buffer
-                if hasattr(console_handler.stream, "buffer")
-                else console_handler.stream,
-                errors="replace",
-            )
-
-    # File handler with UTF-8 encoding
     file_handler = logging.FileHandler("youtube_generator.log", encoding="utf-8")
-
-    # Set format for both handlers
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     console_handler.setFormatter(formatter)
     file_handler.setFormatter(formatter)
-
-    # Configure root logger
     logging.basicConfig(
         level=getattr(logging, level.upper()), handlers=[console_handler, file_handler]
     )

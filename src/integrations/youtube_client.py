@@ -11,19 +11,114 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import os
 import json
+import tempfile
+from dotenv import load_dotenv
 
 try:
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     from google.auth.transport.requests import Request
     from google.oauth2.credentials import Credentials
-    # from google_auth_oauthlib.flow import InstalledAppFlow
+    from google_auth_oauthlib.flow import InstalledAppFlow
 
     GOOGLE_API_AVAILABLE = True
 except ImportError:
     GOOGLE_API_AVAILABLE = False
 
 from src.config.settings import get_config
+
+logger = logging.getLogger(__name__)
+
+
+def _write_token_file_secure(token_file: str, token_payload: str) -> None:
+    """Write OAuth token atomically with owner-only permissions."""
+    token_dir = os.path.dirname(token_file) or "."
+    os.makedirs(token_dir, exist_ok=True)
+
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=token_dir, delete=False
+        ) as temp_file:
+            temp_file.write(token_payload)
+            temp_file.flush()
+            os.fsync(temp_file.fileno())
+            temp_path = temp_file.name
+
+        os.chmod(temp_path, 0o600)
+        os.replace(temp_path, token_file)
+        os.chmod(token_file, 0o600)
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except OSError:
+                pass
+
+
+def get_youtube_credentials() -> Credentials | None:
+    """Run full OAuth flow, returning Credentials or None.
+
+    Loads .env, materialises YOUTUBE_TOKEN_JSON if set, checks the token
+    file, refreshes expired credentials, and starts the browser-based OAuth
+    flow as a last resort.
+    """
+    load_dotenv()
+
+    token_file = os.getenv("YOUTUBE_TOKEN_FILE", "youtube_token.json")
+
+    token_json = os.getenv("YOUTUBE_TOKEN_JSON", "").strip()
+    if token_json and not os.path.exists(token_file):
+        _write_token_file_secure(token_file, token_json)
+        logger.info("Materialized YOUTUBE_TOKEN_JSON env var to %s", token_file)
+
+    client_secrets_file = os.getenv("GOOGLE_CLIENT_SECRETS_FILE")
+
+    scopes = [
+        "https://www.googleapis.com/auth/youtube.upload",
+        "https://www.googleapis.com/auth/youtube.force-ssl",
+        "https://www.googleapis.com/auth/youtubepartner",
+    ]
+
+    creds = None
+    if os.path.exists(token_file):
+        try:
+            creds = Credentials.from_authorized_user_file(token_file, scopes)
+            logger.info("Loaded existing credentials from %s", token_file)
+        except Exception as e:
+            logger.warning("Failed to parse token file %s: %s", token_file, e)
+            creds = None
+
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            try:
+                logger.info("Refreshing expired credentials")
+                creds.refresh(Request())
+            except Exception as e:
+                logger.warning("Credential refresh failed, re-running auth flow: %s", e)
+                creds = None
+
+        if not creds or not creds.valid:
+            logger.info(
+                "No valid credentials found. Starting new auth flow using %s",
+                client_secrets_file,
+            )
+            if not client_secrets_file or not os.path.exists(client_secrets_file):
+                logger.error("Client secrets file '%s' not found.", client_secrets_file)
+                logger.error(
+                    "Please ensure GOOGLE_CLIENT_SECRETS_FILE is set correctly in .env"
+                )
+                return None
+
+            flow = InstalledAppFlow.from_client_secrets_file(
+                client_secrets_file, scopes
+            )
+            creds = flow.run_local_server(port=0)
+
+        _write_token_file_secure(token_file, creds.to_json())
+        logger.info("Credentials saved to %s", token_file)
+
+    return creds
 
 
 class YouTubeClient:
@@ -79,6 +174,12 @@ class YouTubeClient:
     def _get_credentials(self):
         """Get YouTube API credentials from environment variable or file"""
         try:
+            # Primary path: centralized OAuth flow
+            centralized = get_youtube_credentials()
+            if centralized is not None:
+                return centralized
+
+            # Fallback: existing env-var-based logic
             # First try YOUTUBE_TOKEN_JSON environment variable
             youtube_token_env = os.getenv("YOUTUBE_TOKEN_JSON")
             if youtube_token_env:
@@ -713,64 +814,6 @@ class YouTubeClient:
             self.logger.error(f"Failed to reply to comment {comment_id}: {e}")
             return False
 
-    async def heart_comment(self, comment_id: str) -> bool:
-        """
-        Heart/like a comment (note: this requires the comment to be on your video)
-
-        Args:
-            comment_id: YouTube comment ID
-
-        Returns:
-            True if successful
-        """
-        try:
-            await self._ensure_services_initialized()
-            if not self.youtube_service:
-                return False
-
-            # Note: The YouTube API doesn't have a direct "heart" endpoint
-            # This would need to be implemented through comment moderation
-            # For now, we'll log the intended action
-
-            self.logger.warning(
-                "heart_comment is not implemented via YouTube API for comment_id=%s",
-                comment_id,
-            )
-            return False
-
-        except Exception as e:
-            self.logger.error(f"Failed to heart comment {comment_id}: {e}")
-            return False
-
-    async def pin_comment(self, comment_id: str) -> bool:
-        """
-        Pin a comment (note: limited API support)
-
-        Args:
-            comment_id: YouTube comment ID
-
-        Returns:
-            True if successful
-        """
-        try:
-            await self._ensure_services_initialized()
-            if not self.youtube_service:
-                return False
-
-            # Note: Pinning comments through API has limited support
-            # This would typically need to be done through YouTube Studio
-            # For now, we'll log the intended action
-
-            self.logger.warning(
-                "pin_comment is not implemented via YouTube API for comment_id=%s",
-                comment_id,
-            )
-            return False
-
-        except Exception as e:
-            self.logger.error(f"Failed to pin comment {comment_id}: {e}")
-            return False
-
     async def _execute_request_async(self, request):
         """Execute API request asynchronously"""
         try:
@@ -781,11 +824,3 @@ class YouTubeClient:
         except Exception as e:
             self.logger.error(f"Google API request failed: {e}")
             return None
-
-    def get_client_status(self) -> Dict[str, Any]:
-        """Get the current status of the YouTube client"""
-        return {
-            "services_initialized": self._services_initialized,
-            "youtube_service": bool(self.youtube_service),
-            "analytics_service": bool(self.analytics_service),
-        }
