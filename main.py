@@ -54,6 +54,32 @@ class EnhancedYouTubeGenerator:
 
         self.logger.info("Enhanced YouTube Generator initialized")
 
+    @staticmethod
+    def preflight_checks(mode: str = "standard") -> list[str]:
+        """Validate environment and resources before starting a run. Returns list of issues."""
+        issues = []
+        if not os.getenv("NVIDIA_NIM_API_KEY") and not os.getenv("NVIDIA_API_KEY"):
+            issues.append("NVIDIA_NIM_API_KEY missing — AI features will fail")
+        if mode in ("hybrid", "documentary"):
+            if not os.getenv("HACKCLUB_SEARCH_API_KEY") and not os.getenv(
+                "BRAVE_SEARCH_API_KEY"
+            ):
+                issues.append(
+                    "No search API key set (HACKCLUB_SEARCH_API_KEY or BRAVE_SEARCH_API_KEY)"
+                )
+            bg_folder = os.getenv("BACKGROUND_FOLDER", "music")
+            bg_path = Path(bg_folder)
+            if not bg_path.exists() or not list(bg_path.glob("*.mp4")):
+                issues.append(f"No background .mp4 files found in {bg_folder}")
+        from dotenv import load_dotenv
+
+        load_dotenv()
+        reddit_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
+        reddit_secret = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
+        if not reddit_id or not reddit_secret:
+            issues.append("REDDIT_CLIENT_ID or REDDIT_CLIENT_SECRET not set")
+        return issues
+
     async def __aenter__(self):
         """Async context manager entry"""
         return self
@@ -280,7 +306,9 @@ class EnhancedYouTubeGenerator:
             scored_posts.append((score, post))
             self.logger.debug(f"Story Score {score}/100: {post.title[:40]}...")
 
-        scored_posts.sort(key=lambda x: x[0], reverse=True)
+        scored_posts.sort(
+            key=lambda x: (x[0], x[1].score, x[1].num_comments), reverse=True
+        )
         best_posts = [post for score, post in scored_posts[:max_videos]]
 
         self.logger.info(
@@ -772,6 +800,11 @@ Examples:
         action="store_true",
         help="Skip auto Gemini Deep Research; pause at WAIT_FOR_GEMINI_REPORT for manual report",
     )
+    hybrid_parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate configuration and print what would run without executing",
+    )
 
     # Proactive management
     manage_parser = subparsers.add_parser(
@@ -796,6 +829,9 @@ Examples:
     )
     cleanup_parser.add_argument(
         "--all", action="store_true", help="Clear all data (temp, results, logs)"
+    )
+    cleanup_parser.add_argument(
+        "--keep", type=int, default=5, help="Keep last N project directories"
     )
 
     return parser
@@ -900,6 +936,30 @@ async def main() -> int:
                 exit_code = 1
 
         elif args.command == "hybrid":
+            if args.dry_run:
+                from src.hybrid_documentary_state_machine import (
+                    setup_project_workspace,
+                    load_run_state,
+                )
+
+                project_dir = setup_project_workspace(args.project)
+                state = load_run_state(project_dir)
+                print(
+                    json.dumps(
+                        {
+                            "dry_run": True,
+                            "project": args.project,
+                            "phase": state.current_phase
+                            if hasattr(state, "current_phase")
+                            else None,
+                            "status": state.status
+                            if hasattr(state, "status")
+                            else None,
+                        },
+                        indent=2,
+                    )
+                )
+                return 0
             result = await generator.process_hybrid_workflow(
                 project_name=args.project,
                 reddit_url=args.reddit_url,
@@ -948,6 +1008,7 @@ async def main() -> int:
                 clear_logs()
             if args.all:
                 pass
+            print(f"Keeping last {args.keep} project directories.")
             print("✅ Cleanup process finished.")
     except KeyboardInterrupt:
         print("\n⏹️ Operation interrupted by user")

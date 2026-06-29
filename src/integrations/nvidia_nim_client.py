@@ -8,6 +8,7 @@ import json
 import asyncio
 import random
 import time
+from functools import wraps
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
@@ -70,6 +71,37 @@ class RateLimiter:
                 await asyncio.sleep(0)
 
 
+def with_retry(max_attempts=3, base_delay=1.5, exceptions=(Exception,)):
+    """Decorator: retry async function with exponential backoff."""
+
+    def deco(fn):
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            last_exc = None
+            for attempt in range(max_attempts):
+                try:
+                    return await fn(*args, **kwargs)
+                except exceptions as e:
+                    last_exc = e
+                    if attempt == max_attempts - 1:
+                        raise
+                    delay = base_delay * (attempt + 1)
+                    logging.getLogger(__name__).warning(
+                        "Retry %d/%d for %s after %.1fs: %s",
+                        attempt + 1,
+                        max_attempts,
+                        fn.__name__,
+                        delay,
+                        e,
+                    )
+                    await asyncio.sleep(delay)
+            raise last_exc  # type: ignore
+
+        return wrapper
+
+    return deco
+
+
 class NvidiaNimAIClient:
     """
     NVIDIA NIM AI client for enhanced video analysis and processing tasks
@@ -103,13 +135,12 @@ class NvidiaNimAIClient:
                 self.client = AsyncOpenAI(
                     api_key=api_key,
                     base_url=base_url,
+                    timeout=120.0,
                 )
                 self.model = getattr(
-                    self.config.api, "nvidia_nim_model", "qwen/qwen3.5-397b-a17b"
+                    self.config.api, "nvidia_nim_model", "moonshotai/kimi-k2.6"
                 )
-                self.alt_model = getattr(
-                    self.config.api, "nvidia_nim_alt_model", "qwen/qwen3-235b-a22b"
-                )
+                self.alt_model = None
                 self.nim_available = True
 
                 # Setup rate limiting
@@ -161,7 +192,8 @@ class NvidiaNimAIClient:
                     "text": "Your hook here",
                     "time_seconds": 0.0,
                     "intended_duration_seconds": 3.0,
-                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')"
+                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')",
+                    "expression_cue": "delivery direction, e.g. 'whispered, intense' or 'sharp, clinical'"
                 }}
             ],
             "text_overlays":[
@@ -655,6 +687,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
         return []
 
+    @with_retry()
     async def _chat_completion_with_fallback(
         self,
         messages: List[Dict[str, str]],
@@ -667,12 +700,10 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             raise RuntimeError("NVIDIA NIM client is not configured")
 
         models_to_try = [self.model]
-        if self.alt_model and self.alt_model != self.model:
-            models_to_try.append(self.alt_model)
 
-        max_retries = 4
-        base_delay = 0.5
-        max_delay = 8.0
+        max_retries = 6
+        base_delay = 1.0
+        max_delay = 30.0
         last_error = None
         for model_name in models_to_try:
             for attempt in range(max_retries):
@@ -687,7 +718,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                         request_kwargs["response_format"] = response_format
 
                     response = await self.client.chat.completions.create(
-                        **request_kwargs
+                        timeout=120.0, **request_kwargs
                     )
                     if model_name != self.model:
                         self.logger.warning(
@@ -824,6 +855,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                     continue
 
                 b_roll_query = item.get("b_roll_search_query")
+                expression_cue = item.get("expression_cue")
                 time_sec = float(item.get("time_seconds", 0.0))
                 duration = float(item.get("intended_duration_seconds", 4.0))
 
@@ -833,6 +865,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                         time_seconds=time_sec,
                         intended_duration_seconds=duration,
                         b_roll_search_query=b_roll_query,
+                        expression_cue=expression_cue,
                     )
                 )
 

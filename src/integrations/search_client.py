@@ -13,12 +13,12 @@ if TYPE_CHECKING:
 
 
 class DeepResearchClient:
+    """Exa-based deep research client via Hack Club AI proxy."""
+
     def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
-        self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY") or os.getenv(
-            "BRAVE_SEARCH_API_KEY"
-        )
-        self.base_url = "https://search.hackclub.com/res/v1/web/search"
+        self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY")
+        self.base_url = "https://ai.hackclub.com/proxy/v1/exa/search"
         self.audit_logger = audit_logger
         self._session = None
 
@@ -37,41 +37,39 @@ class DeepResearchClient:
             return "No external research available."
 
         headers = {
-            "Accept": "application/json",
             "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
         }
-        params = {"q": query, "count": 3}
+        body = {"query": query, "numResults": 3}
 
         if self.audit_logger:
-            self.audit_logger.log_request("GET", self.base_url, params, headers)
+            self.audit_logger.log_request("POST", self.base_url, body, headers)
 
         start = time.perf_counter()
         try:
             session = await self._ensure_session()
-            async with session.get(
+            async with session.post(
                 self.base_url,
                 headers=headers,
-                params=params,
+                json=body,
                 timeout=aiohttp.ClientTimeout(total=20),
             ) as response:
-                body = await response.text()
+                resp_body = await response.text()
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
                     self.audit_logger.log_response(
                         response.status,
-                        body,
+                        resp_body,
                         duration_ms,
                         url=self.base_url,
                     )
                 if response.status == 200:
                     try:
-                        data = json.loads(body)
+                        data = json.loads(resp_body)
                     except json.JSONDecodeError:
                         data = {}
                     return self._compile_report(data)
-                self.logger.warning(
-                    "Brave search failed with status %s", response.status
-                )
+                self.logger.warning("Exa search failed with status %s", response.status)
                 return "Research failed."
         except Exception as e:
             duration_ms = (time.perf_counter() - start) * 1000
@@ -84,11 +82,10 @@ class DeepResearchClient:
 
     def _compile_report(self, data: dict) -> str:
         compiled_lore = "EXTERNAL FACTS:\n"
-        if "web" in data and "results" in data["web"]:
-            for result in data["web"]["results"]:
-                description = result.get("description", "").strip()
-                if description:
-                    compiled_lore += f"- {description}\n"
+        for result in data.get("results", []):
+            text = result.get("text", "").strip()
+            if text:
+                compiled_lore += f"- {text}\n"
         return compiled_lore
 
 
@@ -231,13 +228,13 @@ class AgenticResearcher:
         if turn == 0:
             return [
                 normalized_topic,
-                f"{normalized_topic} forum archive screenshot", # Added to find UI/forum proof
+                f"{normalized_topic} forum archive screenshot",  # Added to find UI/forum proof
                 f"{normalized_topic} controversy timeline",
             ]
 
         variants = [
             f"{normalized_topic} primary sources evidence",
-            f"{normalized_topic} original post screenshot", # Forces image results of the actual post
+            f"{normalized_topic} original post screenshot",  # Forces image results of the actual post
             f"{normalized_topic} fact check",
         ]
 

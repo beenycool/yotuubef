@@ -124,7 +124,8 @@ class GeminiAIClient:
                     "text": "Your hook here",
                     "time_seconds": 0.0,
                     "intended_duration_seconds": 3.0,
-                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')"
+                    "b_roll_search_query": "specific image query for evidence (e.g., 'Touch Arcade forum archive 2013')",
+                    "expression_cue": "delivery direction, e.g. 'whispered, intense' or 'sharp, clinical'"
                 }}
             ],
             "text_overlays":[
@@ -688,6 +689,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
             text = str(item.get("text", "")).strip()
             if not text:
                 continue
+            expression_cue = item.get("expression_cue")
             narrative_segments.append(
                 NarrativeSegment(
                     text=text,
@@ -695,6 +697,7 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
                     intended_duration_seconds=float(
                         item.get("intended_duration_seconds", 4.0)
                     ),
+                    expression_cue=expression_cue,
                 )
             )
 

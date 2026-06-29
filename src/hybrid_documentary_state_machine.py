@@ -181,6 +181,7 @@ PHASE_JSON_CONTRACTS: Dict[PipelinePhase, str] = {
                     "time_seconds": 0.0,
                     "intended_duration_seconds": 6.0,
                     "narration": "string",
+                    "expression_cue": "free-form delivery cue, e.g. 'whispered, intense, conspiratorial'",
                     "visual_asset_path": "research/media_images/example.png",
                     "visual_directive": "string",
                     "text_overlay": "string",
@@ -226,6 +227,14 @@ Hard rules:
 3) In SCRIPTING, write short, punchy sentences (max 10-15 words per segment). Use conversational language.
 4) In SCRIPTING, map each segment to a concrete local asset path when available to prove the facts.
 5) In EVIDENCE_GATHERING, prioritize searching for primary sources: forum screenshots, archive.org links, and exact timestamps.
+6) Every segment must advance the detective narrative. If a segment does not reveal new evidence or advance the hook, delete it.
+
+FORBIDDEN PHRASES (DO NOT USE THESE):
+- "Did you know?"
+- "In today's video"
+- "Wait for it"
+- "Let's dive in"
+- "Mind-blowing"
 
 Phase contracts:
 {contracts}
@@ -326,10 +335,14 @@ def load_run_state(project_dir: Union[str, Path]) -> RunState:
 
 
 def save_run_state(state: RunState) -> Path:
+    import os as _os
+
     state.updated_at = datetime.now(UTC).isoformat()
     state_path = _state_path(state.project_dir)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    state_path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    tmp = state_path.with_suffix(".json.tmp")
+    tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    _os.replace(str(tmp), str(state_path))  # atomic on POSIX & Windows
     logger.debug("Saved run state to %s", state_path)
     return state_path
 
@@ -380,13 +393,13 @@ def save_finding(
     return target_path
 
 
-class HackclubMediaSearchClient:
-    """Hackclub search helper for web, image, and video endpoints."""
+class ExaSearchClient:
+    """Exa web search client via Hack Club AI proxy."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://search.hackclub.com/res/v1",
+        base_url: str = "https://ai.hackclub.com/proxy/v1/exa",
         timeout_seconds: int = 20,
         audit_logger: Optional["SearchAuditLogger"] = None,
     ):
@@ -408,7 +421,7 @@ class HackclubMediaSearchClient:
             await self._session.close()
         self._session = None
 
-    async def __aenter__(self) -> "HackclubMediaSearchClient":
+    async def __aenter__(self) -> "ExaSearchClient":
         await self._ensure_session()
         return self
 
@@ -416,21 +429,24 @@ class HackclubMediaSearchClient:
         await self.close()
 
     async def search_web(self, query: str, count: int = 10) -> List[MediaSearchResult]:
-        return await self._search("web/search", query, count)
+        return await self._search(query, count)
 
     async def search_images(
         self, query: str, count: int = 10
     ) -> List[MediaSearchResult]:
-        return await self._search("images/search", query, count)
+        logger.warning(
+            "Exa does not support image search; use BraveImageClient instead"
+        )
+        return []
 
     async def search_videos(
         self, query: str, count: int = 10
     ) -> List[MediaSearchResult]:
-        return await self._search("videos/search", query, count)
+        logger.warning("Exa does not support video search; use Brave directly")
+        return []
 
     async def _search(
         self,
-        endpoint: str,
         query: str,
         count: int,
     ) -> List[MediaSearchResult]:
@@ -440,51 +456,49 @@ class HackclubMediaSearchClient:
 
         session = await self._ensure_session()
         headers = {
-            "Accept": "application/json",
             "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
         }
-        params = {"q": query, "count": max(1, min(count, 50))}
-        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        body = {"query": query, "numResults": max(1, min(count, 50))}
+        url = f"{self.base_url}/search"
 
         if self.audit_logger:
-            self.audit_logger.log_request("GET", url, params, headers)
+            self.audit_logger.log_request("POST", url, body, headers)
 
         start = time.perf_counter()
         try:
-            async with session.get(url, headers=headers, params=params) as response:
-                body = await response.text()
+            async with session.post(url, headers=headers, json=body) as response:
+                resp_body = await response.text()
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
                     self.audit_logger.log_response(
                         response.status,
-                        body,
+                        resp_body,
                         duration_ms,
                         url=url,
                     )
                 if response.status >= 400:
                     logger.warning(
-                        "Hackclub search failed %s status=%s body=%s",
-                        endpoint,
+                        "Exa search failed status=%s body=%s",
                         response.status,
-                        body[:300],
+                        resp_body[:300],
                     )
                     return []
                 try:
-                    payload = json.loads(body)
+                    payload = json.loads(resp_body)
                 except json.JSONDecodeError:
                     return []
         except Exception as exc:
             duration_ms = (time.perf_counter() - start) * 1000
             if self.audit_logger:
                 self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-            logger.error("Hackclub search request failed for %s: %s", endpoint, exc)
+            logger.error("Exa search request failed: %s", exc)
             return []
 
-        return self._parse_search_results(endpoint, payload)
+        return self._parse_search_results(payload)
 
     def _parse_search_results(
         self,
-        endpoint: str,
         payload: Any,
     ) -> List[MediaSearchResult]:
         candidates: List[Dict[str, Any]] = []
@@ -492,91 +506,19 @@ class HackclubMediaSearchClient:
         if isinstance(payload, list):
             candidates = [item for item in payload if isinstance(item, dict)]
         elif isinstance(payload, dict):
-            key_prefix = endpoint.split("/", 1)[0]
-            key_bucket = payload.get(key_prefix)
-
-            nested_candidates: List[Any] = []
-            if isinstance(key_bucket, dict):
-                nested_candidates.extend(
-                    [
-                        key_bucket.get("results"),
-                        key_bucket.get("items"),
-                        key_bucket.get("data"),
-                    ]
-                )
-
-            nested_candidates.extend(
-                [payload.get("results"), payload.get("items"), payload.get("data")]
-            )
-
-            for entry in nested_candidates:
-                if isinstance(entry, list):
-                    candidates.extend(
-                        [item for item in entry if isinstance(item, dict)]
-                    )
+            candidates = [
+                item for item in payload.get("results", []) if isinstance(item, dict)
+            ]
 
         parsed: List[MediaSearchResult] = []
         for item in candidates:
-            url = (
-                item.get("url")
-                or item.get("link")
-                or item.get("contentUrl")
-                or item.get("source")
-                or ""
-            )
+            url = item.get("url") or item.get("link") or ""
             if not isinstance(url, str) or not url:
                 continue
 
-            # FIX: Filter out logos and icons by checking filename only
-            url_path = url.split("?")[0].split("#")[0]
-            filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
-            filename_lower = filename.lower()
-            if any(kw in filename_lower for kw in LOGO_FILTER_KEYWORDS):
-                continue
-
-            title = item.get("title") or item.get("name") or ""
-            description = item.get("description") or item.get("snippet") or ""
-            source = item.get("source") or item.get("domain") or "unknown"
-            thumbnail_url = (
-                item.get("thumbnail")
-                or item.get("thumbnail_url")
-                or item.get("image")
-                or ""
-            )
-
-            # Strict filtering for logos, icons, and avatars
-            if item.get("logo") is True:
-                continue
-            title_lower = str(title).lower()
-            if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
-                continue
-
-            if isinstance(thumbnail_url, dict):
-                if thumbnail_url.get("logo"):
-                    continue
-                thumbnail_url = (
-                    thumbnail_url.get("url")
-                    or thumbnail_url.get("src")
-                    or str(thumbnail_url)
-                )
-            elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
-                parsed_thumb = None
-                try:
-                    parsed_thumb = json.loads(thumbnail_url)
-                except json.JSONDecodeError:
-                    try:
-                        parsed_thumb = ast.literal_eval(thumbnail_url)
-                    except (ValueError, SyntaxError):
-                        pass
-
-                if isinstance(parsed_thumb, dict):
-                    if parsed_thumb.get("logo"):
-                        continue
-                    thumbnail_url = (
-                        parsed_thumb.get("url")
-                        or parsed_thumb.get("src")
-                        or thumbnail_url
-                    )
+            title = item.get("title") or ""
+            description = item.get("text") or item.get("snippet") or ""
+            source = item.get("source") or "unknown"
 
             if isinstance(thumbnail_url, str):
                 thumb_path = thumbnail_url.split("?", 1)[0].split("#", 1)[0]
@@ -592,12 +534,16 @@ class HackclubMediaSearchClient:
                     url=url,
                     description=str(description),
                     source=str(source),
-                    thumbnail_url=str(thumbnail_url),
+                    thumbnail_url="",
                 )
             )
 
-        logger.debug("Parsed %d %s results", len(parsed), endpoint)
+        logger.debug("Parsed %d Exa search results", len(parsed))
         return parsed
+
+
+# Backward-compatible alias
+HackclubMediaSearchClient = ExaSearchClient
 
 
 def transcribe_media_file(
@@ -830,6 +776,7 @@ def build_state_machine_prompt(
 __all__ = [
     "DEFAULT_SUMMARY_MODEL",
     "DEFAULT_TRANSCRIBE_MODEL",
+    "ExaSearchClient",
     "HackclubMediaSearchClient",
     "MediaSearchResult",
     "NVIDIA_BASE_URL",

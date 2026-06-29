@@ -167,7 +167,7 @@ class APIConfig:
 
     # NVIDIA NIM
     nvidia_nim_api_key: str = ""
-    nvidia_nim_model: str = "qwen/qwen2.5-7b-instruct"
+    nvidia_nim_model: str = "moonshotai/kimi-k2.6"
     nvidia_nim_alt_model: str = "qwen/qwen3-235b-a22b"
     nvidia_nim_rate_limit_rpm: int = 60
     nvidia_nim_base_url: str = "https://integrate.api.nvidia.com/v1"
@@ -488,6 +488,7 @@ class ConfigManager:
         self.api = APIConfig()
         self.content = ContentConfig()
         self.paths = PathConfig()
+        self.tts: Dict[str, Any] = {}  # TTS config loaded from YAML
 
     def reload(self) -> "ConfigManager":
         """Reload configuration from current config file and environment."""
@@ -564,6 +565,11 @@ class ConfigManager:
             if looping_config:
                 self._update_from_dict(self.effects, looping_config)
 
+            # Handle TTS config
+            tts_config = yaml_config.get("tts", {})
+            if isinstance(tts_config, dict):
+                self.tts = tts_config
+
             # Handle subreddits list
             if "subreddits" in yaml_config:
                 self.content.curated_subreddits = yaml_config["subreddits"]
@@ -592,8 +598,13 @@ class ConfigManager:
         paths_cfg = yaml_config.get("paths") or {}
         cfg_parent = self._config_yaml_parent()
 
-        if paths_cfg.get("base_dir") is not None and str(paths_cfg.get("base_dir", "")).strip():
-            self.paths.base_dir = self._resolve_path_value(paths_cfg["base_dir"], cfg_parent)
+        if (
+            paths_cfg.get("base_dir") is not None
+            and str(paths_cfg.get("base_dir", "")).strip()
+        ):
+            self.paths.base_dir = self._resolve_path_value(
+                paths_cfg["base_dir"], cfg_parent
+            )
 
         base = self.paths.base_dir
 
@@ -628,6 +639,26 @@ class ConfigManager:
         token = (self.api.youtube_token_file or "").strip()
         if token:
             self.paths.youtube_token_file = self._resolve_path_value(token, base)
+
+    def _read_env_bool(self, env_name: str, current_value: bool) -> bool:
+        """Only override booleans when the environment variable is explicitly set."""
+        raw_value = os.getenv(env_name)
+        if raw_value is None:
+            return current_value
+
+        normalized = raw_value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+
+        self.logger.warning(
+            "Invalid %s value '%s'; keeping %s",
+            env_name,
+            raw_value,
+            current_value,
+        )
+        return current_value
 
     def _load_env_config(self):
         """Load configuration from environment variables"""
@@ -697,8 +728,9 @@ class ConfigManager:
             self.paths.sound_effects_folder = Path(os.getenv("SOUND_EFFECTS_DIR"))
 
         # Looping configuration from environment
-        self.effects.enable_seamless_looping = (
-            os.getenv("ENABLE_SEAMLESS_LOOPING", "true").lower() == "true"
+        self.effects.enable_seamless_looping = self._read_env_bool(
+            "ENABLE_SEAMLESS_LOOPING",
+            self.effects.enable_seamless_looping,
         )
         loop_crossfade_duration = os.getenv(
             "LOOP_CROSSFADE_DURATION", str(self.effects.loop_crossfade_duration)
@@ -750,14 +782,16 @@ class ConfigManager:
                     self.effects.loop_target_duration,
                 )
 
-        self.effects.enable_audio_crossfade = (
-            os.getenv("ENABLE_AUDIO_CROSSFADE", "true").lower() == "true"
+        self.effects.enable_audio_crossfade = self._read_env_bool(
+            "ENABLE_AUDIO_CROSSFADE",
+            self.effects.enable_audio_crossfade,
         )
         self.effects.loop_extend_mode = os.getenv(
             "LOOP_EXTEND_MODE", self.effects.loop_extend_mode
         )
-        self.effects.loop_trim_from_center = (
-            os.getenv("LOOP_TRIM_FROM_CENTER", "true").lower() == "true"
+        self.effects.loop_trim_from_center = self._read_env_bool(
+            "LOOP_TRIM_FROM_CENTER",
+            self.effects.loop_trim_from_center,
         )
 
         self.logger.info("Loaded environment variable configuration")
