@@ -1,4 +1,3 @@
-import json
 import os
 import logging
 import tempfile
@@ -6,8 +5,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from dotenv import load_dotenv
-
-from src.config.settings import get_config
 
 
 logger = logging.getLogger(__name__)
@@ -43,20 +40,12 @@ def authenticate_youtube() -> Credentials | None:
     # Load environment variables
     load_dotenv()
 
-    cfg = get_config()
-    secrets_path = cfg.paths.google_client_secrets_file
-    token_path = cfg.paths.youtube_token_file
-    client_secrets_file = str(secrets_path) if secrets_path else None
-    token_file = str(token_path) if token_path else "youtube_token.json"
+    # Configuration
+    token_file = os.getenv("YOUTUBE_TOKEN_FILE", "youtube_token.json")
 
     # Support YOUTUBE_TOKEN_JSON env var (from Colab/secrets.example)
     token_json = os.getenv("YOUTUBE_TOKEN_JSON", "").strip()
     if token_json and not os.path.exists(token_file):
-        try:
-            json.loads(token_json)
-        except json.JSONDecodeError as e:
-            logger.error("YOUTUBE_TOKEN_JSON is not valid JSON: %s", e)
-            raise ValueError(f"YOUTUBE_TOKEN_JSON is not valid JSON: {e}")
         _write_token_file_secure(token_file, token_json)
         logger.info("Materialized YOUTUBE_TOKEN_JSON env var to %s", token_file)
 
@@ -98,8 +87,7 @@ def authenticate_youtube() -> Credentials | None:
             if not client_secrets_file or not os.path.exists(client_secrets_file):
                 logger.error("Client secrets file '%s' not found.", client_secrets_file)
                 logger.error(
-                    "Set api.youtube_client_secrets_file in config.yaml, or "
-                    "GOOGLE_CLIENT_SECRETS_FILE in the environment."
+                    "Please ensure GOOGLE_CLIENT_SECRETS_FILE is set correctly in .env"
                 )
                 return None
 
