@@ -254,9 +254,9 @@ class TTSService:
             "The same narrator is speaking. Keep the voice identity identical."
         )
 
-        expression_cue = getattr(segment, "expression_cue", "").strip()
-        if expression_cue:
-            return f"{base_instructions} Deliver this line with this expression: {expression_cue}."
+        expression_cue = getattr(segment, "expression_cue", None)
+        if expression_cue and expression_cue.strip():
+            return f"{base_instructions} Deliver this line with this expression: {expression_cue.strip()}."
 
         emotion = str(segment.emotion).lower()
         pacing = str(segment.pacing).lower()

@@ -15,6 +15,7 @@ import logging
 import argparse
 from argparse import ArgumentParser
 import json
+import shutil
 import sys
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -61,19 +62,18 @@ class EnhancedYouTubeGenerator:
         if not os.getenv("NVIDIA_NIM_API_KEY") and not os.getenv("NVIDIA_API_KEY"):
             issues.append("NVIDIA_NIM_API_KEY missing — AI features will fail")
         if mode in ("hybrid", "documentary"):
-            if not os.getenv("HACKCLUB_SEARCH_API_KEY") and not os.getenv(
-                "BRAVE_SEARCH_API_KEY"
+            if (
+                not os.getenv("HACKCLUB_SEARCH_API_KEY")
+                and not os.getenv("HACKCLUB_SEARCH_KEY")
+                and not os.getenv("BRAVE_SEARCH_API_KEY")
             ):
                 issues.append(
-                    "No search API key set (HACKCLUB_SEARCH_API_KEY or BRAVE_SEARCH_API_KEY)"
+                    "No search API key set (HACKCLUB_SEARCH_API_KEY, HACKCLUB_SEARCH_KEY, or BRAVE_SEARCH_API_KEY)"
                 )
             bg_folder = os.getenv("BACKGROUND_FOLDER", "music")
             bg_path = Path(bg_folder)
             if not bg_path.exists() or not list(bg_path.glob("*.mp4")):
                 issues.append(f"No background .mp4 files found in {bg_folder}")
-        from dotenv import load_dotenv
-
-        load_dotenv()
         reddit_id = os.getenv("REDDIT_CLIENT_ID", "").strip()
         reddit_secret = os.getenv("REDDIT_CLIENT_SECRET", "").strip()
         if not reddit_id or not reddit_secret:
@@ -942,6 +942,7 @@ async def main() -> int:
                     load_run_state,
                 )
 
+                preflight = EnhancedYouTubeGenerator.preflight_checks("hybrid")
                 project_dir = setup_project_workspace(args.project)
                 state = load_run_state(project_dir)
                 print(
@@ -955,11 +956,12 @@ async def main() -> int:
                             "status": state.status
                             if hasattr(state, "status")
                             else None,
+                            "preflight_issues": preflight,
                         },
                         indent=2,
                     )
                 )
-                return 0
+                return 1 if preflight else 0
             result = await generator.process_hybrid_workflow(
                 project_name=args.project,
                 reddit_url=args.reddit_url,
@@ -997,7 +999,10 @@ async def main() -> int:
 
         elif args.command == "status":
             status = await generator.get_system_status()
-            if status.get("status") == "error":
+            if (
+                status.get("status") == "error"
+                or status.get("system_status") == "error"
+            ):
                 exit_code = 1
 
         elif args.command == "cleanup":
@@ -1008,6 +1013,16 @@ async def main() -> int:
                 clear_logs()
             if args.all:
                 pass
+            findings_dir = Path("findings")
+            if findings_dir.exists():
+                projects = sorted(
+                    [d for d in findings_dir.iterdir() if d.is_dir()],
+                    key=lambda d: d.stat().st_mtime,
+                    reverse=True,
+                )
+                for proj in projects[args.keep :]:
+                    shutil.rmtree(proj, ignore_errors=True)
+                    print(f"  Removed old project: {proj.name}")
             print(f"Keeping last {args.keep} project directories.")
             print("✅ Cleanup process finished.")
     except KeyboardInterrupt:

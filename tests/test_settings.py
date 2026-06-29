@@ -103,8 +103,16 @@ def test_config_manager_initialization(clean_config, tmp_path):
     assert manager.effects.enable_seamless_looping is True
 
 
-def test_config_manager_paths_and_database_from_yaml(clean_config, tmp_path):
+def test_config_manager_paths_and_database_from_yaml(
+    clean_config, tmp_path, monkeypatch
+):
     """paths + database sections in YAML update PathConfig."""
+    monkeypatch.delenv("DB_FILE_PATH", raising=False)
+    monkeypatch.delenv("GOOGLE_CLIENT_SECRETS_FILE", raising=False)
+    monkeypatch.delenv("MUSIC_FILES_DIR", raising=False)
+    monkeypatch.delenv("BACKGROUND_FOLDER", raising=False)
+    monkeypatch.delenv("YOUTUBE_CLIENT_SECRETS_FILE", raising=False)
+    monkeypatch.delenv("YOUTUBE_TOKEN_FILE", raising=False)
     base = tmp_path / "proj"
     base.mkdir()
     music = base / "custom_music"

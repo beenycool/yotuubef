@@ -263,7 +263,16 @@ class CaptionGenerator:
 
         if overlays:
             self.logger.info(f"Generated {len(overlays)} word captions from known text")
-            return CompositeVideoClip([video_clip, *overlays])
+            try:
+                return CompositeVideoClip([video_clip, *overlays])
+            except Exception as e:
+                self.logger.error("Failed to compose caption overlays: %s", e)
+                for clip in overlays:
+                    try:
+                        clip.close()
+                    except Exception:
+                        pass
+                return None
         return None
 
     def get_word_count_and_duration(self, audio_path: Path) -> Dict[str, Any]:

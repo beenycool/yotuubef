@@ -45,18 +45,23 @@ except ImportError:
         afx = None
 import yt_dlp
 
-if "moviepy.editor" not in sys.modules:
-    moviepy_editor = types.ModuleType("moviepy.editor")
-    moviepy_editor.AudioFileClip = AudioFileClip
-    moviepy_editor.concatenate_audioclips = concatenate_audioclips
-    sys.modules["moviepy.editor"] = moviepy_editor
-    try:
-        import moviepy as _moviepy_package
+try:
+    import moviepy.editor as _real_moviepy_editor
 
-        if not hasattr(_moviepy_package, "editor"):
-            _moviepy_package.editor = moviepy_editor
-    except Exception:
-        pass
+    _real_moviepy_editor  # silence unused
+except ImportError:
+    if "moviepy.editor" not in sys.modules:
+        moviepy_editor = types.ModuleType("moviepy.editor")
+        moviepy_editor.AudioFileClip = AudioFileClip
+        moviepy_editor.concatenate_audioclips = concatenate_audioclips
+        sys.modules["moviepy.editor"] = moviepy_editor
+        try:
+            import moviepy as _moviepy_package
+
+            if not hasattr(_moviepy_package, "editor"):
+                _moviepy_package.editor = moviepy_editor
+        except Exception:
+            pass
 
 from src.config.settings import get_config
 from src.models import (
@@ -3033,7 +3038,7 @@ class VideoProcessor:
                     self.logger.warning(f"Error applying volume to fallback music: {e}")
                     # Fallback to trying volumex method
                     try:
-                        music_clip = music_clip.with_volume_scaled(background_volume)
+                        music_clip = music_clip.volumex(background_volume)
                     except Exception as e2:
                         self.logger.warning(f"Error with volumex fallback: {e2}")
                 resource_manager.register_clip(music_clip)

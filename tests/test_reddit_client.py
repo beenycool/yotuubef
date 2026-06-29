@@ -172,3 +172,34 @@ def test_reddit_post_from_submission_extracts_fps_from_dict_media():
     assert post.is_video is True
     assert post.video_url == "https://v.redd.it/example/DASH_720.mp4"
     assert post.fps == 24.0
+
+
+def test_reddit_post_from_submission_extracts_fps_from_object_media():
+    submission = SimpleNamespace(
+        id="obj456",
+        title="An object media video",
+        url="https://v.redd.it/example2",
+        subreddit=SimpleNamespace(display_name="videos"),
+        author="author2",
+        score=456,
+        upvote_ratio=0.95,
+        num_comments=5,
+        created_utc=datetime.now(timezone.utc).timestamp(),
+        is_video=True,
+        media=SimpleNamespace(
+            reddit_video=SimpleNamespace(
+                fallback_url="https://v.redd.it/example2/DASH_1080.mp4",
+                fps=30.0,
+            )
+        ),
+        thumbnail="https://example.com/thumb2.jpg",
+        over_18=False,
+        spoiler=False,
+        selftext="",
+    )
+
+    post = RedditPost.from_submission(submission)
+
+    assert post.is_video is True
+    assert post.video_url == "https://v.redd.it/example2/DASH_1080.mp4"
+    assert post.fps == 30.0

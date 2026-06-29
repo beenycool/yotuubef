@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import time
 from typing import TYPE_CHECKING, Optional
 
@@ -46,39 +47,73 @@ class DeepResearchClient:
             self.audit_logger.log_request("POST", self.base_url, body, headers)
 
         start = time.perf_counter()
-        try:
-            session = await self._ensure_session()
-            async with session.post(
-                self.base_url,
-                headers=headers,
-                json=body,
-                timeout=aiohttp.ClientTimeout(total=20),
-            ) as response:
-                resp_body = await response.text()
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                session = await self._ensure_session()
+                async with session.post(
+                    self.base_url,
+                    headers=headers,
+                    json=body,
+                    timeout=aiohttp.ClientTimeout(total=20),
+                ) as response:
+                    resp_body = await response.text()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if self.audit_logger:
+                        self.audit_logger.log_response(
+                            response.status,
+                            resp_body,
+                            duration_ms,
+                            url=self.base_url,
+                        )
+                    if response.status == 200:
+                        try:
+                            data = json.loads(resp_body)
+                        except json.JSONDecodeError:
+                            data = {}
+                        return self._compile_report(data)
+                    if response.status in (429,) or 500 <= response.status < 600:
+                        if retry < max_retries - 1:
+                            delay = (2**retry) + random.uniform(0, 0.5)
+                            self.logger.warning(
+                                "Exa search transient error %d, retrying in %.1fs (attempt %d/%d)",
+                                response.status,
+                                delay,
+                                retry + 2,
+                                max_retries,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                    self.logger.warning(
+                        "Exa search failed with status %s", response.status
+                    )
+                    return "Research failed."
+            except asyncio.TimeoutError:
+                if retry < max_retries - 1:
+                    delay = (2**retry) + random.uniform(0, 0.5)
+                    self.logger.warning(
+                        "Exa search timeout, retrying in %.1fs (attempt %d/%d)",
+                        delay,
+                        retry + 2,
+                        max_retries,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
                     self.audit_logger.log_response(
-                        response.status,
-                        resp_body,
-                        duration_ms,
-                        url=self.base_url,
+                        500, "Timeout", duration_ms, url=self.base_url
                     )
-                if response.status == 200:
-                    try:
-                        data = json.loads(resp_body)
-                    except json.JSONDecodeError:
-                        data = {}
-                    return self._compile_report(data)
-                self.logger.warning("Exa search failed with status %s", response.status)
-                return "Research failed."
-        except Exception as e:
-            duration_ms = (time.perf_counter() - start) * 1000
-            if self.audit_logger:
-                self.audit_logger.log_response(
-                    500, str(e), duration_ms, url=self.base_url
-                )
-            self.logger.error("Deep research error: %s", e)
-            return "Research error."
+                self.logger.error("Deep research timeout after %d retries", max_retries)
+                return "Research error."
+            except Exception as e:
+                duration_ms = (time.perf_counter() - start) * 1000
+                if self.audit_logger:
+                    self.audit_logger.log_response(
+                        500, str(e), duration_ms, url=self.base_url
+                    )
+                self.logger.error("Deep research error: %s", e)
+                return "Research error."
 
     def _compile_report(self, data: dict) -> str:
         compiled_lore = "EXTERNAL FACTS:\n"

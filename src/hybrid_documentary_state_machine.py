@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
 import logging
 import os
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -466,34 +468,49 @@ class ExaSearchClient:
             self.audit_logger.log_request("POST", url, body, headers)
 
         start = time.perf_counter()
-        try:
-            async with session.post(url, headers=headers, json=body) as response:
-                resp_body = await response.text()
+        max_retries = 3
+        for retry in range(max_retries):
+            try:
+                async with session.post(url, headers=headers, json=body) as response:
+                    resp_body = await response.text()
+                    duration_ms = (time.perf_counter() - start) * 1000
+                    if self.audit_logger:
+                        self.audit_logger.log_response(
+                            response.status,
+                            resp_body,
+                            duration_ms,
+                            url=url,
+                        )
+                    if response.status >= 400:
+                        if response.status in (429,) or 500 <= response.status < 600:
+                            if retry < max_retries - 1:
+                                delay = (2**retry) + random.uniform(0, 0.5)
+                                logger.warning(
+                                    "Exa search transient error %d, retrying in %.1fs (attempt %d/%d)",
+                                    response.status,
+                                    delay,
+                                    retry + 2,
+                                    max_retries,
+                                )
+                                await asyncio.sleep(delay)
+                                continue
+                        logger.warning(
+                            "Exa search failed status=%s body=%s",
+                            response.status,
+                            resp_body[:300],
+                        )
+                        return []
+                    try:
+                        payload = json.loads(resp_body)
+                    except json.JSONDecodeError:
+                        return []
+                    break
+            except Exception as exc:
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
-                    self.audit_logger.log_response(
-                        response.status,
-                        resp_body,
-                        duration_ms,
-                        url=url,
-                    )
-                if response.status >= 400:
-                    logger.warning(
-                        "Exa search failed status=%s body=%s",
-                        response.status,
-                        resp_body[:300],
-                    )
-                    return []
-                try:
-                    payload = json.loads(resp_body)
-                except json.JSONDecodeError:
-                    return []
-        except Exception as exc:
-            duration_ms = (time.perf_counter() - start) * 1000
-            if self.audit_logger:
-                self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-            logger.error("Exa search request failed: %s", exc)
-            return []
+                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
+                logger.error("Exa search request failed: %s", exc)
+                return []
 
         return self._parse_search_results(payload)
 

@@ -1,3 +1,4 @@
+import json
 import os
 import logging
 import tempfile
@@ -51,6 +52,11 @@ def authenticate_youtube() -> Credentials | None:
     # Support YOUTUBE_TOKEN_JSON env var (from Colab/secrets.example)
     token_json = os.getenv("YOUTUBE_TOKEN_JSON", "").strip()
     if token_json and not os.path.exists(token_file):
+        try:
+            json.loads(token_json)
+        except json.JSONDecodeError as e:
+            logger.error("YOUTUBE_TOKEN_JSON is not valid JSON: %s", e)
+            raise ValueError(f"YOUTUBE_TOKEN_JSON is not valid JSON: {e}")
         _write_token_file_secure(token_file, token_json)
         logger.info("Materialized YOUTUBE_TOKEN_JSON env var to %s", token_file)
 

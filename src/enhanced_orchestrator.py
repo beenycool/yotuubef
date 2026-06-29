@@ -1150,6 +1150,22 @@ class EnhancedVideoOrchestrator:
                 continue
 
             if phase == PipelinePhase.SCRIPTING:
+                if getattr(state, "status", "") == "paused_for_script_review":
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.SCRIPTING.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "final_script_path": state.metadata.get(
+                            "final_script_path", ""
+                        ),
+                        "workspace_path": str(Path(state.project_dir).resolve()),
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                    }
                 state = await self._handle_scripting_phase(state, phase)
                 if getattr(state, "status", "") == "paused_for_script_review":
                     return {
@@ -1212,24 +1228,30 @@ class EnhancedVideoOrchestrator:
 
     async def _run_idea_generation_search_first(self, state) -> tuple:
         """Search-first IDEA_GENERATION: run searches, then LLM extracts angles with source_urls."""
-        api_key = (
+        hackclub_api_key = (
             os.getenv("HACKCLUB_SEARCH_API_KEY")
             or os.getenv("HACKCLUB_SEARCH_KEY")
-            or os.getenv("BRAVE_SEARCH_API_KEY")
             or ""
         ).strip()
+        brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
 
         logs_dir = Path(state.project_dir) / "research" / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         audit_path = logs_dir / f"search_audit_{timestamp}.jsonl"
-        audit_logger = SearchAuditLogger(audit_path) if api_key else None
+        audit_logger = SearchAuditLogger(audit_path) if hackclub_api_key else None
 
-        if not api_key:
-            self.logger.warning(
-                "No HACKCLUB_SEARCH_API_KEY or BRAVE_SEARCH_API_KEY. "
-                "Falling back to LLM-only idea generation (may invent content)."
-            )
+        if not hackclub_api_key:
+            if brave_api_key:
+                self.logger.warning(
+                    "BRAVE_SEARCH_API_KEY is set but ExaSearchClient requires a Hackclub key. "
+                    "Falling back to LLM-only idea generation (may invent content)."
+                )
+            else:
+                self.logger.warning(
+                    "No HACKCLUB_SEARCH_API_KEY set. "
+                    "Falling back to LLM-only idea generation (may invent content)."
+                )
             idea_payload = await self._generate_hybrid_phase_payload(
                 state,
                 PipelinePhase.IDEA_GENERATION,
@@ -1241,7 +1263,9 @@ class EnhancedVideoOrchestrator:
 
         print("[Hybrid] Searching for ideas (5-8 scouting queries)...", flush=True)
         search_context = ""
-        async with ExaSearchClient(audit_logger=audit_logger) as client:
+        async with ExaSearchClient(
+            api_key=hackclub_api_key, audit_logger=audit_logger
+        ) as client:
             scouting_queries = await self._generate_scouting_queries(state)
             for q in scouting_queries:
                 hits = await client.search_web(q, count=4)
@@ -2261,12 +2285,16 @@ Search results:
             async with ExaSearchClient(api_key=hackclub_api_key) as client:
                 for query in image_queries:
                     web_hits = await client.search_web(query, count=min(count, 4))
-                    results["web"][query] = [hit.__dict__ for hit in web_hits]
+                    hits = [hit.__dict__ for hit in web_hits]
+                    results["web"][query] = hits
+                    results["image"][query] = hits
                 for query in video_queries:
                     web_hits = await client.search_web(query, count=min(count, 4))
+                    hits = [hit.__dict__ for hit in web_hits]
                     existing = results["web"].get(query, [])
-                    existing.extend([hit.__dict__ for hit in web_hits])
+                    existing.extend(hits)
                     results["web"][query] = existing
+                    results["video"][query] = hits
 
         if brave_api_key and (image_queries or video_queries):
             brave_results = await self._run_brave_media_queries(
@@ -3453,7 +3481,7 @@ Search results:
 
         created_clips: List[Any] = []
         timeline_clips: List[Any] = []
-        overlays: List[TextOverlay] = []
+        overlays: List[Dict[str, Any]] = []
         timeline_manifest: List[Dict[str, Any]] = []
         tts_jobs: List[Dict[str, Any]] = []
 
@@ -3471,7 +3499,7 @@ Search results:
             # ──────────────────────────────────────────────────────────
             # PASS 1: Build narrative segments, generate TTS, measure real durations
             # ──────────────────────────────────────────────────────────
-            segment_meta: List[Dict[str, Any]] = []
+            segment_meta_map: Dict[int, Dict[str, Any]] = {}
             for idx, segment in enumerate(segments):
                 if not isinstance(segment, dict):
                     continue
@@ -3534,13 +3562,16 @@ Search results:
                 if text_overlay:
                     try:
                         overlays.append(
-                            TextOverlay(
-                                text=text_overlay[:200],
-                                timestamp_seconds=0.0,  # will patch after real timing
-                                duration=max(0.8, min(estimate, 4.0)),
-                                position=PositionType.CENTER,
-                                style=TextStyle.HIGHLIGHT,
-                            )
+                            {
+                                "overlay": TextOverlay(
+                                    text=text_overlay[:200],
+                                    timestamp_seconds=0.0,  # will patch after real timing
+                                    duration=max(0.8, min(estimate, 4.0)),
+                                    position=PositionType.CENTER,
+                                    style=TextStyle.HIGHLIGHT,
+                                ),
+                                "segment_idx": idx,
+                            }
                         )
                     except Exception:
                         self.logger.debug(
@@ -3558,7 +3589,7 @@ Search results:
                     "pace_value": pace_value,
                     "text_overlay": text_overlay,
                 }
-                segment_meta.append(meta_entry)
+                segment_meta_map[idx] = meta_entry
 
                 if narration:
                     try:
@@ -3595,13 +3626,13 @@ Search results:
                     if not isinstance(tts_result, dict) or not tts_result.get(
                         "success"
                     ):
-                        meta = segment_meta[idx]
-                        actual_durations[idx] = max(meta["estimate"], 0.5)
+                        meta = segment_meta_map.get(idx, {})
+                        actual_durations[idx] = max(meta.get("estimate", 1.0), 0.5)
                         continue
                     audio_path = tts_result.get("audio_path")
                     if not audio_path:
-                        meta = segment_meta[idx]
-                        actual_durations[idx] = max(meta["estimate"], 0.5)
+                        meta = segment_meta_map.get(idx, {})
+                        actual_durations[idx] = max(meta.get("estimate", 1.0), 0.5)
                         continue
                     try:
                         clip = AudioFileClip(str(audio_path))
@@ -3613,28 +3644,27 @@ Search results:
                         self.logger.warning(
                             "Failed to load TTS audio for segment %s: %s", idx, exc
                         )
-                        meta = segment_meta[idx]
-                        actual_durations[idx] = max(meta["estimate"], 0.5)
+                        meta = segment_meta_map.get(idx, {})
+                        actual_durations[idx] = max(meta.get("estimate", 1.0), 0.5)
 
             # Fallback: any segment_meta without a duration gets its estimate
-            for m in segment_meta:
-                if m["idx"] not in actual_durations:
-                    actual_durations[m["idx"]] = max(m["estimate"], 0.5)
+            for idx, m in segment_meta_map.items():
+                if idx not in actual_durations:
+                    actual_durations[idx] = max(m.get("estimate", 1.0), 0.5)
 
             # ──────────────────────────────────────────────────────────
             # PASS 2: Build video timeline matching real audio durations
             # ──────────────────────────────────────────────────────────
             cursor = 0.0
-            for m in segment_meta:
-                idx = m["idx"]
+            for idx, m in sorted(segment_meta_map.items()):
                 duration = actual_durations[idx]
                 start_time = round(cursor, 3)
                 cursor += duration
 
                 # Update overlay timestamp
-                for ov in overlays:
-                    if ov.timestamp_seconds == 0.0 and idx == segment_meta.index(m):
-                        ov.timestamp_seconds = start_time
+                for ov_entry in overlays:
+                    if ov_entry["segment_idx"] == idx:
+                        ov_entry["overlay"].timestamp_seconds = start_time
                         break
 
                 segment_clip: Optional[Any] = None
@@ -3704,7 +3734,7 @@ Search results:
                             size=(1080, 1920),
                             color=(0, 0, 0),
                             duration=duration,
-                        ).with_volume_scaled(0.3)
+                        ).with_opacity(0.3)
                         from moviepy import CompositeVideoClip as _CompositeVideoClip
 
                         segment_clip = _CompositeVideoClip([background_clip, overlay])
@@ -3758,8 +3788,8 @@ Search results:
             # ──────────────────────────────────────────────────────────
             audio_layers: List[Any] = []
             cum_time = 0.0
-            for m in segment_meta:
-                idx = m["idx"]
+            for idx in sorted(segment_meta_map):
+                m = segment_meta_map[idx]
                 duration = actual_durations[idx]
                 start_time = cum_time
                 cum_time += duration
@@ -3818,10 +3848,11 @@ Search results:
 
             if overlays:
                 try:
+                    overlay_clips = [o["overlay"] for o in overlays]
                     rendered_clip = (
                         self.video_processor.text_processor.add_text_overlays(
                             rendered_clip,
-                            overlays,
+                            overlay_clips,
                         )
                     )
                     _register_clip(rendered_clip)
@@ -4503,12 +4534,17 @@ Search results:
                 tail.with_volume_scaled(0.3),
             ]
         )
-        # Crossfaded_head duration = crossfade. Now shift tail and head to match.
-        # Actually, simpler: just volume-ramp the last crossfade seconds down
-        # and the first crossfade seconds up.
-        # The simplest approach: half-volume overlap at the seam.
         body = audio_clip.subclipped(crossfade, duration - crossfade)
-        result = concatenate_audioclips([crossfaded_head, body.with_start(crossfade)])
+        trailing = audio_clip.subclipped(duration - crossfade, duration).with_start(
+            duration - crossfade
+        )
+        result = concatenate_audioclips(
+            [
+                crossfaded_head.with_duration(crossfade),
+                body.with_start(crossfade),
+                trailing.with_start(duration),
+            ]
+        )
         return result if result.duration > 0 else audio_clip
 
     @staticmethod

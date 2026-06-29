@@ -687,7 +687,6 @@ Return a JSON array of the top 3 most engaging comments. Each object in the arra
 
         return []
 
-    @with_retry()
     async def _chat_completion_with_fallback(
         self,
         messages: List[Dict[str, str]],
