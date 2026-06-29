@@ -8,7 +8,6 @@ import json
 import asyncio
 import random
 import time
-from functools import wraps
 from typing import Dict, List, Optional, Any
 from pathlib import Path
 
@@ -71,37 +70,6 @@ class RateLimiter:
                 await asyncio.sleep(0)
 
 
-def with_retry(max_attempts=3, base_delay=1.5, exceptions=(Exception,)):
-    """Decorator: retry async function with exponential backoff."""
-
-    def deco(fn):
-        @wraps(fn)
-        async def wrapper(*args, **kwargs):
-            last_exc = None
-            for attempt in range(max_attempts):
-                try:
-                    return await fn(*args, **kwargs)
-                except exceptions as e:
-                    last_exc = e
-                    if attempt == max_attempts - 1:
-                        raise
-                    delay = base_delay * (attempt + 1)
-                    logging.getLogger(__name__).warning(
-                        "Retry %d/%d for %s after %.1fs: %s",
-                        attempt + 1,
-                        max_attempts,
-                        fn.__name__,
-                        delay,
-                        e,
-                    )
-                    await asyncio.sleep(delay)
-            raise last_exc  # type: ignore
-
-        return wrapper
-
-    return deco
-
-
 class NvidiaNimAIClient:
     """
     NVIDIA NIM AI client for enhanced video analysis and processing tasks
@@ -125,6 +93,7 @@ class NvidiaNimAIClient:
         self._response_cache: Dict[str, Any] = {}
         self._max_cache_size = 128
         self._model_supports_vision: Optional[bool] = None
+        self._check_model_supports_vision()
 
         # Initialize NVIDIA NIM client if available
         if OPENAI_AVAILABLE and hasattr(self.config.api, "nvidia_nim_api_key"):
@@ -942,6 +911,12 @@ Example:
     ) -> VideoAnalysisEnhanced:
         """Convert NVIDIA NIM analysis result to VideoAnalysisEnhanced model"""
         try:
+            if not self._validate_script_safety(analysis_result, self.config):
+                self.logger.warning(
+                    "Script safety validation failed, falling back to minimal analysis"
+                )
+                return self._create_minimal_analysis(reddit_content)
+
             raw_narrative_segments = analysis_result.get(
                 "narrative_script_segments", []
             )

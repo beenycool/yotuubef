@@ -624,7 +624,9 @@ class DatabaseManager:
     def cleanup_old_records(self, days_to_keep: int = 90) -> Dict[str, int]:
         """Clean up old records to prevent database bloat"""
         try:
-            days_int = max(0, int(days_to_keep))
+            days_int = int(days_to_keep)
+            if days_int < 0:
+                raise ValueError(f"days_to_keep must be >= 0, got {days_to_keep}")
             days_modifier = f"-{days_int} days"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
