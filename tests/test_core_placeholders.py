@@ -46,8 +46,9 @@ def test_enhancement_optimizer_updates_yaml_and_reloads(tmp_path: Path):
 audio:
   background_music:
     volume: 0.2
-  sound_effects:
-    volume: 0.4
+effects:
+  max_zoom: 1.1
+  color_grade_intensity: 0.7
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -59,16 +60,44 @@ audio:
     optimizer._update_config_parameters(
         {
             "background_music_volume": 0.55,
-            "sound_effects_volume": 0.35,
+            "zoom_intensity": 1.4,
+            "color_grading_strength": 0.35,
         }
     )
 
     updated_yaml = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert updated_yaml["audio"]["background_music"]["volume"] == 0.55
-    assert updated_yaml["audio"]["sound_effects"]["volume"] == 0.35
+    assert updated_yaml["effects"]["max_zoom"] == 1.4
+    assert updated_yaml["effects"]["color_grade_intensity"] == 0.35
 
     refreshed_config = get_config()
     assert refreshed_config.audio.background_music_volume == 0.55
+    assert refreshed_config.effects.max_zoom == 1.4
+    assert refreshed_config.effects.color_grade_intensity == 0.35
+
+
+def test_enhancement_optimizer_skips_unsupported_runtime_parameters(tmp_path: Path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+audio:
+  background_music:
+    volume: 0.2
+  sound_effects:
+    volume: 0.4
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    init_config(config_path)
+    optimizer = EnhancementOptimizer()
+
+    applied = optimizer._update_config_parameters({"sound_effects_volume": 0.35})
+
+    updated_yaml = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert applied is False
+    assert updated_yaml["audio"]["sound_effects"]["volume"] == 0.4
 
 
 def test_config_reload_updates_global_config_view(tmp_path: Path):

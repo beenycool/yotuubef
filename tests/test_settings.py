@@ -140,6 +140,8 @@ def test_config_manager_paths_and_database_from_yaml(clean_config, tmp_path):
 def test_config_manager_yaml_loading(clean_config, tmp_path, monkeypatch):
     # Ensure env var doesn't override our yaml config
     monkeypatch.delenv("ENABLE_SEAMLESS_LOOPING", raising=False)
+    monkeypatch.delenv("ENABLE_AUDIO_CROSSFADE", raising=False)
+    monkeypatch.delenv("LOOP_TRIM_FROM_CENTER", raising=False)
 
     config_data = {
         "video": {"target_fps": 60, "video_quality_profile": "high"},
@@ -167,10 +169,9 @@ def test_config_manager_yaml_loading(clean_config, tmp_path, monkeypatch):
     assert manager.text_overlay.graphical_font == "CustomFont.ttf"
     assert manager.text_overlay.font_size_ratio_profiles["short"] == 0.1
     assert manager.effects.shake_intensity == 0.05
-    # The `ENABLE_SEAMLESS_LOOPING` defaults to true in os.getenv if not present,
-    # and env vars are loaded *after* yaml in settings.py, which overwrites it.
-    # To properly test YAML overriding, we shouldn't rely on something that env vars override.
-    # Let's test a different effects property.
+    assert manager.effects.enable_seamless_looping is False
+    assert manager.effects.enable_audio_crossfade is True
+    assert manager.effects.loop_trim_from_center is True
     assert manager.content.curated_subreddits == ["testsubreddit"]
 
 

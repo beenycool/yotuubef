@@ -52,25 +52,16 @@ class EnhancementOptimizer:
 
         # Parameter ranges and constraints
         self.parameter_constraints = {
-            "sound_effects_volume": {"min": 0.1, "max": 1.0, "step": 0.05},
-            "visual_effects_intensity": {"min": 0.3, "max": 2.0, "step": 0.1},
-            "text_overlay_duration": {"min": 1.0, "max": 5.0, "step": 0.2},
-            "speed_effect_factor": {"min": 0.5, "max": 2.0, "step": 0.1},
+            # Only include parameters that are wired into the runtime config.
             "zoom_intensity": {"min": 1.0, "max": 1.8, "step": 0.1},
             "color_grading_strength": {"min": 0.0, "max": 1.0, "step": 0.05},
-            "hook_text_font_size": {"min": 40, "max": 120, "step": 5},
             "background_music_volume": {"min": 0.1, "max": 0.8, "step": 0.05},
         }
 
         self.parameter_yaml_paths = {
             "background_music_volume": ("audio", "background_music", "volume"),
-            "sound_effects_volume": ("audio", "sound_effects", "volume"),
-            "visual_effects_intensity": ("effects", "visual_effects_intensity"),
-            "text_overlay_duration": ("text_overlay", "text_overlay_duration"),
-            "speed_effect_factor": ("video_processing", "speed_effect_factor"),
-            "zoom_intensity": ("effects", "zoom_intensity"),
-            "color_grading_strength": ("effects", "color_grading_strength"),
-            "hook_text_font_size": ("text_overlay", "hook_text_font_size"),
+            "zoom_intensity": ("effects", "max_zoom"),
+            "color_grading_strength": ("effects", "color_grade_intensity"),
         }
 
         # Load current optimization state
@@ -468,16 +459,19 @@ class EnhancementOptimizer:
             config_data = self._load_config_yaml(config_path)
 
             updated_paths = []
+            applied_parameters = []
             for parameter_name, new_value in updates.items():
                 key_path = self.parameter_yaml_paths.get(parameter_name)
                 if not key_path:
                     self.logger.warning(
-                        f"No YAML key path mapping for parameter: {parameter_name}"
+                        "Skipping unsupported optimization parameter: %s",
+                        parameter_name,
                     )
                     continue
 
                 self._set_nested_value(config_data, key_path, new_value)
                 updated_paths.append(".".join(key_path))
+                applied_parameters.append(parameter_name)
 
             if not updated_paths:
                 return False
@@ -487,6 +481,25 @@ class EnhancementOptimizer:
             if hasattr(self.config, "reload"):
                 self.config.reload()
             self.config = get_config()
+
+            verified_parameters = []
+            for parameter_name in applied_parameters:
+                runtime_value = self._read_runtime_parameter_value(parameter_name)
+                expected_value = float(updates[parameter_name])
+                if runtime_value is None:
+                    continue
+                if abs(runtime_value - expected_value) > 1e-6:
+                    self.logger.warning(
+                        "Optimization parameter %s did not take effect after reload (%s != %s)",
+                        parameter_name,
+                        runtime_value,
+                        expected_value,
+                    )
+                    continue
+                verified_parameters.append(parameter_name)
+
+            if not verified_parameters:
+                return False
 
             self.logger.info(f"Configuration updates applied: {updated_paths}")
             return True
@@ -563,21 +576,29 @@ class EnhancementOptimizer:
 
     def _get_current_parameter_value(self, parameter_name: str) -> float:
         """Get current value of a parameter"""
-        # This would read from actual configuration in production
+        runtime_value = self._read_runtime_parameter_value(parameter_name)
+        if runtime_value is not None:
+            return runtime_value
+
         defaults = {
-            "sound_effects_volume": 0.7,
-            "visual_effects_intensity": 1.0,
-            "text_overlay_duration": 2.5,
-            "speed_effect_factor": 1.2,
             "zoom_intensity": 1.3,
             "color_grading_strength": 0.5,
-            "hook_text_font_size": 80,
             "background_music_volume": 0.4,
         }
 
         return self.optimization_state.get("current_parameters", {}).get(
             parameter_name, defaults.get(parameter_name, 1.0)
         )
+
+    def _read_runtime_parameter_value(self, parameter_name: str) -> Optional[float]:
+        """Read the live runtime value for supported optimization parameters."""
+        if parameter_name == "background_music_volume":
+            return float(self.config.audio.background_music_volume)
+        if parameter_name == "zoom_intensity":
+            return float(self.config.effects.max_zoom)
+        if parameter_name == "color_grading_strength":
+            return float(self.config.effects.color_grade_intensity)
+        return None
 
     def _load_optimization_state(self) -> Dict[str, Any]:
         """Load optimization state from storage"""

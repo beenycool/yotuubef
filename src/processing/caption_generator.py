@@ -204,6 +204,68 @@ class CaptionGenerator:
                     pass
             return None
 
+    def generate_captions_from_known_text(
+        self,
+        video_clip: Any,
+        segments: list[Any],
+    ) -> Any:
+        """Generate word-level captions from known narrative segments, skipping Whisper transcription.
+
+        Uses segment timestamps and known text to create caption overlays.
+        Falls back to Whisper-based transcription if segments lack timing info.
+        """
+        # Collect all text with timing from segments
+        caption_events = []
+        for seg in segments:
+            text = getattr(seg, "narration", "") or getattr(seg, "text", "") or ""
+            start = getattr(seg, "time_seconds", 0) or 0
+            duration = getattr(seg, "intended_duration_seconds", 0) or 0
+            if text and duration > 0:
+                words = text.split()
+                if words:
+                    word_duration = duration / len(words)
+                    for i, word in enumerate(words):
+                        caption_events.append(
+                            {
+                                "word": word,
+                                "start": start + i * word_duration,
+                                "end": start + (i + 1) * word_duration,
+                            }
+                        )
+
+        if not caption_events:
+            self.logger.warning(
+                "No caption events from known text; falling back to Whisper"
+            )
+            return None
+
+        # Create overlay clips for each word
+        from moviepy import CompositeVideoClip
+
+        overlays = []
+        for evt in caption_events:
+            txt = MoviePyCompat.create_text_clip(
+                evt["word"],
+                font="Arial",
+                font_size=48,
+                color="white",
+                stroke_color="black",
+                stroke_width=1,
+            )
+            if txt is None:
+                continue
+            txt = MoviePyCompat.with_position(txt, ("center", "center"))
+            txt = MoviePyCompat.with_start(
+                MoviePyCompat.with_duration(txt, evt["end"] - evt["start"]),
+                evt["start"],
+            )
+            overlays.append(txt)
+
+        if overlays:
+            self.logger.info(f"Generated {len(overlays)} word captions from known text")
+            return CompositeVideoClip([video_clip, *overlays])
+        return None
+
     def get_word_count_and_duration(self, audio_path: Path) -> Dict[str, Any]:
         """Get quick stats about the audio"""
         words = self.transcribe_with_timestamps(audio_path)
