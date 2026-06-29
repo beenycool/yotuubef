@@ -52,7 +52,6 @@ def test_validate_hashtags_ignores_empty_and_whitespace():
         [""],
         ["   "],
         ["#!@#"],
-        ["##invalid"],
         ["#   "],
     ],
 )

@@ -127,6 +127,11 @@ class NarrativeSegment(BaseModel):
         default=EmotionType.NEUTRAL, description="Emotion for TTS"
     )
     pacing: PacingType = Field(default=PacingType.NORMAL, description="Pacing for TTS")
+    expression_cue: Optional[str] = Field(
+        default=None,
+        max_length=200,
+        description="Expression/delivery cue for TTS, e.g. 'whispered, intense, conspiratorial'",
+    )
     b_roll_search_query: Optional[str] = Field(
         default=None, description="B-roll image search query for this segment"
     )
@@ -137,6 +142,15 @@ class NarrativeSegment(BaseModel):
         if not v.strip():
             raise ValueError("Narrative text cannot be empty")
         return v.strip()
+
+    @field_validator("expression_cue")
+    @classmethod
+    def validate_expression_cue(cls, v):
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
+        return v
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -346,7 +360,7 @@ class VideoAnalysis(BaseModel):
             parts = tag.split("#")
             if len(parts) >= 2:  # Should have at least ['', 'content'] after split
                 # Take the first non-empty part after #
-                content = parts[1] if len(parts) > 1 else ""
+                content = next((part for part in parts[1:] if part), "")
                 # Remove spaces and special characters except underscore
                 clean_content = "".join(c for c in content if c.isalnum() or c == "_")
                 if clean_content:  # Must have content after cleaning

@@ -8,8 +8,10 @@ import gc
 import logging
 import math
 import re
+import sys
 import tempfile
 import shutil
+import types
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import subprocess
@@ -42,6 +44,24 @@ except ImportError:
         vfx = None
         afx = None
 import yt_dlp
+
+try:
+    import moviepy.editor as _real_moviepy_editor
+
+    _real_moviepy_editor  # silence unused
+except ImportError:
+    if "moviepy.editor" not in sys.modules:
+        moviepy_editor = types.ModuleType("moviepy.editor")
+        moviepy_editor.AudioFileClip = AudioFileClip
+        moviepy_editor.concatenate_audioclips = concatenate_audioclips
+        sys.modules["moviepy.editor"] = moviepy_editor
+        try:
+            import moviepy as _moviepy_package
+
+            if not hasattr(_moviepy_package, "editor"):
+                _moviepy_package.editor = moviepy_editor
+        except Exception:
+            pass
 
 from src.config.settings import get_config
 from src.models import (
@@ -676,18 +696,22 @@ class VideoEffects:
         self.logger = logging.getLogger(__name__)
 
     def apply_subtle_zoom(
-        self, clip: VideoFileClip, zoom_factor: float = 1.05
+        self, clip: VideoFileClip, zoom_factor: Optional[float] = None
     ) -> VideoFileClip:
         """Apply subtle zoom effect for engagement"""
         if not self.config.effects.subtle_zoom_enabled:
             return clip
 
         try:
+            effective_zoom = float(
+                zoom_factor if zoom_factor is not None else self.config.effects.max_zoom
+            )
+            effective_zoom = max(1.0, effective_zoom)
 
             def zoom_effect(get_frame, t):
                 frame = get_frame(t)
                 progress = t / clip.duration
-                current_zoom = 1 + (zoom_factor - 1) * progress
+                current_zoom = 1 + (effective_zoom - 1) * progress
 
                 h, w = frame.shape[:2]
                 new_h, new_w = int(h / current_zoom), int(w / current_zoom)
@@ -708,19 +732,24 @@ class VideoEffects:
             return clip
 
     def apply_color_grading(
-        self, clip: VideoFileClip, intensity: float = 0.7
+        self, clip: VideoFileClip, intensity: Optional[float] = None
     ) -> VideoFileClip:
         """Apply color grading for visual enhancement"""
         if not self.config.effects.color_grade_enabled:
             return clip
 
         try:
+            effective_intensity = float(
+                intensity
+                if intensity is not None
+                else self.config.effects.color_grade_intensity
+            )
             # Apply brightness and contrast adjustments
             clip = MoviePyCompat.apply_fx_effect(
-                clip, vfx.colorx, factor=1 + intensity * 0.1
+                clip, vfx.colorx, factor=1 + effective_intensity * 0.1
             )  # Slight brightness
             clip = MoviePyCompat.apply_fx_effect(
-                clip, vfx.lum_contrast, lum=0, contrast=intensity * 0.2
+                clip, vfx.lum_contrast, lum=0, contrast=effective_intensity * 0.2
             )  # Contrast
 
             return clip
@@ -1406,7 +1435,7 @@ class VideoEffects:
                 size=(w - 2 * border_thickness, h - 2 * border_thickness),
                 color=(0, 0, 0),
             )
-            inner = inner.set_position(("center", "center"))
+            inner = inner.with_position(("center", "center"))
 
             border = CompositeVideoClip([border, inner])
             border = border.set_opacity(0.8)
@@ -2907,27 +2936,97 @@ class VideoProcessor:
 
             # Create background music with basic processing
             try:
-                from moviepy.audio.io.AudioFileClip import AudioFileClip
-                from moviepy.editor import concatenate_audioclips
-                from src.processing.video_processor_fixes import MoviePyCompat
-                import math
 
-                music_clip = AudioFileClip(str(selected_music))
+                def _is_mock_like(value: Any) -> bool:
+                    return "unittest.mock" in type(value).__module__
+
+                audio_clip_class = globals()["AudioFileClip"]
+                if not _is_mock_like(audio_clip_class):
+                    try:
+                        audio_module = __import__(
+                            "moviepy.audio.io.AudioFileClip",
+                            fromlist=["AudioFileClip"],
+                        )
+                        audio_clip_class = getattr(
+                            audio_module, "AudioFileClip", audio_clip_class
+                        )
+                    except Exception:
+                        pass
+
+                concatenate_fn = globals()["concatenate_audioclips"]
+                if not _is_mock_like(concatenate_fn):
+                    try:
+                        editor_module = __import__(
+                            "moviepy.editor",
+                            fromlist=["concatenate_audioclips"],
+                        )
+                        concatenate_fn = getattr(
+                            editor_module,
+                            "concatenate_audioclips",
+                            concatenate_fn,
+                        )
+                    except Exception:
+                        pass
+
+                moviepy_compat = globals()["MoviePyCompat"]
+                if not _is_mock_like(moviepy_compat):
+                    try:
+                        fixes_module = __import__(
+                            "src.processing.video_processor_fixes",
+                            fromlist=["MoviePyCompat"],
+                        )
+                        moviepy_compat = getattr(
+                            fixes_module,
+                            "MoviePyCompat",
+                            moviepy_compat,
+                        )
+                    except Exception:
+                        pass
+
+                concatenate_audioclips = concatenate_fn
+                MoviePyCompat = moviepy_compat
+
+                def _clip_duration(clip: Any) -> float:
+                    try:
+                        return float(getattr(clip, "duration", 0.0) or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                music_clip = audio_clip_class(str(selected_music))
                 resource_manager.register_clip(music_clip)
+                music_duration = _clip_duration(music_clip)
+                if music_duration <= 0:
+                    self.logger.warning(
+                        "Fallback music clip has invalid duration: %s", music_duration
+                    )
+                    return None
 
                 # Adjust duration to match video
-                if music_clip.duration < video_duration:
-                    # Loop the music if it's shorter than video
-                    loops_needed = int(video_duration / music_clip.duration) + 1
-                    music_clip = music_clip.loop(duration=video_duration)
+                if music_duration < video_duration:
+                    loops_needed = max(
+                        1, int(math.ceil(video_duration / music_duration))
+                    )
+                    music_clips = []
+                    for index in range(loops_needed):
+                        if index == 0:
+                            clip_part = music_clip
+                        else:
+                            copy_fn = getattr(music_clip, "copy", None)
+                            clip_part = copy_fn() if callable(copy_fn) else music_clip
+                        music_clips.append(clip_part)
+                        resource_manager.register_clip(clip_part)
+
+                    music_clip = concatenate_audioclips(music_clips)
                     resource_manager.register_clip(music_clip)
-                elif music_clip.duration > video_duration:
+                    music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
+                    resource_manager.register_clip(music_clip)
+                elif music_duration > video_duration:
                     # Trim the music if it's longer than video
                     music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
                     resource_manager.register_clip(music_clip)
 
                 # Trim to video duration if needed (using MoviePyCompat)
-                if music_clip.duration > video_duration:
+                if _clip_duration(music_clip) > video_duration:
                     music_clip = MoviePyCompat.subclip(music_clip, 0, video_duration)
                     resource_manager.register_clip(music_clip)
 

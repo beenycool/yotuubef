@@ -70,6 +70,27 @@ Seed sources to verify:
     assert "site:mcspeedrun.com" in lowered
 
 
+def test_hybrid_phase_payload_validation_allows_extra_fields():
+    payload = {
+        "phase": "SYNTHESIS",
+        "chosen_angle": "Angle",
+        "reasoning": "Reasoning",
+        "image_queries": ["img one"],
+        "video_queries": ["video one"],
+        "evidence_questions": ["What is the primary source?"],
+        "next_phase": "EVIDENCE_GATHERING",
+        "extra_debug": {"model": "qwen"},
+    }
+
+    assert (
+        EnhancedVideoOrchestrator._is_valid_hybrid_phase_payload(
+            PipelinePhase.SYNTHESIS,
+            payload,
+        )
+        is True
+    )
+
+
 def test_research_relevance_guard_filters_generic_text():
     orchestrator = _build_orchestrator_stub()
     report_text = (
@@ -914,6 +935,230 @@ async def test_agentic_visual_loop_stops_when_no_images(tmp_path, monkeypatch):
 
     assert result["segments"][0]["narration"] == "Original."
     assert calls["ensure"] == 1
+
+
+@pytest.mark.asyncio
+async def test_process_hybrid_documentary_studio_resets_stale_completed_run(
+    tmp_path, monkeypatch
+):
+    project_dir = tmp_path / "rerun_project"
+    project_dir.mkdir(parents=True)
+
+    state = SimpleNamespace(
+        project_name="rerun_project",
+        project_dir=str(project_dir),
+        current_phase=PipelinePhase.VIDEO_RENDER,
+        status="completed",
+        context_snapshot="previous context",
+        gemini_report_path=str(
+            project_dir / "research" / "reports" / "gemini_report.txt"
+        ),
+        metadata={
+            "idea_generation_path": "research/ideas/idea_generation.json",
+            "deep_research_prompt_path": "research/reports/deep_research_prompt.txt",
+            "synthesis_path": "research/synthesis/synthesis.json",
+            "evidence_index_path": "research/evidence/evidence_index.json",
+            "final_script_path": "research/scripts/final_script.json",
+            "final_video_path": "processed/final.mp4",
+        },
+    )
+
+    orchestrator = _build_orchestrator_stub()
+    monkeypatch.setattr(
+        orchestrator_module, "setup_project_workspace", lambda _name: project_dir
+    )
+    monkeypatch.setattr(
+        orchestrator_module, "load_run_state", lambda _project_dir: state
+    )
+    monkeypatch.setattr(orchestrator_module, "save_run_state", lambda _state: None)
+
+    async def _fake_run_hybrid_state_machine(
+        state_arg,
+        gemini_report_path=None,
+        no_auto_research=False,
+    ):
+        _ = gemini_report_path, no_auto_research
+        assert state_arg.current_phase == PipelinePhase.IDEA_GENERATION
+        assert state_arg.status == "active"
+        assert state_arg.gemini_report_path is None
+        assert "synthesis_path" not in state_arg.metadata
+        assert "evidence_index_path" not in state_arg.metadata
+        assert "final_script_path" not in state_arg.metadata
+        assert "final_video_path" not in state_arg.metadata
+        assert "idea_generation_path" in state_arg.metadata
+        assert "deep_research_prompt_path" in state_arg.metadata
+        return {"success": True, "current_phase": PipelinePhase.IDEA_GENERATION.value}
+
+    orchestrator._run_hybrid_state_machine = _fake_run_hybrid_state_machine
+
+    result = await orchestrator.process_hybrid_documentary_studio(
+        "rerun_project",
+        resume=False,
+    )
+
+    assert result["success"] is True
+
+
+@pytest.mark.asyncio
+async def test_handle_evidence_gathering_phase_uses_evidence_contract_and_queries(
+    tmp_path, monkeypatch
+):
+    project_dir = tmp_path / "evidence_phase"
+    (project_dir / "research" / "synthesis").mkdir(parents=True)
+
+    synthesis_path = project_dir / "research" / "synthesis" / "synthesis.json"
+    synthesis_path.write_text(
+        json.dumps(
+            {
+                "phase": "SYNTHESIS",
+                "chosen_angle": "Angle",
+                "reasoning": "Reasoning",
+                "image_queries": ["leaderboard screenshot"],
+                "video_queries": ["documentary clip"],
+                "evidence_questions": ["When was the record removed?"],
+                "next_phase": "EVIDENCE_GATHERING",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report_path = project_dir / "research" / "reports" / "gemini_report.txt"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(
+        "Chronology: 2024-01-01 | event | https://example.com", encoding="utf-8"
+    )
+
+    state = SimpleNamespace(
+        project_name="evidence_phase",
+        project_dir=str(project_dir),
+        current_phase=PipelinePhase.EVIDENCE_GATHERING,
+        status="active",
+        metadata={"synthesis_path": str(synthesis_path)},
+        gemini_report_path=str(report_path),
+    )
+
+    orchestrator = _build_orchestrator_stub()
+    monkeypatch.setattr(orchestrator_module, "save_run_state", lambda _state: None)
+
+    captured = {}
+
+    async def _fake_generate(state_arg, phase_arg, context):
+        _ = state_arg
+        captured["phase"] = phase_arg
+        captured["context"] = context
+        return {
+            "phase": "EVIDENCE_GATHERING",
+            "evidence_plan": [
+                {
+                    "claim": "The leaderboard entry was removed.",
+                    "evidence_needed": ["Screenshot of the removed run"],
+                    "priority": "high",
+                }
+            ],
+            "media_queries": ["removed leaderboard entry screenshot"],
+            "next_phase": "SCRIPTING",
+        }
+
+    async def _fake_search(*, image_queries, video_queries, count):
+        captured["image_queries"] = image_queries
+        captured["video_queries"] = video_queries
+        captured["count"] = count
+        return {"image": {}, "video": {}, "web": {}}
+
+    async def _fake_download(state_arg, search_payload):
+        _ = state_arg, search_payload
+        return []
+
+    async def _fake_transcribe(state_arg, downloaded_media):
+        _ = state_arg, downloaded_media
+        return []
+
+    def _fake_set_phase(state_arg, next_phase, reason):
+        _ = reason
+        state_arg.current_phase = next_phase
+        return state_arg
+
+    orchestrator._generate_hybrid_phase_payload = _fake_generate
+    orchestrator._run_hybrid_media_queries = _fake_search
+    orchestrator._download_hybrid_media_assets = _fake_download
+    orchestrator._transcribe_hybrid_media_assets = _fake_transcribe
+    monkeypatch.setattr(orchestrator_module, "set_phase", _fake_set_phase)
+
+    result_state = await orchestrator._handle_evidence_gathering_phase(state)
+
+    assert captured["phase"] == PipelinePhase.EVIDENCE_GATHERING
+    assert "removed leaderboard entry screenshot" in captured["image_queries"]
+    assert "removed leaderboard entry screenshot" in captured["video_queries"]
+    assert "leaderboard screenshot" in captured["image_queries"]
+    assert "documentary clip" in captured["video_queries"]
+    assert result_state.current_phase == PipelinePhase.SCRIPTING
+
+    evidence_index_path = Path(state.metadata["evidence_index_path"])
+    payload = json.loads(evidence_index_path.read_text(encoding="utf-8"))
+    assert payload["evidence_plan"][0]["claim"] == "The leaderboard entry was removed."
+    assert payload["media_queries"] == ["removed leaderboard entry screenshot"]
+
+
+@pytest.mark.asyncio
+async def test_run_hybrid_media_queries_uses_brave_when_hackclub_missing(monkeypatch):
+    monkeypatch.delenv("HACKCLUB_SEARCH_KEY", raising=False)
+    monkeypatch.delenv("HACKCLUB_SEARCH_API_KEY", raising=False)
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-token")
+
+    orchestrator = _build_orchestrator_stub()
+    captured = {}
+
+    async def _fake_brave(*, image_queries, video_queries, count, api_key):
+        captured["image_queries"] = image_queries
+        captured["video_queries"] = video_queries
+        captured["count"] = count
+        captured["api_key"] = api_key
+        return {
+            "image": {"img query": [{"url": "https://example.com/image.jpg"}]},
+            "video": {"vid query": [{"url": "https://example.com/video.mp4"}]},
+            "web": {},
+        }
+
+    orchestrator._run_brave_media_queries = _fake_brave
+
+    result = await orchestrator._run_hybrid_media_queries(
+        image_queries=["img query"],
+        video_queries=["vid query"],
+        count=3,
+    )
+
+    assert captured == {
+        "image_queries": ["img query"],
+        "video_queries": ["vid query"],
+        "count": 3,
+        "api_key": "brave-token",
+    }
+    assert result["image"]["img query"][0]["url"] == "https://example.com/image.jpg"
+
+
+@pytest.mark.asyncio
+async def test_multimodal_video_scoring_skips_large_files_before_ai_call(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("HYBRID_MULTIMODAL_VIDEO_MAX_MB", "1")
+
+    video_path = tmp_path / "large_video.mp4"
+    video_path.write_bytes(b"0" * (2 * 1024 * 1024))
+
+    class _UnexpectedClient:
+        async def _chat_completion_with_fallback(self, **kwargs):
+            raise AssertionError("AI client should not be called for oversized video")
+
+    orchestrator = _build_orchestrator_stub()
+    orchestrator.ai_client = SimpleNamespace(active_client=_UnexpectedClient())
+
+    result = await orchestrator._score_with_multimodal_payload(
+        media_type="video",
+        media_path=video_path,
+        prompt_text="score this",
+    )
+
+    assert result is None
 
 
 @pytest.mark.asyncio

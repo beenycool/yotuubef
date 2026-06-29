@@ -63,6 +63,7 @@ class DatabaseManager:
                 """)
 
                 self._ensure_local_artifacts_table(cursor)
+                self._ensure_processing_history_table(cursor)
 
                 conn.commit()
 
@@ -82,12 +83,14 @@ class DatabaseManager:
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)"
                 )
-                cursor.execute()
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_local_artifacts_reddit_url ON local_artifacts(reddit_url)"
                 )
                 cursor.execute(
                     "CREATE INDEX IF NOT EXISTS idx_local_artifacts_youtube_video_id ON local_artifacts(youtube_video_id)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_processing_history_created_at ON processing_history(created_at)"
                 )
 
                 conn.commit()
@@ -229,6 +232,12 @@ class DatabaseManager:
                                 f"Migration failed for local_artifacts.{column_name}: {e}"
                             )
 
+            cursor.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name='processing_history'"
+            )
+            if cursor.fetchone() is None:
+                self._ensure_processing_history_table(cursor)
+
         except sqlite3.Error as e:
             self.logger.warning(f"Error during database migration: {e}")
 
@@ -244,6 +253,18 @@ class DatabaseManager:
                 youtube_video_id TEXT,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+    def _ensure_processing_history_table(self, cursor: sqlite3.Cursor) -> None:
+        """Create processing_history table for cleanup/audit compatibility."""
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS processing_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                reddit_url TEXT,
+                processing_status TEXT,
+                message TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
@@ -600,17 +621,37 @@ class DatabaseManager:
             self.logger.error(f"Error getting processing stats: {e}")
             return {}
 
-    def cleanup_old_records(self, days_to_keep: int = 90):
+    def cleanup_old_records(self, days_to_keep: int = 90) -> Dict[str, int]:
         """Clean up old records to prevent database bloat"""
         try:
             days_int = max(0, int(days_to_keep))
+            days_modifier = f"-{days_int} days"
             with self.get_connection() as conn:
                 cursor = conn.cursor()
 
+                cursor.execute(
+                    "DELETE FROM uploads WHERE upload_timestamp < datetime('now', ?)",
+                    (days_modifier,),
+                )
+                uploads_deleted = max(0, cursor.rowcount)
+
+                cursor.execute(
+                    "DELETE FROM processing_history WHERE created_at < datetime('now', ?)",
+                    (days_modifier,),
+                )
+                history_deleted = max(0, cursor.rowcount)
+
                 conn.commit()
+                deleted = {
+                    "uploads_deleted": uploads_deleted,
+                    "processing_history_deleted": history_deleted,
+                }
+                self.logger.info("Cleaned old records: %s", deleted)
+                return deleted
 
         except sqlite3.Error as e:
             self.logger.error(f"Error cleaning up old records: {e}")
+            return {"uploads_deleted": 0, "processing_history_deleted": 0}
 
     def get_failed_uploads(self, limit: int = 50) -> List[Dict[str, Any]]:
         """Get failed uploads for retry analysis"""

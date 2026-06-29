@@ -78,6 +78,9 @@ class TTSService:
         self.gpu_manager = GPUMemoryManager(
             max_vram_usage=0.75
         )  # Increased for better TTS performance
+        self.narrator_speaker = getattr(self.config, "tts", {}).get(
+            "narrator_speaker", self.QWEN_DEFAULT_SPEAKER
+        )
         self._initialize_services()
 
     def _initialize_services(self):
@@ -210,7 +213,7 @@ class TTSService:
                 wavs, sr = self._qwen_model.generate_custom_voice(
                     text=segment.text,
                     language=self.QWEN_DEFAULT_LANGUAGE,
-                    speaker=self.QWEN_DEFAULT_SPEAKER,
+                    speaker=self.narrator_speaker,
                     instruct=instruct_text,
                     max_new_tokens=2048,
                 )
@@ -242,32 +245,39 @@ class TTSService:
             return None
 
     def _build_qwen_instruction(self, segment: NarrativeSegment) -> str:
-        """Build instruction text for Qwen3-TTS style control."""
+        """Build instruction text for Qwen3-TTS style control.
+
+        Uses expression_cue when available (from AI-generated script),
+        otherwise falls back to emotion+pacing mapping.
+        """
+        base_instructions = (
+            "The same narrator is speaking. Keep the voice identity identical."
+        )
+
+        expression_cue = getattr(segment, "expression_cue", None)
+        if expression_cue and expression_cue.strip():
+            return f"{base_instructions} Deliver this line with this expression: {expression_cue.strip()}."
+
         emotion = str(segment.emotion).lower()
         pacing = str(segment.pacing).lower()
 
-        instructions = [
-            "Narrate this clearly for a short-form video.",
-            "Use a natural, human conversational voice.",
-        ]
-
+        cues = []
         if emotion == EmotionType.EXCITED.value:
-            instructions.append("Sound energetic and excited.")
+            cues.append("energetic and intense")
         elif emotion == EmotionType.DRAMATIC.value:
-            instructions.append("Sound dramatic and suspenseful.")
+            cues.append("suspenseful and lower pitch")
         elif emotion == EmotionType.CALM.value:
-            instructions.append("Sound calm and composed.")
+            cues.append("steady, composed, and quiet")
         else:
-            instructions.append("Sound neutral and clear.")
+            cues.append("clear, natural, and informative")
 
         if pacing == PacingType.FAST.value:
-            instructions.append("Speak slightly faster than normal.")
+            cues.append("speaking slightly faster")
         elif pacing == PacingType.SLOW.value:
-            instructions.append("Speak slowly with clear pauses.")
-        else:
-            instructions.append("Speak at a natural pace.")
+            cues.append("speaking with deliberate pauses")
 
-        return " ".join(instructions)
+        expression_desc = ", ".join(cues)
+        return f"{base_instructions} Deliver this line: {expression_desc}."
 
     def generate_multiple_segments(
         self, segments: List[NarrativeSegment], output_dir: Optional[Path] = None

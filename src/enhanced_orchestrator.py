@@ -12,6 +12,7 @@ import logging
 import mimetypes
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -59,6 +60,7 @@ from src.processing.image_search_client import BraveImageClient
 from src.processing.caption_generator import CaptionGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
 from src.hybrid_documentary_state_machine import (
+    ExaSearchClient,
     HackclubMediaSearchClient,
     PipelinePhase,
     build_state_machine_prompt,
@@ -196,28 +198,32 @@ class EnhancedVideoOrchestrator:
                 "description": analysis.summary_for_description,
                 "tags": [tag.replace("#", "") for tag in analysis.hashtags],
             }
-            upload_result = await self.youtube_client.upload_video(
-                str(output_file), upload_metadata
-            )
-
-            for segment in audio_segments:
+            upload_result = None
+            try:
+                upload_result = await self.youtube_client.upload_video(
+                    str(output_file), upload_metadata
+                )
+            finally:
+                for segment in audio_segments:
+                    try:
+                        segment.close()
+                    except Exception:
+                        pass
                 try:
-                    segment.close()
+                    audio_clip.close()
                 except Exception:
                     pass
-            try:
-                audio_clip.close()
-            except Exception:
-                pass
-            try:
-                final_video.close()
-            except Exception:
-                pass
+                try:
+                    final_video.close()
+                except Exception:
+                    pass
 
-            if not upload_result.get("success"):
+            if not upload_result or not upload_result.get("success"):
                 return {
                     "success": False,
-                    "error": upload_result.get("error", "Upload failed"),
+                    "error": upload_result.get("error", "Upload failed")
+                    if upload_result
+                    else "Upload returned no result",
                     "video_path": str(output_file),
                 }
 
@@ -275,7 +281,7 @@ class EnhancedVideoOrchestrator:
 
     async def _ai_studio_generate_audio_and_broll(
         self, analysis: Any
-    ) -> tuple[list[Any], Any, list[dict[str, Any]]]:
+    ) -> tuple[list[Any], Any, list[dict[str, Any]] | dict[str, Any]]:
         # Step 3: Generate TTS audio
         self.logger.info("Step 3: TTS Generation")
         tts_results = (
@@ -289,7 +295,7 @@ class EnhancedVideoOrchestrator:
             if item.get("success") and item.get("audio_path")
         ]
         if not tts_paths:
-            return [], None, [{"success": False, "error": "TTS generation failed"}]
+            return [], None, {"success": False, "error": "TTS generation failed"}
 
         # Concatenate TTS segments
         audio_segments = [AudioFileClip(str(path)) for path in tts_paths]
@@ -346,14 +352,31 @@ class EnhancedVideoOrchestrator:
         return video_clip
 
     def _ai_studio_apply_captions(
-        self, video_clip: Any, main_audio: Any, options: dict[str, Any]
+        self,
+        video_clip: Any,
+        main_audio: Any,
+        options: dict[str, Any],
+        analysis: Any = None,
     ) -> tuple[Any, Optional[Path]]:
         # Step 8: Add word-level captions (Improvement 4) - FORCE ENABLED BY DEFAULT
         combined_audio_path = None
         if options.get("enable_word_captions", True):
             self.logger.info("Step 8: Word-Level Captions (Improvement 4)")
             caption_gen = CaptionGenerator()
-            # Combine all TTS paths for transcription
+
+            # Try known-text captions first (skips Whisper)
+            if (
+                analysis
+                and hasattr(analysis, "narrative_script_segments")
+                and analysis.narrative_script_segments
+            ):
+                result = caption_gen.generate_captions_from_known_text(
+                    video_clip, analysis.narrative_script_segments
+                )
+                if result is not None:
+                    return result, None
+
+            # Fallback: combine TTS audio and transcribe with Whisper
             combined_audio_path = self.config.paths.temp_dir / "combined_tts.wav"
             combined_audio_path.parent.mkdir(parents=True, exist_ok=True)
             main_audio.write_audiofile(
@@ -380,8 +403,8 @@ class EnhancedVideoOrchestrator:
             if whoosh_path:
                 whoosh_clip = (
                     AudioFileClip(str(whoosh_path))
-                    .set_start(moment["timestamp_seconds"])
-                    .volumex(0.4)
+                    .with_start(moment["timestamp_seconds"])
+                    .with_volume_scaled(0.4)
                 )
                 audio_layers.append(whoosh_clip)
 
@@ -389,7 +412,11 @@ class EnhancedVideoOrchestrator:
         boom_path = sfx_manager.get_boom_sound()
         if boom_path and analysis.narrative_script_segments:
             hook_time = analysis.narrative_script_segments[0].time_seconds
-            boom_clip = AudioFileClip(str(boom_path)).set_start(hook_time).volumex(0.8)
+            boom_clip = (
+                AudioFileClip(str(boom_path))
+                .with_start(hook_time)
+                .with_volume_scaled(0.8)
+            )
             audio_layers.append(boom_clip)
         return audio_layers
 
@@ -448,7 +475,7 @@ class EnhancedVideoOrchestrator:
 
         video_clip = self._ai_studio_apply_visuals(video_clip, broll_moments, analysis)
         video_clip, combined_audio_path = self._ai_studio_apply_captions(
-            video_clip, main_audio, options
+            video_clip, main_audio, options, analysis=analysis
         )
         audio_layers = self._ai_studio_build_audio(main_audio, broll_moments, analysis)
 
@@ -460,7 +487,8 @@ class EnhancedVideoOrchestrator:
         )
         try:
             final_audio = CompositeAudioClip(audio_layers)
-            final_video = MoviePyCompat.with_audio(video_clip, final_audio)
+            loopable_audio = EnhancedVideoOrchestrator.make_loopable_audio(final_audio)
+            final_video = MoviePyCompat.with_audio(video_clip, loopable_audio)
 
             # Step 10: Write output
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -534,7 +562,12 @@ class EnhancedVideoOrchestrator:
                 broll_moments_or_err,
             ) = await self._ai_studio_generate_audio_and_broll(analysis_or_err)
             if main_audio is None:
-                return broll_moments_or_err[0]
+                err = (
+                    broll_moments_or_err
+                    if isinstance(broll_moments_or_err, dict)
+                    else {"success": False, "error": "TTS generation failed"}
+                )
+                return err
 
             return self._ai_studio_compose_and_render(
                 reddit_post,
@@ -574,8 +607,7 @@ class EnhancedVideoOrchestrator:
                 self.logger.info(
                     "Resetting completed hybrid run for project=%s", project_name
                 )
-                state.status = "active"
-                state.current_phase = PipelinePhase.IDEA_GENERATION
+                self._reset_hybrid_run_state(state)
                 save_run_state(state)
 
             if reddit_url:
@@ -587,6 +619,9 @@ class EnhancedVideoOrchestrator:
             state.metadata["hybrid_no_auto_research"] = bool(no_auto_research)
 
             if phase_override:
+                if getattr(state, "status", "") == "paused_for_script_review":
+                    state.status = "active"
+                    save_run_state(state)
                 target_phase = self._coerce_hybrid_phase(phase_override)
                 current_phase = self._coerce_hybrid_phase(state.current_phase)
                 if target_phase and target_phase != current_phase:
@@ -622,6 +657,50 @@ class EnhancedVideoOrchestrator:
                 "pipeline": "hybrid_documentary_studio",
                 "project_name": project_name,
             }
+
+    @staticmethod
+    def _reset_hybrid_run_state(state: Any) -> None:
+        """Clear stale downstream artifacts before restarting a completed run."""
+        state.status = "active"
+        state.current_phase = PipelinePhase.IDEA_GENERATION
+        state.gemini_report_path = None
+
+        metadata = getattr(state, "metadata", None)
+        if not isinstance(metadata, dict):
+            metadata = {}
+            state.metadata = metadata
+
+        for key in (
+            "synthesis_path",
+            "evidence_index_path",
+            "evidence_search_path",
+            "raw_media_dir",
+            "final_script_path",
+            "final_video_path",
+            "render_manifest_path",
+        ):
+            metadata.pop(key, None)
+
+        # Wipe research subfolders and raw_media from disk
+        research = Path(state.project_dir) / "research"
+        for sub in (
+            "synthesis",
+            "evidence",
+            "scripts",
+            "summaries",
+            "transcripts",
+            "media_images",
+            "media_videos",
+            "reports",
+        ):
+            d = research / sub
+            if d.exists():
+                shutil.rmtree(d, ignore_errors=True)
+                d.mkdir(parents=True, exist_ok=True)
+        raw = Path(state.project_dir) / "raw_media"
+        if raw.exists():
+            shutil.rmtree(raw, ignore_errors=True)
+            raw.mkdir(parents=True, exist_ok=True)
 
     async def _handle_idea_generation_phase(self, state: Any) -> Any:
         idea_payload, audit_path = await self._run_idea_generation_search_first(
@@ -776,10 +855,37 @@ class EnhancedVideoOrchestrator:
             synthesis_payload.get("video_queries"), minimum_count=0
         )
 
+        report_text = self._read_hybrid_artifact_text(state.gemini_report_path)
+        evidence_context_parts = [
+            json.dumps(synthesis_payload, indent=2, ensure_ascii=True)
+            if synthesis_payload
+            else "",
+            report_text,
+        ]
+        evidence_context = "\n\n".join(
+            [part for part in evidence_context_parts if str(part or "").strip()]
+        ).strip()
+        evidence_payload = await self._generate_hybrid_phase_payload(
+            state,
+            PipelinePhase.EVIDENCE_GATHERING,
+            evidence_context or "Gather evidence for the chosen documentary angle.",
+        )
+        media_queries = self._normalize_query_list(
+            evidence_payload.get("media_queries"), minimum_count=0
+        )
+        search_image_queries = self._normalize_query_list(
+            image_queries + media_queries,
+            minimum_count=0,
+        )
+        search_video_queries = self._normalize_query_list(
+            video_queries + media_queries,
+            minimum_count=0,
+        )
+
         print("[Hybrid] Searching for images and videos...", flush=True)
         search_payload = await self._run_hybrid_media_queries(
-            image_queries=image_queries,
-            video_queries=video_queries,
+            image_queries=search_image_queries,
+            video_queries=search_video_queries,
             count=6,
         )
         search_path = save_finding(
@@ -801,8 +907,10 @@ class EnhancedVideoOrchestrator:
         evidence_index = {
             "phase": PipelinePhase.EVIDENCE_GATHERING.value,
             "created_at": datetime.now().isoformat(),
-            "image_queries": image_queries,
-            "video_queries": video_queries,
+            "evidence_plan": evidence_payload.get("evidence_plan", []),
+            "media_queries": media_queries,
+            "image_queries": search_image_queries,
+            "video_queries": search_video_queries,
             "search_results_path": str(search_path),
             "downloaded_media": downloaded_media,
             "transcripts": transcripts,
@@ -822,6 +930,25 @@ class EnhancedVideoOrchestrator:
             PipelinePhase.SCRIPTING,
             "Evidence artifacts captured",
         )
+
+    @staticmethod
+    def _validate_and_refine_hook(script_payload: dict) -> str | None:
+        """Check hook quality and return refined hook or None if ok."""
+        hook = (
+            script_payload.get("hook")
+            or script_payload.get("segments", [{}])[0].get("narration", "")
+            or ""
+        ).strip()
+        forbidden = [
+            "did you know",
+            "in today's",
+            "wait for it",
+            "let's dive",
+            "mind-blowing",
+        ]
+        if any(p in hook.lower() for p in forbidden) or len(hook.split()) < 4:
+            return None
+        return hook
 
     async def _handle_scripting_phase(self, state: Any, phase: Any) -> Any:
         context_parts: List[str] = []
@@ -880,12 +1007,18 @@ class EnhancedVideoOrchestrator:
             script_payload,
         )
         state.metadata["final_script_path"] = str(final_script_path)
+        state.status = "paused_for_script_review"
         save_run_state(state)
-        return set_phase(
-            state,
-            PipelinePhase.VIDEO_RENDER,
-            "Script finalized; ready for local render",
+        print(f"[Hybrid] Script saved to: {final_script_path}", flush=True)
+        print(
+            f"[Hybrid] PAUSED for script review. Edit the JSON above, then run:",
+            flush=True,
         )
+        print(
+            f"  python main.py hybrid {state.project_name} --resume --phase VIDEO_RENDER",
+            flush=True,
+        )
+        return state
 
     async def _handle_video_render_phase(
         self, state: Any
@@ -1017,7 +1150,39 @@ class EnhancedVideoOrchestrator:
                 continue
 
             if phase == PipelinePhase.SCRIPTING:
+                if getattr(state, "status", "") == "paused_for_script_review":
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.SCRIPTING.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "final_script_path": state.metadata.get(
+                            "final_script_path", ""
+                        ),
+                        "workspace_path": str(Path(state.project_dir).resolve()),
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                    }
                 state = await self._handle_scripting_phase(state, phase)
+                if getattr(state, "status", "") == "paused_for_script_review":
+                    return {
+                        "success": True,
+                        "paused": True,
+                        "status": state.status,
+                        "current_phase": PipelinePhase.SCRIPTING.value,
+                        "project_name": state.project_name,
+                        "pipeline": "hybrid_documentary_studio",
+                        "final_script_path": state.metadata.get(
+                            "final_script_path", ""
+                        ),
+                        "workspace_path": str(Path(state.project_dir).resolve()),
+                        "no_upload": bool(
+                            state.metadata.get("hybrid_no_upload", False)
+                        ),
+                    }
                 continue
 
             if phase == PipelinePhase.VIDEO_RENDER:
@@ -1040,26 +1205,53 @@ class EnhancedVideoOrchestrator:
         "deleted world record receipts",
     ]
 
+    async def _generate_scouting_queries(self, state) -> list[str]:
+        """Generate scouting queries via LLM for better topic diversity, falls back to hardcoded."""
+        try:
+            prompt = (
+                f"Generate 6 niche search queries for a documentary about '{state.project_name}'. "
+                "Focus on internet mysteries, gaming lore, deleted content, and controversies. "
+                'Return JSON {"queries": ["..."]} only.'
+            )
+            resp = await self.ai_client.active_client._chat_completion_with_fallback(
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.6,
+                max_tokens=400,
+                response_format={"type": "json_object"},
+            )
+            queries = json.loads(resp.choices[0].message.content).get("queries", [])
+            if queries and len(queries) >= 3:
+                return queries[:8]
+        except Exception as exc:
+            self.logger.warning("LLM query generation failed, using defaults: %s", exc)
+        return list(self._SCOUTING_QUERIES)
+
     async def _run_idea_generation_search_first(self, state) -> tuple:
         """Search-first IDEA_GENERATION: run searches, then LLM extracts angles with source_urls."""
-        api_key = (
+        hackclub_api_key = (
             os.getenv("HACKCLUB_SEARCH_API_KEY")
             or os.getenv("HACKCLUB_SEARCH_KEY")
-            or os.getenv("BRAVE_SEARCH_API_KEY")
             or ""
         ).strip()
+        brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
 
         logs_dir = Path(state.project_dir) / "research" / "logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         audit_path = logs_dir / f"search_audit_{timestamp}.jsonl"
-        audit_logger = SearchAuditLogger(audit_path) if api_key else None
+        audit_logger = SearchAuditLogger(audit_path) if hackclub_api_key else None
 
-        if not api_key:
-            self.logger.warning(
-                "No HACKCLUB_SEARCH_API_KEY or BRAVE_SEARCH_API_KEY. "
-                "Falling back to LLM-only idea generation (may invent content)."
-            )
+        if not hackclub_api_key:
+            if brave_api_key:
+                self.logger.warning(
+                    "BRAVE_SEARCH_API_KEY is set but ExaSearchClient requires a Hackclub key. "
+                    "Falling back to LLM-only idea generation (may invent content)."
+                )
+            else:
+                self.logger.warning(
+                    "No HACKCLUB_SEARCH_API_KEY set. "
+                    "Falling back to LLM-only idea generation (may invent content)."
+                )
             idea_payload = await self._generate_hybrid_phase_payload(
                 state,
                 PipelinePhase.IDEA_GENERATION,
@@ -1071,8 +1263,11 @@ class EnhancedVideoOrchestrator:
 
         print("[Hybrid] Searching for ideas (5-8 scouting queries)...", flush=True)
         search_context = ""
-        async with HackclubMediaSearchClient(audit_logger=audit_logger) as client:
-            for q in self._SCOUTING_QUERIES[:8]:
+        async with ExaSearchClient(
+            api_key=hackclub_api_key, audit_logger=audit_logger
+        ) as client:
+            scouting_queries = await self._generate_scouting_queries(state)
+            for q in scouting_queries:
                 hits = await client.search_web(q, count=4)
                 search_context += f"\n--- RESULTS FOR QUERY: {q} ---\n"
                 for hit in hits:
@@ -1445,14 +1640,43 @@ Search results:
         content = response.choices[0].message.content or "{}"
         parsed = self._safe_parse_phase_json(content)
         if not isinstance(parsed, dict):
-            raise RuntimeError(
-                f"Hybrid phase {phase.value}: AI returned invalid JSON (unparseable)"
+            self.logger.warning(
+                "Hybrid phase %s returned unparseable JSON; using fallback payload",
+                phase.value,
             )
-        if not self._is_valid_hybrid_phase_payload(phase, parsed):
-            raise RuntimeError(
-                f"Hybrid phase {phase.value}: AI payload failed contract validation"
+            return self._fallback_hybrid_phase_payload(phase, context)
+
+        normalized = self._coerce_hybrid_phase_payload(phase, parsed, context)
+        if not self._is_valid_hybrid_phase_payload(phase, normalized):
+            self.logger.warning(
+                "Hybrid phase %s payload failed validation after normalization; using fallback payload",
+                phase.value,
             )
-        return parsed
+            return self._fallback_hybrid_phase_payload(phase, context)
+        return normalized
+
+    def _coerce_hybrid_phase_payload(
+        self,
+        phase: PipelinePhase,
+        payload: Dict[str, Any],
+        context: str,
+    ) -> Dict[str, Any]:
+        """Drop unknown keys and backfill missing required keys from fallback payloads."""
+        fallback = self._fallback_hybrid_phase_payload(phase, context)
+        normalized: Dict[str, Any] = {"phase": phase.value}
+
+        for key, fallback_value in fallback.items():
+            if key == "phase":
+                continue
+
+            value = payload.get(key, fallback_value)
+            if isinstance(fallback_value, list) and not isinstance(value, list):
+                value = fallback_value
+            elif isinstance(fallback_value, str) and value is None:
+                value = fallback_value
+            normalized[key] = value
+
+        return normalized
 
     async def _generate_supplementary_image_queries(
         self,
@@ -1689,7 +1913,7 @@ Search results:
         phase: PipelinePhase,
         payload: Dict[str, Any],
     ) -> bool:
-        expected_keys_map = {
+        required_keys_map = {
             PipelinePhase.IDEA_GENERATION: {
                 "phase",
                 "angles",
@@ -1722,14 +1946,14 @@ Search results:
             },
         }
 
-        expected_keys = expected_keys_map.get(phase)
-        if not expected_keys:
+        required_keys = required_keys_map.get(phase)
+        if not required_keys:
             return False
         if payload.get("phase") != phase.value:
             return False
 
         actual_keys = set(payload.keys())
-        if actual_keys != expected_keys:
+        if not required_keys.issubset(actual_keys):
             return False
 
         if phase == PipelinePhase.IDEA_GENERATION:
@@ -1739,6 +1963,28 @@ Search results:
             if len(prompt_text.split()) < 8:
                 return False
             if not isinstance(payload.get("angles"), list):
+                return False
+
+        if phase == PipelinePhase.SYNTHESIS:
+            if not isinstance(payload.get("image_queries"), list):
+                return False
+            if not isinstance(payload.get("video_queries"), list):
+                return False
+            if not isinstance(payload.get("evidence_questions"), list):
+                return False
+
+        if phase == PipelinePhase.EVIDENCE_GATHERING:
+            if not isinstance(payload.get("evidence_plan"), list):
+                return False
+            if not isinstance(payload.get("media_queries"), list):
+                return False
+
+        if phase == PipelinePhase.SCRIPTING:
+            if not isinstance(payload.get("segments"), list):
+                return False
+            if not isinstance(payload.get("sources_to_check"), list):
+                return False
+            if not isinstance(payload.get("hashtags"), list):
                 return False
 
         return True
@@ -2027,31 +2273,210 @@ Search results:
         video_queries: List[str],
         count: int = 6,
     ) -> Dict[str, Any]:
-        api_key = (
+        hackclub_api_key = (
             os.getenv("HACKCLUB_SEARCH_KEY")
             or os.getenv("HACKCLUB_SEARCH_API_KEY")
             or ""
         ).strip()
+        brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
         results: Dict[str, Any] = {"image": {}, "video": {}, "web": {}}
-        if not api_key:
-            return results
 
-        async with HackclubMediaSearchClient(api_key=api_key) as client:
+        if hackclub_api_key:
+            async with ExaSearchClient(api_key=hackclub_api_key) as client:
+                for query in image_queries:
+                    web_hits = await client.search_web(query, count=min(count, 4))
+                    hits = [hit.__dict__ for hit in web_hits]
+                    results["web"][query] = hits
+                    results["image"][query] = hits
+                for query in video_queries:
+                    web_hits = await client.search_web(query, count=min(count, 4))
+                    hits = [hit.__dict__ for hit in web_hits]
+                    existing = results["web"].get(query, [])
+                    existing.extend(hits)
+                    results["web"][query] = existing
+                    results["video"][query] = hits
+
+        if brave_api_key and (image_queries or video_queries):
+            brave_results = await self._run_brave_media_queries(
+                image_queries=image_queries,
+                video_queries=video_queries,
+                count=count,
+                api_key=brave_api_key,
+            )
+            for media_type in ("image", "video"):
+                results[media_type] = brave_results.get(media_type, {})
+            if not hackclub_api_key:
+                results["web"] = brave_results.get("web", {})
+
+        return results
+
+    async def _run_brave_media_queries(
+        self,
+        *,
+        image_queries: List[str],
+        video_queries: List[str],
+        count: int,
+        api_key: str,
+    ) -> Dict[str, Any]:
+        results: Dict[str, Any] = {"image": {}, "video": {}, "web": {}}
+        headers = {"Accept": "application/json", "X-Subscription-Token": api_key}
+        timeout = aiohttp.ClientTimeout(total=20)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             for query in image_queries:
-                image_hits = await client.search_images(query, count=count)
-                web_hits = await client.search_web(query, count=min(count, 4))
-                results["image"][query] = [hit.__dict__ for hit in image_hits]
-                results["web"][query] = [hit.__dict__ for hit in web_hits]
+                image_hits = await self._search_brave_endpoint(
+                    session,
+                    headers,
+                    endpoint="images/search",
+                    query=query,
+                    count=count,
+                )
+                web_hits = await self._search_brave_endpoint(
+                    session,
+                    headers,
+                    endpoint="web/search",
+                    query=query,
+                    count=min(count, 4),
+                )
+                results["image"][query] = image_hits
+                results["web"][query] = web_hits
 
             for query in video_queries:
-                video_hits = await client.search_videos(query, count=count)
-                web_hits = await client.search_web(query, count=min(count, 4))
-                results["video"][query] = [hit.__dict__ for hit in video_hits]
+                video_hits = await self._search_brave_endpoint(
+                    session,
+                    headers,
+                    endpoint="videos/search",
+                    query=query,
+                    count=count,
+                )
+                web_hits = await self._search_brave_endpoint(
+                    session,
+                    headers,
+                    endpoint="web/search",
+                    query=query,
+                    count=min(count, 4),
+                )
+                results["video"][query] = video_hits
                 existing = results["web"].get(query, [])
-                existing.extend([hit.__dict__ for hit in web_hits])
+                existing.extend(web_hits)
                 results["web"][query] = existing
 
         return results
+
+    async def _search_brave_endpoint(
+        self,
+        session: aiohttp.ClientSession,
+        headers: Dict[str, str],
+        *,
+        endpoint: str,
+        query: str,
+        count: int,
+    ) -> List[Dict[str, str]]:
+        url = f"https://api.search.brave.com/res/v1/{endpoint.lstrip('/')}"
+        params = {"q": query, "count": max(1, min(int(count or 1), 20))}
+
+        try:
+            async with session.get(url, headers=headers, params=params) as response:
+                if response.status >= 400:
+                    self.logger.warning(
+                        "Brave %s failed status=%s for query=%s",
+                        endpoint,
+                        response.status,
+                        query,
+                    )
+                    return []
+                payload = await response.json(content_type=None)
+        except Exception as exc:
+            self.logger.warning(
+                "Brave %s request failed for query=%s: %s",
+                endpoint,
+                query,
+                exc,
+            )
+            return []
+
+        return self._parse_brave_search_results(endpoint, payload)
+
+    @staticmethod
+    def _parse_brave_search_results(
+        endpoint: str,
+        payload: Any,
+    ) -> List[Dict[str, str]]:
+        candidates: List[Dict[str, Any]] = []
+
+        if isinstance(payload, list):
+            candidates = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            key_prefix = endpoint.split("/", 1)[0]
+            key_bucket = payload.get(key_prefix)
+            nested_candidates: List[Any] = []
+
+            if isinstance(key_bucket, dict):
+                nested_candidates.extend(
+                    [
+                        key_bucket.get("results"),
+                        key_bucket.get("items"),
+                        key_bucket.get("data"),
+                    ]
+                )
+
+            nested_candidates.extend(
+                [payload.get("results"), payload.get("items"), payload.get("data")]
+            )
+
+            for entry in nested_candidates:
+                if isinstance(entry, list):
+                    candidates.extend(
+                        [item for item in entry if isinstance(item, dict)]
+                    )
+
+        parsed: List[Dict[str, str]] = []
+        for item in candidates:
+            url = (
+                item.get("url")
+                or item.get("link")
+                or item.get("contentUrl")
+                or item.get("content_url")
+                or item.get("page_url")
+                or ""
+            )
+            if not isinstance(url, str) or not url:
+                continue
+
+            thumbnail_url = (
+                item.get("thumbnail")
+                or item.get("thumbnail_url")
+                or item.get("image")
+                or ""
+            )
+            if isinstance(thumbnail_url, dict):
+                thumbnail_url = (
+                    thumbnail_url.get("url")
+                    or thumbnail_url.get("src")
+                    or str(thumbnail_url)
+                )
+
+            parsed.append(
+                {
+                    "title": str(item.get("title") or item.get("name") or ""),
+                    "url": url,
+                    "description": str(
+                        item.get("description")
+                        or item.get("snippet")
+                        or item.get("text")
+                        or ""
+                    ),
+                    "source": str(
+                        item.get("source")
+                        or item.get("domain")
+                        or item.get("hostname")
+                        or "unknown"
+                    ),
+                    "thumbnail_url": str(thumbnail_url or ""),
+                }
+            )
+
+        return parsed
 
     async def _download_hybrid_media_assets(
         self,
@@ -2586,13 +3011,13 @@ Search results:
         )
         max_calls = self._read_env_int(
             "HYBRID_IMAGE_RELEVANCE_MAX_CALLS",
-            default=24,
+            default=40,
             minimum=1,
             maximum=120,
         )
         min_approved_images = self._read_env_int(
             "HYBRID_IMAGE_RELEVANCE_MIN_APPROVED_PER_SEGMENT",
-            default=3,
+            default=1,
             minimum=1,
             maximum=12,
         )
@@ -2714,13 +3139,13 @@ Search results:
         """Iteratively search/download more images until each segment has enough approved images."""
         min_approved_images = self._read_env_int(
             "HYBRID_IMAGE_RELEVANCE_MIN_APPROVED_PER_SEGMENT",
-            default=3,
+            default=1,
             minimum=1,
             maximum=12,
         )
         max_retries = self._read_env_int(
             "HYBRID_IMAGE_RELEVANCE_MAX_RETRIES",
-            default=2,
+            default=1,
             minimum=0,
             maximum=8,
         )
@@ -2880,6 +3305,7 @@ Search results:
             str(os.getenv("HYBRID_VISUAL_REVISION_ENABLED", "true")).strip().lower()
         )
         allow_revisions = flag_raw not in {"0", "false", "no", "off"}
+        issued_image_queries: set[str] = set()
 
         for _ in range(max_rounds):
             visual_catalog = self._build_visual_catalog_for_script(state)
@@ -2928,12 +3354,14 @@ Search results:
             deduped_queries: List[str] = []
             for q in new_image_queries:
                 lowered = q.lower()
-                if lowered in seen_queries:
+                if lowered in seen_queries or lowered in issued_image_queries:
                     continue
                 seen_queries.add(lowered)
                 deduped_queries.append(q)
             if not deduped_queries:
                 break
+
+            issued_image_queries.update([q.lower() for q in deduped_queries])
 
             search_payload = await self._run_hybrid_media_queries(
                 image_queries=deduped_queries,
@@ -3053,15 +3481,13 @@ Search results:
 
         created_clips: List[Any] = []
         timeline_clips: List[Any] = []
-        tts_jobs: List[Dict[str, Any]] = []
-        overlays: List[TextOverlay] = []
+        overlays: List[Dict[str, Any]] = []
         timeline_manifest: List[Dict[str, Any]] = []
+        tts_jobs: List[Dict[str, Any]] = []
 
         timeline_clip: Optional[Any] = None
         rendered_clip: Optional[Any] = None
         composite_audio: Optional[Any] = None
-
-        cursor = 0.0
 
         def _register_clip(clip: Any) -> None:
             if clip is not None:
@@ -3070,95 +3496,28 @@ Search results:
         print("[Hybrid] Rendering final video locally...", flush=True)
 
         try:
+            # ──────────────────────────────────────────────────────────
+            # PASS 1: Build narrative segments, generate TTS, measure real durations
+            # ──────────────────────────────────────────────────────────
+            segment_meta_map: Dict[int, Dict[str, Any]] = {}
             for idx, segment in enumerate(segments):
                 if not isinstance(segment, dict):
                     continue
 
-                duration = self._normalize_segment_duration(
+                estimate = self._normalize_segment_duration(
                     segment,
                     min_segment_duration=min_segment_duration,
                     max_segment_duration=max_segment_duration,
                     narration_multiplier=narration_multiplier,
                 )
-                start_time = round(cursor, 3)
-                cursor += duration
 
                 narration = str(segment.get("narration", "") or "").strip()
                 asset_rel = str(segment.get("visual_asset_path", "") or "").strip()
                 asset_abs = (project_dir / asset_rel) if asset_rel else None
                 source_type = "fallback"
-
-                segment_clip: Optional[Any] = None
                 if asset_abs and asset_abs.exists() and asset_abs.is_file():
                     media_type = self._media_type_for_asset(asset_rel)
-                    if media_type == "video":
-                        try:
-                            source_video = VideoFileClip(str(asset_abs))
-                            _register_clip(source_video)
-                            clip_duration = float(
-                                getattr(source_video, "duration", 0.0) or 0.0
-                            )
-                            if clip_duration > 0 and clip_duration >= duration:
-                                segment_clip = MoviePyCompat.subclip(
-                                    source_video, 0, duration
-                                )
-                            elif clip_duration > 0:
-                                loop_fn = getattr(source_video, "loop", None)
-                                if callable(loop_fn):
-                                    segment_clip = loop_fn(duration=duration)
-                                else:
-                                    segment_clip = MoviePyCompat.with_duration(
-                                        source_video, duration
-                                    )
-                            if segment_clip is not None:
-                                source_type = "video"
-                        except Exception as exc:
-                            self.logger.warning(
-                                "Hybrid render video segment failed for %s: %s",
-                                asset_abs,
-                                exc,
-                            )
-                    elif media_type == "image":
-                        try:
-                            segment_clip = ImageClip(str(asset_abs))
-                            segment_clip = MoviePyCompat.with_duration(
-                                segment_clip, duration
-                            )
-                            source_type = "image"
-                        except Exception as exc:
-                            self.logger.warning(
-                                "Hybrid render image segment failed for %s: %s",
-                                asset_abs,
-                                exc,
-                            )
-
-                if segment_clip is None:
-                    try:
-                        background_clip = BackgroundManager().get_sliced_background(
-                            target_duration=duration,
-                            subreddit="hybrid",
-                            text_content=narration,
-                        )
-                        segment_clip = background_clip
-                        source_type = "background"
-                    except Exception as exc:
-                        self.logger.warning(
-                            "Hybrid render background fallback failed for segment %s: %s",
-                            idx,
-                            exc,
-                        )
-                        segment_clip = ColorClip(
-                            size=(1080, 1920),
-                            color=(18, 18, 18),
-                            duration=duration,
-                        )
-                        source_type = "color"
-
-                segment_clip = ensure_shorts_format(
-                    segment_clip, target_duration=duration
-                )
-                _register_clip(segment_clip)
-                timeline_clips.append(segment_clip)
+                    source_type = media_type if media_type != "unknown" else "fallback"
 
                 emotion_raw = str(segment.get("emotion", "") or "").strip().lower()
                 if emotion_raw not in {
@@ -3195,19 +3554,56 @@ Search results:
                 elif pace_raw == PacingType.SLOW.value:
                     pace_value = PacingType.SLOW
 
+                expression_cue = (
+                    str(segment.get("expression_cue", "") or "").strip() or None
+                )
+
+                text_overlay = str(segment.get("text_overlay", "") or "").strip()
+                if text_overlay:
+                    try:
+                        overlays.append(
+                            {
+                                "overlay": TextOverlay(
+                                    text=text_overlay[:200],
+                                    timestamp_seconds=0.0,  # will patch after real timing
+                                    duration=max(0.8, min(estimate, 4.0)),
+                                    position=PositionType.CENTER,
+                                    style=TextStyle.HIGHLIGHT,
+                                ),
+                                "segment_idx": idx,
+                            }
+                        )
+                    except Exception:
+                        self.logger.debug(
+                            "Skipping invalid text overlay at segment index %s", idx
+                        )
+
+                meta_entry = {
+                    "idx": idx,
+                    "narration": narration,
+                    "asset_rel": asset_rel,
+                    "asset_abs": asset_abs,
+                    "source_type": source_type,
+                    "estimate": estimate,
+                    "emotion_value": emotion_value,
+                    "pace_value": pace_value,
+                    "text_overlay": text_overlay,
+                }
+                segment_meta_map[idx] = meta_entry
+
                 if narration:
                     try:
                         tts_segment = NarrativeSegment(
                             text=narration,
-                            time_seconds=start_time,
-                            intended_duration_seconds=duration,
+                            time_seconds=0.0,
+                            intended_duration_seconds=estimate,
                             emotion=emotion_value,
                             pacing=pace_value,
+                            expression_cue=expression_cue,
                         )
                         tts_jobs.append(
                             {
                                 "index": idx,
-                                "start_time": start_time,
                                 "segment": tts_segment,
                             }
                         )
@@ -3216,22 +3612,151 @@ Search results:
                             "Skipping invalid narration segment at index %s", idx
                         )
 
-                text_overlay = str(segment.get("text_overlay", "") or "").strip()
-                if text_overlay:
+            # Generate TTS audio for ALL segments
+            actual_durations: Dict[int, float] = {}
+            tts_audio_map: Dict[int, Any] = {}
+            if tts_jobs:
+                tts_segments_list = [job["segment"] for job in tts_jobs]
+                tts_results = await asyncio.to_thread(
+                    self.advanced_audio_processor.tts_service.generate_multiple_segments,
+                    tts_segments_list,
+                )
+                for job, tts_result in zip(tts_jobs, tts_results):
+                    idx = job["index"]
+                    if not isinstance(tts_result, dict) or not tts_result.get(
+                        "success"
+                    ):
+                        meta = segment_meta_map.get(idx, {})
+                        actual_durations[idx] = max(meta.get("estimate", 1.0), 0.5)
+                        continue
+                    audio_path = tts_result.get("audio_path")
+                    if not audio_path:
+                        meta = segment_meta_map.get(idx, {})
+                        actual_durations[idx] = max(meta.get("estimate", 1.0), 0.5)
+                        continue
                     try:
-                        overlays.append(
-                            TextOverlay(
-                                text=text_overlay[:200],
-                                timestamp_seconds=start_time,
-                                duration=max(0.8, min(duration, 4.0)),
-                                position=PositionType.CENTER,
-                                style=TextStyle.HIGHLIGHT,
+                        clip = AudioFileClip(str(audio_path))
+                        _register_clip(clip)
+                        actual = clip.duration + 0.2  # breathing room
+                        actual_durations[idx] = max(actual, 0.5)
+                        tts_audio_map[idx] = clip
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Failed to load TTS audio for segment %s: %s", idx, exc
+                        )
+                        meta = segment_meta_map.get(idx, {})
+                        actual_durations[idx] = max(meta.get("estimate", 1.0), 0.5)
+
+            # Fallback: any segment_meta without a duration gets its estimate
+            for idx, m in segment_meta_map.items():
+                if idx not in actual_durations:
+                    actual_durations[idx] = max(m.get("estimate", 1.0), 0.5)
+
+            # ──────────────────────────────────────────────────────────
+            # PASS 2: Build video timeline matching real audio durations
+            # ──────────────────────────────────────────────────────────
+            cursor = 0.0
+            for idx, m in sorted(segment_meta_map.items()):
+                duration = actual_durations[idx]
+                start_time = round(cursor, 3)
+                cursor += duration
+
+                # Update overlay timestamp
+                for ov_entry in overlays:
+                    if ov_entry["segment_idx"] == idx:
+                        ov_entry["overlay"].timestamp_seconds = start_time
+                        break
+
+                segment_clip: Optional[Any] = None
+                source_type = m["source_type"]
+                asset_abs = m["asset_abs"]
+                asset_rel = m["asset_rel"]
+
+                if asset_abs and asset_abs.exists() and asset_abs.is_file():
+                    media_type = self._media_type_for_asset(asset_rel)
+                    if media_type == "video":
+                        try:
+                            source_video = VideoFileClip(str(asset_abs))
+                            _register_clip(source_video)
+                            clip_duration = float(
+                                getattr(source_video, "duration", 0.0) or 0.0
                             )
+                            if clip_duration > 0 and clip_duration >= duration:
+                                segment_clip = MoviePyCompat.subclip(
+                                    source_video, 0, duration
+                                )
+                            elif clip_duration > 0:
+                                loop_fn = getattr(source_video, "loop", None)
+                                if callable(loop_fn):
+                                    segment_clip = loop_fn(duration=duration)
+                                else:
+                                    segment_clip = MoviePyCompat.with_duration(
+                                        source_video, duration
+                                    )
+                            if segment_clip is not None:
+                                source_type = "video"
+                        except Exception as exc:
+                            self.logger.warning(
+                                "Hybrid render video segment failed for %s: %s",
+                                asset_abs,
+                                exc,
+                            )
+                    elif media_type == "image":
+                        try:
+                            segment_clip = ImageClip(str(asset_abs))
+                            segment_clip = MoviePyCompat.with_duration(
+                                segment_clip, duration
+                            )
+                            # Ken Burns subtle zoom: 1.0x -> 1.05x over duration
+                            if duration > 0:
+                                zoom = lambda t, dur=duration: 1 + 0.05 * min(
+                                    t / dur, 1.0
+                                )
+                                segment_clip = segment_clip.resized(zoom)
+                            source_type = "image"
+                        except Exception as exc:
+                            self.logger.warning(
+                                "Hybrid render image segment failed for %s: %s",
+                                asset_abs,
+                                exc,
+                            )
+
+                if segment_clip is None:
+                    try:
+                        background_clip = BackgroundManager().get_sliced_background(
+                            target_duration=duration,
+                            subreddit="hybrid",
+                            text_content=m["narration"],
                         )
-                    except Exception:
-                        self.logger.debug(
-                            "Skipping invalid text overlay at segment index %s", idx
+                        from moviepy import ColorClip as _ColorClip
+
+                        overlay = _ColorClip(
+                            size=(1080, 1920),
+                            color=(0, 0, 0),
+                            duration=duration,
+                        ).with_opacity(0.3)
+                        from moviepy import CompositeVideoClip as _CompositeVideoClip
+
+                        segment_clip = _CompositeVideoClip([background_clip, overlay])
+                        source_type = "background"
+                    except Exception as exc:
+                        self.logger.warning(
+                            "Hybrid render background fallback failed for segment %s: %s",
+                            idx,
+                            exc,
                         )
+                        segment_clip = ColorClip(
+                            size=(1080, 1920),
+                            color=(18, 18, 18),
+                            duration=duration,
+                        )
+                        source_type = "color"
+
+                segment_clip = ensure_shorts_format(
+                    segment_clip, target_duration=duration
+                )
+                _register_clip(segment_clip)
+                timeline_clips.append(segment_clip)
 
                 timeline_manifest.append(
                     {
@@ -3258,37 +3783,62 @@ Search results:
                     "error": "Failed to build concatenated render timeline",
                 }
 
+            # ──────────────────────────────────────────────────────────
+            # Audio assembly: layer TTS at real start times + SFX
+            # ──────────────────────────────────────────────────────────
             audio_layers: List[Any] = []
-            if tts_jobs:
-                tts_segments = [job["segment"] for job in tts_jobs]
-                tts_results = await asyncio.to_thread(
-                    self.advanced_audio_processor.tts_service.generate_multiple_segments,
-                    tts_segments,
-                )
-                for job, tts_result in zip(tts_jobs, tts_results):
-                    if not isinstance(tts_result, dict):
-                        continue
-                    if not tts_result.get("success"):
-                        continue
-                    audio_path = tts_result.get("audio_path")
-                    if not audio_path:
-                        continue
-                    try:
-                        clip = AudioFileClip(str(audio_path))
-                        clip = MoviePyCompat.with_start(clip, float(job["start_time"]))
-                        audio_layers.append(clip)
-                        _register_clip(clip)
-                    except Exception as exc:
-                        self.logger.warning(
-                            "Failed to load TTS segment audio at %s: %s",
-                            audio_path,
-                            exc,
-                        )
+            cum_time = 0.0
+            for idx in sorted(segment_meta_map):
+                m = segment_meta_map[idx]
+                duration = actual_durations[idx]
+                start_time = cum_time
+                cum_time += duration
+
+                # Place TTS audio
+                clip = tts_audio_map.get(idx)
+                if clip is not None:
+                    positioned = MoviePyCompat.with_start(clip, float(start_time))
+                    audio_layers.append(positioned)
+
+                # SFX: whoosh at b-roll transitions (image/video appearing)
+                if m["source_type"] in ("image", "video") and start_time > 0:
+                    from src.processing.sound_effects_manager import SoundEffectsManager
+
+                    sfx_mgr = SoundEffectsManager()
+                    whoosh_path = sfx_mgr.get_whoosh_sound()
+                    if whoosh_path:
+                        try:
+                            whoosh = AudioFileClip(str(whoosh_path))
+                            whoosh = whoosh.with_start(start_time).with_volume_scaled(
+                                0.3
+                            )
+                            audio_layers.append(whoosh)
+                            _register_clip(whoosh)
+                        except Exception:
+                            pass
+
+            # Boom at hook (0.0) for first segment
+            from src.processing.sound_effects_manager import SoundEffectsManager
+
+            sfx_mgr = SoundEffectsManager()
+            boom_path = sfx_mgr.get_boom_sound()
+            if boom_path:
+                try:
+                    boom = AudioFileClip(str(boom_path))
+                    boom = boom.with_start(0.0).with_volume_scaled(0.6)
+                    audio_layers.append(boom)
+                    _register_clip(boom)
+                except Exception:
+                    pass
 
             if audio_layers:
                 composite_audio = CompositeAudioClip(audio_layers)
                 _register_clip(composite_audio)
-                rendered_clip = MoviePyCompat.with_audio(rendered_clip, composite_audio)
+                # Perfect loop: crossfade tail into head
+                loopable = EnhancedVideoOrchestrator.make_loopable_audio(
+                    composite_audio
+                )
+                rendered_clip = MoviePyCompat.with_audio(rendered_clip, loopable)
 
             if rendered_clip is None:
                 return {
@@ -3298,10 +3848,11 @@ Search results:
 
             if overlays:
                 try:
+                    overlay_clips = [o["overlay"] for o in overlays]
                     rendered_clip = (
                         self.video_processor.text_processor.add_text_overlays(
                             rendered_clip,
-                            overlays,
+                            overlay_clips,
                         )
                     )
                     _register_clip(rendered_clip)
@@ -3710,6 +4261,20 @@ Search results:
 
         try:
             if media_type == "video":
+                max_video_mb = self._read_env_int(
+                    "HYBRID_MULTIMODAL_VIDEO_MAX_MB",
+                    default=8,
+                    minimum=1,
+                    maximum=128,
+                )
+                max_video_bytes = max_video_mb * 1024 * 1024
+                if media_path.stat().st_size > max_video_bytes:
+                    self.logger.debug(
+                        "Skipping multimodal video scoring for %s: file exceeds %s MB",
+                        media_path,
+                        max_video_mb,
+                    )
+                    return None
                 data_url = self._encode_video_as_data_url(media_path)
                 user_content = [
                     {"type": "text", "text": prompt_text},
@@ -3935,6 +4500,14 @@ Search results:
         max_segment_duration: float,
         narration_multiplier: float,
     ) -> float:
+        # Prefer actual TTS duration when available (eliminates audio drift)
+        actual = segment.get("actual_duration")
+        if actual is not None and isinstance(actual, (int, float)) and actual > 0:
+            clamped = max(
+                min_segment_duration, min(max_segment_duration, float(actual) + 0.2)
+            )
+            return clamped
+
         narration = str(segment.get("narration", "") or "").strip()
         words = len(re.findall(r"\w+", narration))
         estimated = 2.5 if words == 0 else max(2.5, min(12.0, (words / 2.6) + 0.8))
@@ -3944,6 +4517,35 @@ Search results:
         cap = min(max_segment_duration, estimated * narration_multiplier)
         duration = min(baseline, max(min_segment_duration, cap))
         return max(min_segment_duration, duration)
+
+    @staticmethod
+    def make_loopable_audio(audio_clip: Any, crossfade: float = 0.2) -> Any:
+        """Crossfade the tail into the head for seamless loop playback."""
+        from moviepy import AudioFileClip, CompositeAudioClip, concatenate_audioclips
+
+        duration = audio_clip.duration
+        if duration < crossfade * 3:
+            return audio_clip
+        head = audio_clip.subclipped(0, crossfade).with_start(0)
+        tail = audio_clip.subclipped(duration - crossfade, duration).with_start(0)
+        crossfaded_head = CompositeAudioClip(
+            [
+                head,
+                tail.with_volume_scaled(0.3),
+            ]
+        )
+        body = audio_clip.subclipped(crossfade, duration - crossfade)
+        trailing = audio_clip.subclipped(duration - crossfade, duration).with_start(
+            duration - crossfade
+        )
+        result = concatenate_audioclips(
+            [
+                crossfaded_head.with_duration(crossfade),
+                body.with_start(crossfade),
+                trailing.with_start(duration),
+            ]
+        )
+        return result if result.duration > 0 else audio_clip
 
     @staticmethod
     def _distribute_segment_padding(
