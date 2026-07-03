@@ -4,7 +4,7 @@ import uuid
 import pytest
 
 from src.config.settings import init_config
-from src.integrations.reddit_client import ContentFilter, RedditPost
+from src.integrations.reddit_client import RedditPost
 
 
 def _post_with_title(
@@ -82,62 +82,8 @@ content:
 
 
 def test_content_filter_filter_posts_quality_blocks(tmp_path):
-    """Test filtering posts that fail quality metrics."""
-    config_path = tmp_path / "config.yaml"
-    config_path.write_text(
-        """
-content:
-  hard_disallowed: []
-  demonetization_risk: []
-  caution: []
-  forbidden_words: []
-  unsuitable_content_types: []
-""".strip()
-        + "\n",
-        encoding="utf-8",
-    )
-    init_config(config_path)
-
-    content_filter = ContentFilter()
-
-    post_good = _post_with_title("good video")
-
-    # Low score
-    post_low_score = _post_with_title("low score")
-    post_low_score.score = 5
-
-    # Low upvote ratio
-    post_controversial = _post_with_title("controversial")
-    post_controversial.upvote_ratio = 0.5
-
-    # Too short
-    post_short = _post_with_title("too short", duration=2)
-
-    # Low res
-    post_low_res = _post_with_title("low res")
-    post_low_res.width = 480
-    post_low_res.height = 360
-
-    # Too long
-    post_long = _post_with_title("too long", duration=301)
-
-    # Low FPS
-    post_low_fps = _post_with_title("low fps")
-    post_low_fps.fps = 20
-
-    posts = [
-        post_good,
-        post_low_score,
-        post_controversial,
-        post_short,
-        post_low_res,
-        post_long,
-        post_low_fps,
-    ]
-    filtered_posts = content_filter.filter_posts(posts)
-
-    assert len(filtered_posts) == 1
-    assert filtered_posts[0] == post_good
+    """Placeholder: ContentFilter was removed in hybrid-only restructure."""
+    pass
 
 
 def test_reddit_post_from_submission_extracts_fps_from_dict_media():

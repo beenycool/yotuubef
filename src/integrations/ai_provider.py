@@ -63,7 +63,7 @@ class OpenAIProvider(AIProvider):
                 base_url=base_url,
                 timeout=120.0,
             )
-            self._available = api_key and bool(api_key.strip())
+            self._available = bool(api_key) and bool(api_key.strip())
         except ImportError:
             self._available = False
 

@@ -252,7 +252,7 @@ class ScriptSegment(BaseModel):
 
     time_seconds: float = Field(default=0.0, ge=0)
     intended_duration_seconds: float = Field(default=6.0, ge=0.1, le=30.0)
-    narration: str = Field(default="", min_length=1, max_length=500)
+    narration: str = Field(..., min_length=1, max_length=500)
     expression_cue: Optional[str] = None
     visual_asset_path: Optional[str] = None
     visual_directive: Optional[str] = None

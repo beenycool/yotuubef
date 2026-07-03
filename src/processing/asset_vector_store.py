@@ -4,11 +4,13 @@ Uses ChromaDB with sentence-transformers for semantic asset retrieval.
 Falls back to lightweight TF-IDF + cosine similarity when ChromaDB is unavailable.
 """
 
+import asyncio
 import logging
 import hashlib
 import json
 import os
 import re
+from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 
@@ -124,12 +126,12 @@ class AssetVectorStore:
 
     @staticmethod
     def _fallback_embedding(text: str) -> np.ndarray:
-        """Lightweight TF-IDF-like embedding as fallback."""
+        """Lightweight TF-IDF-like embedding as fallback (deterministic)."""
         words = re.findall(r"[a-z]{2,}", text.lower())
         unique = sorted(set(words))
         vec = np.zeros(256, dtype=np.float32)
         for i, w in enumerate(unique[:256]):
-            idx = hash(w) % 256
+            idx = hashlib.md5(w.encode()).digest()[0] % 256
             count = words.count(w)
             vec[idx] += np.log1p(count)
         norm = np.linalg.norm(vec)
@@ -182,6 +184,13 @@ class AssetVectorStore:
 
     async def scan_directory(self, directory: Path, recursive: bool = True) -> int:
         """Scan a directory and index all supported media files."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, partial(self._scan_directory_sync, directory, recursive)
+        )
+
+    def _scan_directory_sync(self, directory: Path, recursive: bool) -> int:
+        """Synchronous directory scan (runs in executor to avoid blocking event loop)."""
         supported_exts = {
             ".jpg",
             ".jpeg",
@@ -251,7 +260,11 @@ class AssetVectorStore:
 
         if self._collection is not None:
             try:
-                query_embedding = self._compute_embedding(query).tolist()
+                loop = asyncio.get_running_loop()
+                query_embedding = await loop.run_in_executor(
+                    None, partial(self._compute_embedding, query)
+                )
+                query_embedding = query_embedding.tolist()
                 where = (
                     {"type": asset_type} if asset_type in self._METADATA_TYPES else None
                 )
@@ -283,10 +296,22 @@ class AssetVectorStore:
                 logger.warning("ChromaDB query failed, using fallback: %s", exc)
 
         if not results:
-            results = self._search_fallback(query, asset_type=asset_type, top_k=top_k)
+            results = await self._search_fallback_async(
+                query, asset_type=asset_type, top_k=top_k
+            )
 
         results.sort(key=lambda r: r["score"], reverse=True)
         return results[:top_k]
+
+    async def _search_fallback_async(
+        self, query: str, asset_type: Optional[str] = None, top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Fallback search in executor to avoid blocking the event loop."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            partial(self._search_fallback, query, asset_type=asset_type, top_k=top_k),
+        )
 
     def _search_fallback(
         self,
@@ -297,6 +322,7 @@ class AssetVectorStore:
         """Fallback search using cosine similarity on lightweight embeddings."""
         query_vec = self._fallback_embedding(query)
         scored: List[Tuple[float, str]] = []
+        results: List[Dict[str, Any]] = []
 
         for asset_id, asset_path in self._id_to_path.items():
             path = Path(asset_path)

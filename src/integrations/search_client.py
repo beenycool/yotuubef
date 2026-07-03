@@ -394,19 +394,21 @@ class AgenticExaResearcher:
             search_tasks = [
                 self.search_client.search_web(q, count=3) for q in current_queries
             ]
-            search_results = await asyncio.gather(*search_tasks)
+            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
             # Mark queries as done
             self.previous_queries.update(current_queries)
 
-            # 2. Flatten raw results
+            # 2. Flatten raw results (skip failed queries)
             raw_results: List[Dict[str, str]] = []
             for result_list in search_results:
+                if isinstance(result_list, Exception):
+                    continue
                 for r in result_list:
                     raw_results.append(
                         {
-                            "url": r.url,
-                            "title": r.title,
+                            "url": getattr(r, "url", ""),
+                            "title": getattr(r, "title", ""),
                             "text": getattr(r, "description", "") or "",
                         }
                     )

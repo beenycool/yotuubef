@@ -755,9 +755,10 @@ class ChannelManager:
 
             self.active_thumbnail_tests[video_id] = test_info
 
-            upload_row = await self._get_db_manager().get_upload_by_video_id(video_id)
+            db_manager = await self._get_db_manager()
+            upload_row = await db_manager.get_upload_by_video_id(video_id)
             if upload_row:
-                await self._get_db_manager().start_thumbnail_ab_test(upload_row["id"])
+                await db_manager.start_thumbnail_ab_test(upload_row["id"])
 
             self.logger.info(
                 f"Started thumbnail A/B test for video {video_id} with {len(variants)} variants"
@@ -1187,9 +1188,10 @@ class ChannelManager:
         return f"V{index + 1}"
 
     async def _get_db_manager(self) -> DatabaseManager:
+        from src.database.db_manager import get_db_manager as _get_shared_db
+
         if self._db_manager is None:
-            self._db_manager = DatabaseManager()
-            await self._db_manager.initialize_database()
+            self._db_manager = await _get_shared_db()
         return self._db_manager
 
     async def _get_video_path(self, video_id: str) -> Optional[Path]:

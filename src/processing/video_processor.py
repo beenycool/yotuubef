@@ -1433,7 +1433,7 @@ class VideoEffects:
             inner = inner.with_position(("center", "center"))
 
             border = CompositeVideoClip([border, inner])
-            border = border.set_opacity(0.8)
+            border = MoviePyCompat.with_opacity(border, 0.8)
             border = MoviePyCompat.with_start(border, timestamp)
             border = MoviePyCompat.with_duration(border, duration)
 
@@ -3026,11 +3026,18 @@ class VideoProcessor:
                     music_clip = music_clip.with_volume_scaled(background_volume)
                 except Exception as e:
                     self.logger.warning(f"Error applying volume to fallback music: {e}")
-                    # Fallback to trying volumex method
                     try:
-                        music_clip = music_clip.with_volume_scaled(background_volume)
+                        vol_attr = getattr(music_clip, "volumex", None)
+                        if callable(vol_attr):
+                            music_clip = vol_attr(background_volume)
+                        else:
+                            self.logger.warning(
+                                "No alternative volume method available; using clip at original volume"
+                            )
                     except Exception as e2:
-                        self.logger.warning(f"Error with volumex fallback: {e2}")
+                        self.logger.warning(
+                            f"Error with alternative volume method: {e2}"
+                        )
                 resource_manager.register_clip(music_clip)
 
                 self.logger.info(
