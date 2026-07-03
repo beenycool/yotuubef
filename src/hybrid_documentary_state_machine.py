@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import ast
 import json
 import logging
@@ -29,7 +30,7 @@ import aiohttp
 
 if TYPE_CHECKING:
     from src.utils.search_audit_logger import SearchAuditLogger
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 OpenAI = None
 try:
@@ -42,6 +43,61 @@ except ImportError:
 
 
 logger = logging.getLogger(__name__)
+
+
+# ── AI Output Validation & Auto-Retry ──────────────────────────────────────────
+
+PHASE_VALIDATION_SCHEMAS: dict[str, type[BaseModel]] = {}
+
+try:
+    from src.models import (
+        ScriptSchema,
+        IdeaGenerationSchema,
+        EvidenceGatheringSchema,
+    )
+
+    PHASE_VALIDATION_SCHEMAS = {
+        "SCRIPTING": ScriptSchema,
+        "IDEA_GENERATION": IdeaGenerationSchema,
+        "EVIDENCE_GATHERING": EvidenceGatheringSchema,
+    }
+except ImportError:
+    pass
+
+
+def validate_phase_output(
+    phase_name: str, raw_data: dict
+) -> tuple[dict | None, str | None]:
+    """Validate AI phase output against its Pydantic schema.
+
+    Returns (validated_dict, error_message).
+    If valid, error_message is None. If invalid, returns (None, error_string).
+    """
+    schema = PHASE_VALIDATION_SCHEMAS.get(phase_name)
+    if schema is None:
+        return raw_data, None
+    try:
+        validated = schema.model_validate(raw_data)
+        return validated.model_dump(), None
+    except ValidationError as e:
+        error_msg = f"Phase {phase_name} validation failed: {e}"
+        logger.error(error_msg)
+        return None, error_msg
+
+
+def build_validation_feedback_prompt(
+    phase_name: str, raw_data: dict, error: str
+) -> str:
+    """Build a prompt fragment telling the LLM to fix its JSON output."""
+    return (
+        f"\n\nPREVIOUS OUTPUT FOR PHASE '{phase_name}' FAILED VALIDATION.\n"
+        f"Error: {error}\n\n"
+        f"Raw output that failed:\n{json.dumps(raw_data, indent=2, ensure_ascii=True)[:2000]}\n\n"
+        "Fix the JSON structure according to the phase contract. "
+        "Ensure all required fields are present with correct types. "
+        "Return ONLY valid JSON matching the contract."
+    )
+
 
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
 NVIDIA_API_KEY = os.getenv("NVIDIA_NIM_API_KEY", "")
@@ -226,10 +282,15 @@ Context:
 Hard rules:
 1) Return ONLY valid JSON matching the schema for CURRENT_PIPELINE_PHASE.
 2) Never invent sources, dates, or quotes. If you don't know the exact date or username, don't write it.
-3) In SCRIPTING, write short, punchy sentences (max 10-15 words per segment). Use conversational language.
-4) In SCRIPTING, map each segment to a concrete local asset path when available to prove the facts.
-5) In EVIDENCE_GATHERING, prioritize searching for primary sources: forum screenshots, archive.org links, and exact timestamps.
-6) Every segment must advance the detective narrative. If a segment does not reveal new evidence or advance the hook, delete it.
+3) In SCRIPTING, the first segment (the hook) MUST be under 3 seconds. Intended_duration_seconds must be <= 3.0 for the hook.
+4) In SCRIPTING, match word count to intended_duration_seconds to avoid TTS speedup:
+   - intended_duration_seconds 3-5s: max 8 words
+   - intended_duration_seconds 6-8s: max 15 words  
+   - intended_duration_seconds 9-12s: max 22 words
+   Use conversational language. Short sentences only.
+5) In SCRIPTING, map each segment to a concrete local asset path when available to prove the facts.
+6) In EVIDENCE_GATHERING, prioritize searching for primary sources: forum screenshots, archive.org links, and exact timestamps.
+7) Every segment must advance the detective narrative. If a segment does not reveal new evidence or advance the hook, delete it.
 
 FORBIDDEN PHRASES (DO NOT USE THESE):
 - "Did you know?"
@@ -572,9 +633,58 @@ class ExaSearchClient:
             if not isinstance(url, str) or not url:
                 continue
 
-            title = item.get("title") or ""
-            description = item.get("text") or item.get("snippet") or ""
-            source = item.get("source") or "unknown"
+            # Filter out logos and icons
+            url_path = url.split("?")[0].split("#")[0]
+            filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
+            filename_lower = filename.lower()
+            if any(kw in filename_lower for kw in LOGO_FILTER_KEYWORDS):
+                continue
+
+            title = item.get("title") or item.get("name") or item.get("title") or ""
+            description = (
+                item.get("text") or item.get("snippet") or item.get("description") or ""
+            )
+            source = item.get("source") or item.get("domain") or "unknown"
+            thumbnail_url = (
+                item.get("thumbnail")
+                or item.get("thumbnail_url")
+                or item.get("image")
+                or ""
+            )
+
+            # Strict filtering for logos, icons, and avatars
+            if item.get("logo") is True:
+                continue
+            title_lower = str(title).lower()
+            if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
+                continue
+
+            if isinstance(thumbnail_url, dict):
+                if thumbnail_url.get("logo"):
+                    continue
+                thumbnail_url = (
+                    thumbnail_url.get("url")
+                    or thumbnail_url.get("src")
+                    or str(thumbnail_url)
+                )
+            elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
+                parsed_thumb = None
+                try:
+                    parsed_thumb = json.loads(thumbnail_url)
+                except json.JSONDecodeError:
+                    try:
+                        parsed_thumb = ast.literal_eval(thumbnail_url)
+                    except (ValueError, SyntaxError):
+                        pass
+
+                if isinstance(parsed_thumb, dict):
+                    if parsed_thumb.get("logo"):
+                        continue
+                    thumbnail_url = (
+                        parsed_thumb.get("url")
+                        or parsed_thumb.get("src")
+                        or thumbnail_url
+                    )
 
             parsed.append(
                 MediaSearchResult(
@@ -828,6 +938,7 @@ __all__ = [
     "MediaSearchResult",
     "NVIDIA_BASE_URL",
     "PHASE_JSON_CONTRACTS",
+    "PHASE_VALIDATION_SCHEMAS",
     "PipelinePhase",
     "ResearchArtifact",
     "RunState",
@@ -835,6 +946,7 @@ __all__ = [
     "SummaryResult",
     "TranscriptArtifacts",
     "build_state_machine_prompt",
+    "build_validation_feedback_prompt",
     "estimate_tokens_conservative",
     "load_run_state",
     "save_finding",
@@ -843,4 +955,5 @@ __all__ = [
     "setup_project_workspace",
     "summarize_if_needed",
     "transcribe_media_file",
+    "validate_phase_output",
 ]

@@ -188,6 +188,7 @@ class ContentConfig:
     max_reddit_posts_to_fetch: int = 10
 
     curated_subreddits: List[str] = field(default_factory=list)
+
     forbidden_words: List[str] = field(
         default_factory=lambda: [
             "fuck",

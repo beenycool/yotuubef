@@ -181,70 +181,203 @@ class EnhancementOptimizer:
             return {"sufficient_data": False, "error": str(e)}
 
     def _calculate_parameter_correlations(self) -> Dict[str, Dict[str, float]]:
-        """Calculate correlations between parameters and performance metrics"""
-        correlations = {}
+        """Compute Pearson correlations between enhancement parameters and performance metrics.
+
+        Queries the video_metrics database for enhancements_used data and
+        corresponding performance metrics (engagement_rate, retention_rate,
+        completion_rate) over the last 30 days. Computes correlation coefficients
+        per parameter using numpy. Returns only when sufficient data exists (n >= 10 videos).
+        """
+        correlations: Dict[str, Dict[str, float]] = {}
 
         try:
-            # This would analyze stored parameter values vs performance in production
-            # For now, we'll simulate based on typical optimization patterns
-
-            correlations = {
-                "zoom_intensity": {
-                    "engagement_correlation": 0.20,
-                    "retention_correlation": 0.15,
-                    "completion_correlation": 0.12,
-                },
-                "color_grading_strength": {
-                    "engagement_correlation": 0.18,
-                    "retention_correlation": 0.10,
-                    "completion_correlation": 0.08,
-                },
-                "background_music_volume": {
-                    "engagement_correlation": 0.12,
-                    "retention_correlation": 0.22,
-                    "completion_correlation": 0.18,
-                },
-            }
-
+            with sqlite3.connect(str(self.db.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT enhancements_used, engagement_rate, retention_rate,
+                           completion_rate, click_through_rate
+                    FROM video_metrics
+                    WHERE upload_date >= ?
+                    """,
+                    ((datetime.now() - timedelta(days=30)).isoformat(),),
+                )
+                rows = cursor.fetchall()
+                if len(rows) >= self.min_sample_size:
+                    self.logger.info(
+                        "Computing parameter correlations from %d videos", len(rows)
+                    )
+                    param_to_enhancement_key = {
+                        "zoom_intensity": "dynamic_zoom",
+                        "color_grading_strength": "color_grade",
+                        "sound_effects_volume": "sound_effect",
+                        "speed_effect_factor": "speed_effect",
+                        "text_overlay_duration": "text_overlay",
+                        "visual_effects_intensity": "visual_effect",
+                        "hook_text_font_size": "hook_font",
+                        "background_music_volume": "music_volume",
+                    }
+                    for param in self.parameter_constraints:
+                        param_values = []
+                        eng_values = []
+                        ret_values = []
+                        cmp_values = []
+                        enh_key = param_to_enhancement_key.get(param, param)
+                        for row in rows:
+                            enhancements = json.loads(row[0]) if row[0] else []
+                            if enh_key in enhancements:
+                                param_values.append(1.0)
+                            else:
+                                param_values.append(0.0)
+                            eng_values.append(row[1] or 0.0)
+                            ret_values.append(row[2] or 0.0)
+                            cmp_values.append(row[3] or 0.0)
+                        if len(set(param_values)) > 1:
+                            eng_corr = (
+                                np.corrcoef(param_values, eng_values)[0, 1]
+                                if np.std(param_values) > 0
+                                else 0
+                            )
+                            ret_corr = (
+                                np.corrcoef(param_values, ret_values)[0, 1]
+                                if np.std(param_values) > 0
+                                else 0
+                            )
+                            cmp_corr = (
+                                np.corrcoef(param_values, cmp_values)[0, 1]
+                                if np.std(param_values) > 0
+                                else 0
+                            )
+                            correlations[param] = {
+                                "engagement_correlation": float(eng_corr),
+                                "retention_correlation": float(ret_corr),
+                                "completion_correlation": float(cmp_corr),
+                            }
+                    return correlations
+                self.logger.info(
+                    "Insufficient data for correlation analysis (%d videos, need %d)",
+                    len(rows),
+                    self.min_sample_size,
+                )
         except Exception as e:
-            self.logger.warning(f"Parameter correlation calculation failed: {e}")
+            self.logger.warning("Parameter correlation calculation failed: %s", e)
 
         return correlations
 
     def _calculate_baseline_metrics(self) -> Dict[str, float]:
-        """Calculate baseline performance metrics"""
+        """Calculate baseline performance metrics from real data.
+
+        Attempts to query the engagement_metrics database for average metrics
+        across all recent videos. Falls back to empty dict if insufficient data.
+        """
         try:
-            # Get average metrics across all recent videos
-            baseline = {
-                "avg_engagement_rate": 12.5,  # Percentage
-                "avg_retention_rate": 65.0,  # Percentage
-                "avg_completion_rate": 45.0,  # Percentage
-                "avg_ctr": 0.08,  # Click-through rate
-                "avg_likes_ratio": 92.0,  # Percentage of positive reactions
-            }
-
-            return baseline
-
+            with sqlite3.connect(str(self.db.db_path)) as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    """
+                    SELECT AVG(engagement_rate), AVG(retention_rate),
+                           AVG(completion_rate), AVG(click_through_rate)
+                    FROM video_metrics
+                    WHERE upload_date >= ?
+                    """,
+                    ((datetime.now() - timedelta(days=30)).isoformat(),),
+                )
+                row = cursor.fetchone()
+                if row and row[0] is not None:
+                    return {
+                        "avg_engagement_rate": row[0] or 0.0,
+                        "avg_retention_rate": row[1] or 0.0,
+                        "avg_completion_rate": row[2] or 0.0,
+                        "avg_ctr": row[3] or 0.0,
+                    }
         except Exception as e:
-            self.logger.warning(f"Baseline calculation failed: {e}")
-            return {}
+            self.logger.warning("Baseline calculation failed: %s", e)
+
+        return {}
 
     def _analyze_performance_trends(self) -> Dict[str, Any]:
-        """Analyze performance trends over time"""
+        """Analyze performance trends over time from real DB data."""
         try:
-            trends = {
-                "engagement_trend": "increasing",  # 'increasing', 'decreasing', 'stable'
+            trends: Dict[str, Any] = {
+                "engagement_trend": "stable",
                 "retention_trend": "stable",
-                "completion_trend": "increasing",
-                "trend_confidence": 0.75,
-                "significant_changes": [
-                    {
-                        "metric": "engagement_rate",
-                        "change_percent": 8.5,
-                        "time_period": "2_weeks",
-                    }
-                ],
+                "completion_trend": "stable",
+                "trend_confidence": 0.0,
+                "significant_changes": [],
             }
+
+            with sqlite3.connect(str(self.db.db_path)) as conn:
+                cursor = conn.cursor()
+
+                # Compare recent 7 days vs previous 14 days
+                cursor.execute(
+                    """
+                    SELECT
+                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days')
+                            THEN engagement_rate END) AS recent_eng,
+                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
+                            AND datetime(upload_date) < datetime('now', '-7 days')
+                            THEN engagement_rate END) AS prior_eng,
+                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days')
+                            THEN retention_rate END) AS recent_ret,
+                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
+                            AND datetime(upload_date) < datetime('now', '-7 days')
+                            THEN retention_rate END) AS prior_ret,
+                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days')
+                            THEN completion_rate END) AS recent_cmp,
+                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
+                            AND datetime(upload_date) < datetime('now', '-7 days')
+                            THEN completion_rate END) AS prior_cmp,
+                        COUNT(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days') THEN 1 END) AS recent_count,
+                        COUNT(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
+                            AND datetime(upload_date) < datetime('now', '-7 days') THEN 1 END) AS prior_count
+                    FROM video_metrics
+                    """,
+                )
+                row = cursor.fetchone()
+
+            if row and row[6] and row[6] >= 3 and row[7] and row[7] >= 3:
+                recent_eng = row[0] or 0.0
+                prior_eng = row[1] or 0.0
+                recent_ret = row[2] or 0.0
+                prior_ret = row[3] or 0.0
+                recent_cmp = row[4] or 0.0
+                prior_cmp = row[5] or 0.0
+
+                def classify(a: float, b: float) -> str:
+                    if b == 0:
+                        return "stable"
+                    pct = ((a - b) / b) * 100
+                    if pct > 5:
+                        return "increasing"
+                    if pct < -5:
+                        return "decreasing"
+                    return "stable"
+
+                trends["engagement_trend"] = classify(recent_eng, prior_eng)
+                trends["retention_trend"] = classify(recent_ret, prior_ret)
+                trends["completion_trend"] = classify(recent_cmp, prior_cmp)
+
+                sig_changes = []
+                for metric_name, recent_val, prior_val in [
+                    ("engagement_rate", recent_eng, prior_eng),
+                    ("retention_rate", recent_ret, prior_ret),
+                    ("completion_rate", recent_cmp, prior_cmp),
+                ]:
+                    if prior_val > 0:
+                        pct = ((recent_val - prior_val) / prior_val) * 100
+                        if abs(pct) > 5:
+                            sig_changes.append(
+                                {
+                                    "metric": metric_name,
+                                    "change_percent": round(pct, 1),
+                                    "time_period": "2_weeks",
+                                }
+                            )
+                trends["significant_changes"] = sig_changes
+
+                n = row[6] + row[7]
+                trends["trend_confidence"] = round(min(1.0, n / 20), 2)
 
             return trends
 

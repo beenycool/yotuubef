@@ -75,17 +75,52 @@ class BraveImageClient:
         query_hash = hashlib.sha256(query.encode()).hexdigest()[:24]
         return self.cache_dir / f"{query_hash}.jpg"
 
-    async def search_images(self, query: str, count: int = 3) -> List[Dict[str, Any]]:
+    async def search_images(
+        self,
+        query: str,
+        count: int = 3,
+        asset_store: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
         """
-        Search for images using Brave API.
+        Search for images using local vector store first, then Brave API as fallback.
 
         Args:
             query: Search query string
             count: Number of results to return
+            asset_store: Optional AssetVectorStore for local dedup
 
         Returns:
             List of image result dictionaries with URL, title, etc.
         """
+        # Query local vector store first
+        if asset_store is not None:
+            try:
+                local_results = await asset_store.search(
+                    query, asset_type="image", top_k=count
+                )
+                if local_results:
+                    local_paths = [
+                        {
+                            "url": f"file://{r['path']}",
+                            "title": Path(r["path"]).name,
+                            "type": "local_vector_store",
+                            "source": "local_cache",
+                            "score": r["score"],
+                            "local_path": r["path"],
+                        }
+                        for r in local_results
+                        if r.get("path") and Path(r["path"]).exists()
+                    ]
+                    if local_paths:
+                        self.logger.info(
+                            "Found %d images locally for query: %s",
+                            len(local_paths),
+                            query,
+                        )
+                        return local_paths
+            except Exception as exc:
+                self.logger.debug("Local vector store query failed: %s", exc)
+
         if not self.api_key:
             self.logger.warning("BRAVE_SEARCH_API_KEY not set")
             return []
@@ -103,7 +138,9 @@ class BraveImageClient:
                 if response.status == 200:
                     data = await response.json()
                     results = data.get("results", [])
-                    self.logger.info(f"Found {len(results)} images for query: {query}")
+                    self.logger.info(
+                        f"Found {len(results)} images from Brave for query: {query}"
+                    )
                     return results
                 else:
                     self.logger.warning(f"Brave image search failed: {response.status}")

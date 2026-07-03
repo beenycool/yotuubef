@@ -3,6 +3,8 @@ Enhanced YouTube Client with A/B Testing and Analytics Integration
 Handles video uploads, thumbnail management, comment interactions, and performance tracking.
 """
 
+from __future__ import annotations
+
 import logging
 import asyncio
 import functools
