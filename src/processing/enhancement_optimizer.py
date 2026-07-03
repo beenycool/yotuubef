@@ -181,12 +181,17 @@ class EnhancementOptimizer:
             return {"sufficient_data": False, "error": str(e)}
 
     def _calculate_parameter_correlations(self) -> Dict[str, Dict[str, float]]:
-        """Compute Pearson correlations between enhancement parameters and performance metrics.
+        """Calculate actual correlations from stored performance data.
 
-        Queries the video_metrics database for enhancements_used data and
-        corresponding performance metrics (engagement_rate, retention_rate,
-        completion_rate) over the last 30 days. Computes correlation coefficients
-        per parameter using numpy. Returns only when sufficient data exists (n >= 10 videos).
+        TODO: This is a stub. The real implementation should:
+        1. Query the engagement_metrics database for parameter values and
+           corresponding performance metrics (engagement_rate, retention_rate,
+           completion_rate) over the last 30 days.
+        2. Compute Pearson/Spearman correlations between each parameter and
+           each metric using numpy or scipy.
+        3. Only return correlations when sufficient data exists (n >= 10 videos).
+
+        Until enough real data is collected, returns heuristic defaults.
         """
         correlations: Dict[str, Dict[str, float]] = {}
 
@@ -207,25 +212,14 @@ class EnhancementOptimizer:
                     self.logger.info(
                         "Computing parameter correlations from %d videos", len(rows)
                     )
-                    param_to_enhancement_key = {
-                        "zoom_intensity": "dynamic_zoom",
-                        "color_grading_strength": "color_grade",
-                        "sound_effects_volume": "sound_effect",
-                        "speed_effect_factor": "speed_effect",
-                        "text_overlay_duration": "text_overlay",
-                        "visual_effects_intensity": "visual_effect",
-                        "hook_text_font_size": "hook_font",
-                        "background_music_volume": "music_volume",
-                    }
                     for param in self.parameter_constraints:
                         param_values = []
                         eng_values = []
                         ret_values = []
                         cmp_values = []
-                        enh_key = param_to_enhancement_key.get(param, param)
                         for row in rows:
                             enhancements = json.loads(row[0]) if row[0] else []
-                            if enh_key in enhancements:
+                            if param in enhancements:
                                 param_values.append(1.0)
                             else:
                                 param_values.append(0.0)
@@ -313,24 +307,24 @@ class EnhancementOptimizer:
                 cursor.execute(
                     """
                     SELECT
-                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days')
+                        AVG(CASE WHEN upload_date >= datetime('now', '-7 days')
                             THEN engagement_rate END) AS recent_eng,
-                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
-                            AND datetime(upload_date) < datetime('now', '-7 days')
+                        AVG(CASE WHEN upload_date >= datetime('now', '-21 days')
+                            AND upload_date < datetime('now', '-7 days')
                             THEN engagement_rate END) AS prior_eng,
-                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days')
+                        AVG(CASE WHEN upload_date >= datetime('now', '-7 days')
                             THEN retention_rate END) AS recent_ret,
-                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
-                            AND datetime(upload_date) < datetime('now', '-7 days')
+                        AVG(CASE WHEN upload_date >= datetime('now', '-21 days')
+                            AND upload_date < datetime('now', '-7 days')
                             THEN retention_rate END) AS prior_ret,
-                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days')
+                        AVG(CASE WHEN upload_date >= datetime('now', '-7 days')
                             THEN completion_rate END) AS recent_cmp,
-                        AVG(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
-                            AND datetime(upload_date) < datetime('now', '-7 days')
+                        AVG(CASE WHEN upload_date >= datetime('now', '-21 days')
+                            AND upload_date < datetime('now', '-7 days')
                             THEN completion_rate END) AS prior_cmp,
-                        COUNT(CASE WHEN datetime(upload_date) >= datetime('now', '-7 days') THEN 1 END) AS recent_count,
-                        COUNT(CASE WHEN datetime(upload_date) >= datetime('now', '-21 days')
-                            AND datetime(upload_date) < datetime('now', '-7 days') THEN 1 END) AS prior_count
+                        COUNT(CASE WHEN upload_date >= datetime('now', '-7 days') THEN 1 END) AS recent_count,
+                        COUNT(CASE WHEN upload_date >= datetime('now', '-21 days')
+                            AND upload_date < datetime('now', '-7 days') THEN 1 END) AS prior_count
                     FROM video_metrics
                     """,
                 )

@@ -4,9 +4,16 @@ import json
 import logging
 import os
 import time
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import aiohttp
+
+try:
+    from openai import AsyncOpenAI
+
+    OPENAI_ASYNC_AVAILABLE = True
+except ImportError:
+    OPENAI_ASYNC_AVAILABLE = False
 
 if TYPE_CHECKING:
     from src.utils.search_audit_logger import SearchAuditLogger
@@ -239,3 +246,227 @@ class AgenticResearcher:
         ]
 
         return [query for query in variants if query not in previous_queries]
+
+
+class AgenticExaResearcher:
+    """
+    Autonomous deep research agent using Exa search + LLM evaluation loop.
+
+    Runs an investigative loop:
+      search -> LLM evaluates -> LLM decides next queries -> repeat
+    until all claims are verified or max_iterations reached.
+    Discards junk results, keeps verified facts with exact quotes + URLs.
+    """
+
+    def __init__(
+        self,
+        search_client: Any,
+        max_iterations: int = 4,
+        audit_logger: Optional[SearchAuditLogger] = None,
+    ):
+        self.search_client = search_client
+        self.max_iterations = max_iterations
+        self.audit_logger = audit_logger
+        self.logger = logging.getLogger(__name__)
+
+        self.api_key = os.getenv("NVIDIA_NIM_API_KEY") or os.getenv(
+            "NVIDIA_API_KEY", ""
+        )
+        self.base_url = os.getenv(
+            "NVIDIA_BASE_URL",
+            "https://integrate.api.nvidia.com/v1",
+        )
+        self.summary_model = os.getenv(
+            "NVIDIA_SUMMARY_MODEL",
+            "qwen/qwen2.5-7b-instruct",
+        )
+
+        self.client = None
+        if OPENAI_ASYNC_AVAILABLE and self.api_key:
+            self.client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+            )
+
+        # Accumulated verified facts across all iterations
+        self.accumulated_knowledge: List[Dict[str, str]] = []
+        self.previous_queries: set = set()
+
+    async def conduct_deep_research(
+        self,
+        topic: str,
+        initial_claims: List[str],
+    ) -> Dict[str, Any]:
+        """
+        Run the full agentic research loop.
+
+        Args:
+            topic: The documentary angle / chosen_angle (e.g. "Action Park Cannonball Loop hoax")
+            initial_claims: List of evidence_questions from synthesis (e.g. ["Was the loop real?", ...])
+
+        Returns:
+            dict with:
+              - verified_evidence: list of {"claim", "quote", "url"}
+              - total_results_evaluated: int
+        """
+        if not self.client:
+            self.logger.warning(
+                "AsyncOpenAI client not available; cannot run agentic research"
+            )
+            return {"verified_evidence": [], "total_results_evaluated": 0}
+
+        current_queries = await self._generate_initial_queries(topic, initial_claims)
+        all_raw_results: List[Dict[str, str]] = []
+
+        for iteration in range(self.max_iterations):
+            if not current_queries:
+                self.logger.info("No more queries to run. Research complete.")
+                break
+
+            self.logger.info(
+                "Research iteration %d/%d. Queries: %s",
+                iteration + 1,
+                self.max_iterations,
+                current_queries,
+            )
+
+            # 1. Execute searches in parallel
+            search_tasks = [
+                self.search_client.search_web(q, count=3) for q in current_queries
+            ]
+            search_results = await asyncio.gather(*search_tasks)
+
+            # Mark queries as done
+            self.previous_queries.update(current_queries)
+
+            # 2. Flatten raw results
+            raw_results: List[Dict[str, str]] = []
+            for result_list in search_results:
+                for r in result_list:
+                    raw_results.append(
+                        {
+                            "url": r.url,
+                            "title": r.title,
+                            "text": getattr(r, "description", "") or "",
+                        }
+                    )
+            all_raw_results.extend(raw_results)
+
+            # 3. Evaluate with LLM
+            evaluation = await self._evaluate_results(
+                topic,
+                initial_claims,
+                raw_results,
+            )
+
+            # 4. Save verified facts
+            verified = evaluation.get("verified_facts", [])
+            if verified:
+                self.accumulated_knowledge.extend(verified)
+                self.logger.info("Verified %d new facts", len(verified))
+
+            # 5. Check if research is complete
+            if evaluation.get("research_complete", False):
+                self.logger.info("LLM indicates research is complete. Stopping search.")
+                break
+
+            # 6. Get next queries, filter out already-run ones
+            next_queries = evaluation.get("next_queries", [])
+            current_queries = [
+                q for q in next_queries if q not in self.previous_queries
+            ]
+
+        return {
+            "verified_evidence": self.accumulated_knowledge,
+            "total_results_evaluated": len(all_raw_results),
+        }
+
+    async def _generate_initial_queries(
+        self,
+        topic: str,
+        claims: List[str],
+    ) -> List[str]:
+        """Generate the first batch of search queries based on topic and claims."""
+        if not claims:
+            return [topic]
+
+        prompt = (
+            "You are an internet investigator. We are making a documentary video about:\n"
+            f"{topic}\n\n"
+            "We need to verify these claims:\n"
+            f"{json.dumps(claims)}\n\n"
+            "Generate 3 highly specific search queries to find primary sources "
+            "or evidence for these claims. Focus on archived pages, forum posts, "
+            "official statements, and primary sources.\n"
+            'Return JSON with a "queries" key containing a list of strings.'
+        )
+
+        try:
+            resp = await self.client.chat.completions.create(
+                model=self.summary_model,
+                messages=[{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+                temperature=0.3,
+            )
+            result = json.loads(resp.choices[0].message.content)
+            queries = result.get("queries", [])
+            if queries:
+                return queries[:5]
+        except Exception as e:
+            self.logger.error("Failed to generate initial queries: %s", e)
+
+        # Fallback: use the claims themselves as queries
+        return claims[:3] if claims else [topic]
+
+    async def _evaluate_results(
+        self,
+        topic: str,
+        claims: List[str],
+        raw_results: List[Dict[str, str]],
+    ) -> Dict[str, Any]:
+        """
+        LLM evaluates search results: keeps good facts, discards junk, plans next queries.
+        """
+        system_prompt = (
+            "You are a strict Documentary Fact-Checker and Research Director.\n"
+            "You will be given raw search results. You must:\n"
+            "1. Evaluate if the search results actually contain proof for our claims.\n"
+            "2. If a result proves a claim, extract the EXACT QUOTE and URL "
+            "and add it to 'verified_facts'.\n"
+            "3. If a result is useless, spam, or doesn't help, ignore it.\n"
+            "4. Based on what you found (or didn't find), decide what to search "
+            "for NEXT to find the missing pieces.\n"
+            "5. If all claims are verified, set 'research_complete' to true.\n\n"
+            "Return JSON with this schema:\n"
+            "{\n"
+            '    "verified_facts": [{"claim": "...", "quote": "...", "url": "..."}],\n'
+            '    "next_queries": ["query 1", "query 2"],\n'
+            '    "research_complete": false\n'
+            "}"
+        )
+
+        user_prompt = (
+            f"TOPIC: {topic}\n"
+            f"CLAIMS TO VERIFY: {json.dumps(claims)}\n\n"
+            "RAW SEARCH RESULTS:\n"
+            f"{json.dumps(raw_results, indent=2)}"
+        )
+
+        try:
+            resp = await self.client.chat.completions.create(
+                model=self.summary_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.2,
+            )
+            return json.loads(resp.choices[0].message.content)
+        except Exception as e:
+            self.logger.error("Failed to evaluate search results: %s", e)
+            return {
+                "verified_facts": [],
+                "next_queries": [],
+                "research_complete": False,
+            }

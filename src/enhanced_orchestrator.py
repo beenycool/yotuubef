@@ -38,7 +38,11 @@ from src.models import (
     TextOverlay,
     TextStyle,
 )
-from src.integrations.search_client import DeepResearchClient, AgenticResearcher
+from src.integrations.search_client import (
+    DeepResearchClient,
+    AgenticResearcher,
+    AgenticExaResearcher,
+)
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
 from src.processing.advanced_audio_processor import AdvancedAudioProcessor
@@ -50,6 +54,7 @@ from src.hybrid_documentary_state_machine import (
     ExaSearchClient,
     PipelinePhase,
     build_state_machine_prompt,
+    build_validation_feedback_prompt,
     load_run_state,
     save_finding,
     save_run_state,
@@ -57,8 +62,10 @@ from src.hybrid_documentary_state_machine import (
     setup_project_workspace,
     summarize_if_needed,
     transcribe_media_file,
+    validate_phase_output,
 )
 from src.utils.search_audit_logger import SearchAuditLogger
+from src.processing.asset_vector_store import AssetVectorStore
 
 
 class EnhancedVideoOrchestrator:
@@ -79,6 +86,9 @@ class EnhancedVideoOrchestrator:
 
         self.advanced_audio_processor = AdvancedAudioProcessor()
         self.gpu_manager = GPUMemoryManager(max_vram_usage=0.85)
+
+        # Local vector store for asset dedup + semantic retrieval
+        self.asset_store = AssetVectorStore()
 
         self.logger.info("Enhanced AI-powered video orchestrator initialized")
 
@@ -358,6 +368,66 @@ class EnhancedVideoOrchestrator:
             synthesis_payload.get("video_queries"), minimum_count=0
         )
 
+        # ── Agentic Research Loop ────────────────────────────────────────
+        # Run autonomous deep research: LLM-driven search + evaluation loop
+        # to find verified facts with exact quotes and URLs.
+        topic = synthesis_payload.get("chosen_angle", "")
+        evidence_questions = synthesis_payload.get("evidence_questions", [])
+        verified_evidence: List[Dict[str, str]] = []
+        if topic and evidence_questions:
+            hackclub_api_key = (
+                os.getenv("HACKCLUB_SEARCH_KEY")
+                or os.getenv("HACKCLUB_SEARCH_API_KEY")
+                or ""
+            ).strip()
+            if hackclub_api_key:
+                self.logger.info(
+                    "Starting agentic research for topic='%s' with %d claims",
+                    topic,
+                    len(evidence_questions),
+                )
+                search_client = ExaSearchClient(api_key=hackclub_api_key)
+                researcher = AgenticExaResearcher(
+                    search_client,
+                    max_iterations=4,
+                )
+                try:
+                    research_report = await researcher.conduct_deep_research(
+                        topic=topic,
+                        initial_claims=evidence_questions,
+                    )
+                    verified_evidence = research_report.get("verified_evidence", [])
+                    if verified_evidence:
+                        self.logger.info(
+                            "Agentic research verified %d facts",
+                            len(verified_evidence),
+                        )
+                        save_finding(
+                            state.project_dir,
+                            "evidence",
+                            "verified_evidence.json",
+                            research_report,
+                        )
+                    else:
+                        self.logger.info(
+                            "Agentic research found no verified evidence "
+                            "(results evaluated: %d)",
+                            research_report.get("total_results_evaluated", 0),
+                        )
+                except Exception as exc:
+                    self.logger.error("Agentic research failed: %s", exc)
+                finally:
+                    await search_client.close()
+            else:
+                self.logger.info(
+                    "HACKCLUB_SEARCH_API_KEY not set; skipping agentic research"
+                )
+        else:
+            self.logger.info(
+                "No chosen_angle or evidence_questions; skipping agentic research"
+            )
+        # ── End Agentic Research Loop ────────────────────────────────────
+
         report_text = self._read_hybrid_artifact_text(state.gemini_report_path)
         evidence_context_parts = [
             json.dumps(synthesis_payload, indent=2, ensure_ascii=True)
@@ -402,6 +472,16 @@ class EnhancedVideoOrchestrator:
             state,
             search_payload,
         )
+
+        # Index downloaded assets into local vector store for future dedup + retrieval
+        await self.asset_store.initialize()
+        raw_media_dir = Path(state.project_dir) / "raw_media"
+        if raw_media_dir.exists():
+            indexed = await self.asset_store.scan_directory(raw_media_dir)
+            self.logger.info(
+                "Indexed %d downloaded assets into local vector store", indexed
+            )
+
         transcripts = await self._transcribe_hybrid_media_assets(
             state,
             downloaded_media,
@@ -411,6 +491,7 @@ class EnhancedVideoOrchestrator:
             "phase": PipelinePhase.EVIDENCE_GATHERING.value,
             "created_at": datetime.now().isoformat(),
             "evidence_plan": evidence_payload.get("evidence_plan", []),
+            "verified_evidence": verified_evidence,
             "media_queries": media_queries,
             "image_queries": search_image_queries,
             "video_queries": search_video_queries,
@@ -537,14 +618,32 @@ class EnhancedVideoOrchestrator:
                 error=f"Failed to parse final script JSON: {exc}",
             )
 
-        render_result = await self._render_hybrid_local_video(state, script_payload)
-        if not render_result.get("success"):
+        max_render_retries = int(os.getenv("HYBRID_RENDER_MAX_RETRIES", "2"))
+        render_result = None
+        last_error = ""
+
+        for attempt in range(max_render_retries + 1):
+            if attempt > 0:
+                print(
+                    f"[Hybrid] Render retry {attempt}/{max_render_retries} "
+                    f"(lowering quality)...",
+                    flush=True,
+                )
+            render_result = await self._render_hybrid_local_video(
+                state, script_payload, render_attempt=attempt
+            )
+            if render_result.get("success"):
+                break
+            last_error = str(render_result.get("error", "Unknown render error"))
+            self.logger.warning("Render attempt %d failed: %s", attempt + 1, last_error)
+
+        if not render_result or not render_result.get("success"):
             state.status = "paused_render_failed"
             save_run_state(state)
             return state, self._phase_result(
                 state,
                 final_script_path=final_script_path,
-                error=str(render_result.get("error", "Hybrid render failed")),
+                error=f"Hybrid render failed after {max_render_retries + 1} attempts: {last_error}",
             )
 
         final_video_path = str(render_result.get("video_path", "") or "")
@@ -1059,44 +1158,77 @@ Search results:
         print(
             f"[Hybrid] Calling AI for {phase.value}... (may take 1-2 min)", flush=True
         )
-        prompt = build_state_machine_prompt(state, context)
-        active_client = getattr(self.ai_client, "active_client", None)
+        max_retries = int(os.getenv("HYBRID_AI_VALIDATION_MAX_RETRIES", "2"))
+        last_error: Optional[str] = None
 
-        if not active_client or not hasattr(
-            active_client, "_chat_completion_with_fallback"
-        ):
-            raise RuntimeError(f"No AI client available for hybrid phase {phase.value}")
+        for attempt in range(max_retries + 1):
+            if attempt > 0 and last_error:
+                print(
+                    f"[Hybrid] Retrying {phase.value} (attempt {attempt + 1}/{max_retries + 1})...",
+                    flush=True,
+                )
+                retry_context = context + build_validation_feedback_prompt(
+                    phase.value, {}, last_error
+                )
+            else:
+                retry_context = context
 
-        max_tokens = 4000 if phase == PipelinePhase.SCRIPTING else 1800
-        response = await active_client._chat_completion_with_fallback(
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Return strict JSON for the provided phase contract only.",
-                },
-                {"role": "user", "content": prompt},
-            ],
-            temperature=0.3,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-        content = response.choices[0].message.content or "{}"
-        parsed = self._safe_parse_phase_json(content)
-        if not isinstance(parsed, dict):
-            self.logger.warning(
-                "Hybrid phase %s returned unparseable JSON; using fallback payload",
-                phase.value,
+            prompt = build_state_machine_prompt(state, retry_context)
+            active_client = getattr(self.ai_client, "active_client", None)
+
+            if not active_client or not hasattr(
+                active_client, "_chat_completion_with_fallback"
+            ):
+                raise RuntimeError(
+                    f"No AI client available for hybrid phase {phase.value}"
+                )
+
+            max_tokens = 4000 if phase == PipelinePhase.SCRIPTING else 1800
+            response = await active_client._chat_completion_with_fallback(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "Return strict JSON for the provided phase contract only.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.3,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
             )
-            return self._fallback_hybrid_phase_payload(phase, context)
+            content = response.choices[0].message.content or "{}"
+            parsed = self._safe_parse_phase_json(content)
+            if not isinstance(parsed, dict):
+                if attempt < max_retries:
+                    last_error = "Unparseable JSON response"
+                    continue
+                self.logger.warning(
+                    "Hybrid phase %s returned unparseable JSON; using fallback payload",
+                    phase.value,
+                )
+                return self._fallback_hybrid_phase_payload(phase, context)
 
-        normalized = self._coerce_hybrid_phase_payload(phase, parsed, context)
-        if not self._is_valid_hybrid_phase_payload(phase, normalized):
-            self.logger.warning(
-                "Hybrid phase %s payload failed validation after normalization; using fallback payload",
-                phase.value,
-            )
-            return self._fallback_hybrid_phase_payload(phase, context)
-        return normalized
+            validated, validation_error = validate_phase_output(phase.value, parsed)
+            if validation_error and attempt < max_retries:
+                last_error = validation_error
+                continue
+
+            normalized = self._coerce_hybrid_phase_payload(phase, parsed, context)
+            if not self._is_valid_hybrid_phase_payload(phase, normalized):
+                if attempt < max_retries:
+                    last_error = "Payload failed key validation"
+                    continue
+                self.logger.warning(
+                    "Hybrid phase %s payload failed validation after normalization; using fallback payload",
+                    phase.value,
+                )
+                return self._fallback_hybrid_phase_payload(phase, context)
+
+            if validated is not None:
+                return validated
+            return normalized
+
+        return self._fallback_hybrid_phase_payload(phase, context)
 
     def _coerce_hybrid_phase_payload(
         self,
@@ -2717,6 +2849,126 @@ Search results:
 
         return last_report
 
+    async def _judge_script_quality(
+        self,
+        script_payload: Dict[str, Any],
+        max_judge_retries: int = 1,
+    ) -> Dict[str, Any]:
+        """LLM Judge: Evaluate script quality, auto-rewrite if score < 8."""
+        segments = script_payload.get("segments", [])
+        if not isinstance(segments, list) or not segments:
+            return script_payload
+
+        active_client = getattr(self.ai_client, "active_client", None)
+        if not active_client or not hasattr(
+            active_client, "_chat_completion_with_fallback"
+        ):
+            return script_payload
+
+        judge_prompt = """You are a strict YouTube Shorts script judge. Evaluate this script.
+Rate it 1-10 based on:
+1. Hook is under 3 seconds (first segment must grab attention immediately)
+2. Sentences are short and punchy (max 10-15 words per segment)
+3. Sounds natural/conversational (not like a robot)
+4. No forbidden phrases: "Did you know?", "In today's video", "Wait for it", "Let's dive in", "Mind-blowing"
+5. The "Perfect Loop" mechanic: last sentence flows back into the hook
+
+Return strict JSON:
+{
+  "score": <1-10>,
+  "hook_under_3_seconds": true/false,
+  "sounds_natural": true/false,
+  "sentences_too_long": true/false,
+  "has_forbidden_phrases": true/false,
+  "feedback": "Brief explanation of issues",
+  "passes_quality_bar": true/false
+}
+
+Script to judge:
+"""
+        for attempt in range(max_judge_retries + 1):
+            try:
+                import json as _json
+
+                script_json = _json.dumps(script_payload, indent=2, ensure_ascii=True)[
+                    :4000
+                ]
+                full_prompt = judge_prompt + script_json
+
+                response = await active_client._chat_completion_with_fallback(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a strict script quality judge. Return JSON only.",
+                        },
+                        {"role": "user", "content": full_prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=500,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                parsed = _json.loads(content)
+                score = int(parsed.get("score", 0))
+                passes = bool(parsed.get("passes_quality_bar", score >= 8))
+
+                print(
+                    f"[Hybrid] Script Judge score: {score}/10 (passes={passes})",
+                    flush=True,
+                )
+                if parsed.get("feedback"):
+                    print(f"[Hybrid] Judge feedback: {parsed['feedback']}", flush=True)
+
+                if passes or attempt >= max_judge_retries:
+                    return script_payload
+
+                rewrite_prompt = (
+                    f"The script judge gave a score of {score}/10 and said: {parsed.get('feedback', '')}\n\n"
+                    f"Rewrite the script to address these issues. Keep all factual details intact. "
+                    f"Make the hook grab attention in the first 3 seconds. Shorten long sentences. "
+                    f"Ensure the last sentence loops back to the hook. "
+                    f"Remove any forbidden phrases. Return the full corrected script JSON."
+                )
+
+                print(
+                    f"[Hybrid] Judge score < 8, rewriting script (attempt {attempt + 1})...",
+                    flush=True,
+                )
+                response = await active_client._chat_completion_with_fallback(
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a top YouTube Shorts scriptwriter. Rewrite to fix issues. Return JSON only.",
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Original script:\n{script_json}\n\n"
+                                f"Rewrite instructions:\n{rewrite_prompt}"
+                            ),
+                        },
+                    ],
+                    temperature=0.4,
+                    max_tokens=4000,
+                    response_format={"type": "json_object"},
+                )
+                content = response.choices[0].message.content or "{}"
+                rewritten = self._safe_parse_phase_json(content)
+                if (
+                    rewritten
+                    and isinstance(rewritten, dict)
+                    and rewritten.get("segments")
+                ):
+                    script_payload = rewritten
+                    print("[Hybrid] Script rewritten by judge feedback.", flush=True)
+                else:
+                    break
+            except Exception as exc:
+                self.logger.warning("Script judge failed: %s", exc)
+                break
+
+        return script_payload
+
     async def _run_agentic_scripting_with_visual_loop(
         self,
         state: Any,
@@ -2738,6 +2990,11 @@ Search results:
         )
         if max_rounds <= 0:
             await self._ensure_min_approved_images_per_segment(state, script_payload)
+            judge_enabled = (
+                str(os.getenv("HYBRID_SCRIPT_JUDGE_ENABLED", "true")).strip().lower()
+            )
+            if judge_enabled not in {"0", "false", "no", "off"}:
+                script_payload = await self._judge_script_quality(script_payload)
             return script_payload
 
         flag_raw = (
@@ -2878,12 +3135,20 @@ Search results:
             save_run_state(state)
 
         await self._ensure_min_approved_images_per_segment(state, script_payload)
+
+        judge_enabled = (
+            str(os.getenv("HYBRID_SCRIPT_JUDGE_ENABLED", "true")).strip().lower()
+        )
+        if judge_enabled not in {"0", "false", "no", "off"}:
+            script_payload = await self._judge_script_quality(script_payload)
+
         return script_payload
 
     async def _render_hybrid_local_video(
         self,
         state: Any,
         script_payload: Dict[str, Any],
+        render_attempt: int = 0,
     ) -> Dict[str, Any]:
         project_dir = Path(str(getattr(state, "project_dir", "") or "")).resolve()
         if not project_dir.exists():
@@ -3308,14 +3573,31 @@ Search results:
                 f"hybrid_{project_slug}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
             )
 
+            quality_profiles = [
+                {"fps": 30, "codec": "libx264", "preset": "medium", "bitrate": "10M"},
+                {"fps": 24, "codec": "libx264", "preset": "fast", "bitrate": "5M"},
+                {"fps": 20, "codec": "libx264", "preset": "veryfast", "bitrate": "3M"},
+            ]
+            profile_idx = min(render_attempt, len(quality_profiles) - 1)
+            profile = quality_profiles[profile_idx]
+
             write_kwargs: Dict[str, Any] = {
-                "fps": 30,
-                "codec": "libx264",
+                "fps": profile["fps"],
+                "codec": profile["codec"],
+                "preset": profile["preset"],
+                "bitrate": profile["bitrate"],
             }
             if getattr(rendered_clip, "audio", None) is not None:
                 write_kwargs["audio_codec"] = "aac"
             else:
                 write_kwargs["audio"] = False
+
+            if profile_idx > 0:
+                print(
+                    f"[Hybrid] Render quality profile: FPS={profile['fps']}, "
+                    f"preset={profile['preset']}, bitrate={profile['bitrate']}",
+                    flush=True,
+                )
 
             await asyncio.to_thread(
                 rendered_clip.write_videofile,
@@ -3907,7 +4189,22 @@ Search results:
 
         narration = str(segment.get("narration", "") or "").strip()
         words = len(re.findall(r"\w+", narration))
-        estimated = 2.5 if words == 0 else max(2.5, min(12.0, (words / 2.6) + 0.8))
+
+        # Dynamic audio pacing: enforce word-count limits per segment
+        # Fast pace: 2.5 words/sec, Normal: 2.0 words/sec, Slow: 1.5 words/sec
+        pace = str(
+            segment.get("pace", segment.get("pacing", "normal")) or "normal"
+        ).lower()
+        words_per_sec = {"fast": 2.5, "normal": 2.0, "slow": 1.5}.get(pace, 2.0)
+
+        estimated = 2.5 if words == 0 else max(2.0, min(12.0, words / words_per_sec))
+
+        # Word-count limit: if narration exceeds ~12 words at fast pace, flag it
+        max_words_for_pace = {"fast": 12, "normal": 15, "slow": 20}.get(pace, 15)
+        if words > max_words_for_pace and words > 0:
+            segment["_word_count_warning"] = (
+                f"{words} words exceeds {max_words_for_pace} for pace '{pace}'"
+            )
 
         requested = float(segment.get("intended_duration_seconds", 0.0) or 0.0)
         baseline = requested if requested > 0 else estimated

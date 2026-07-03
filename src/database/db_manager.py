@@ -1,106 +1,105 @@
 """
 Database management for tracking uploaded videos and processing history.
 Handles SQLite operations with proper error handling and migrations.
+Uses aiosqlite for async-safe database access.
 """
 
-import sqlite3
 import logging
 import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
-from contextlib import contextmanager
+from contextlib import asynccontextmanager
+
+import aiosqlite
 
 from src.config.settings import get_config
 
 
 class DatabaseManager:
-    """Manages the SQLite database for video tracking"""
+    """Manages the SQLite database for video tracking (async)."""
 
     def __init__(self, db_path: Optional[Path] = None):
         self.config = get_config()
         self.db_path = db_path or self.config.paths.db_file
         self.logger = logging.getLogger(__name__)
+        self._conn: Optional[aiosqlite.Connection] = None
 
-        self._initialize_database()
+    async def _ensure_connection(self) -> aiosqlite.Connection:
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(str(self.db_path), timeout=30.0)
+            self._conn.row_factory = aiosqlite.Row
+        return self._conn
 
-    def _initialize_database(self):
-        """Initialize database with required tables"""
+    async def initialize_database(self):
+        """Initialize database with required tables."""
         try:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = await self._ensure_connection()
 
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
+            await conn.execute("""
+                CREATE TABLE IF NOT EXISTS uploads (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reddit_url TEXT UNIQUE NOT NULL,
+                    reddit_post_id TEXT,
+                    youtube_url TEXT,
+                    youtube_video_id TEXT,
+                    upload_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    title TEXT,
+                    subreddit TEXT,
+                    original_score INTEGER,
+                    processing_duration_seconds REAL,
+                    video_duration_seconds REAL,
+                    file_size_mb REAL,
+                    status TEXT DEFAULT 'completed',
+                    error_message TEXT,
+                    thumbnail_uploaded BOOLEAN DEFAULT FALSE,
+                    ai_analysis_used BOOLEAN DEFAULT FALSE,
+                    thumbnail_ctr_a REAL,
+                    thumbnail_ctr_b REAL,
+                    active_thumbnail TEXT DEFAULT 'A',
+                    thumbnail_test_start_date DATETIME,
+                    thumbnail_test_complete BOOLEAN DEFAULT FALSE,
+                    winning_thumbnail TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
 
-                # Create uploads table with comprehensive schema including A/B testing support
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS uploads (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        reddit_url TEXT UNIQUE NOT NULL,
-                        reddit_post_id TEXT,
-                        youtube_url TEXT,
-                        youtube_video_id TEXT,
-                        upload_timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        title TEXT,
-                        subreddit TEXT,
-                        original_score INTEGER,
-                        processing_duration_seconds REAL,
-                        video_duration_seconds REAL,
-                        file_size_mb REAL,
-                        status TEXT DEFAULT 'completed',
-                        error_message TEXT,
-                        thumbnail_uploaded BOOLEAN DEFAULT FALSE,
-                        ai_analysis_used BOOLEAN DEFAULT FALSE,
-                        thumbnail_ctr_a REAL,
-                        thumbnail_ctr_b REAL,
-                        active_thumbnail TEXT DEFAULT 'A',
-                        thumbnail_test_start_date DATETIME,
-                        thumbnail_test_complete BOOLEAN DEFAULT FALSE,
-                        winning_thumbnail TEXT,
-                        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+            await self._ensure_local_artifacts_table(conn)
+            await self._ensure_processing_history_table(conn)
 
-                self._ensure_local_artifacts_table(cursor)
-                self._ensure_processing_history_table(cursor)
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_uploads_reddit_url ON uploads(reddit_url)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_uploads_youtube_video_id ON uploads(youtube_video_id)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_uploads_subreddit ON uploads(subreddit)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_local_artifacts_reddit_url ON local_artifacts(reddit_url)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_local_artifacts_youtube_video_id ON local_artifacts(youtube_video_id)"
+            )
+            await conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_processing_history_created_at ON processing_history(created_at)"
+            )
 
-                conn.commit()
-
-                # Create indexes for performance
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_uploads_reddit_url ON uploads(reddit_url)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_uploads_youtube_video_id ON uploads(youtube_video_id)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_uploads_subreddit ON uploads(subreddit)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_uploads_status ON uploads(status)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_local_artifacts_reddit_url ON local_artifacts(reddit_url)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_local_artifacts_youtube_video_id ON local_artifacts(youtube_video_id)"
-                )
-                cursor.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_processing_history_created_at ON processing_history(created_at)"
-                )
-
-                conn.commit()
-
+            await conn.commit()
             self.logger.info(f"Database initialized at {self.db_path}")
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Database initialization failed: {e}")
             raise
 
-    def _ensure_local_artifacts_table(self, cursor: sqlite3.Cursor) -> None:
-        """Create local_artifacts with the canonical schema when missing."""
-        cursor.execute("""
+    @staticmethod
+    async def _ensure_local_artifacts_table(conn: aiosqlite.Connection) -> None:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS local_artifacts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 reddit_url TEXT NOT NULL UNIQUE,
@@ -113,9 +112,9 @@ class DatabaseManager:
             )
         """)
 
-    def _ensure_processing_history_table(self, cursor: sqlite3.Cursor) -> None:
-        """Create processing_history table for cleanup/audit compatibility."""
-        cursor.execute("""
+    @staticmethod
+    async def _ensure_processing_history_table(conn: aiosqlite.Connection) -> None:
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS processing_history (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 reddit_url TEXT,
@@ -125,40 +124,38 @@ class DatabaseManager:
             )
         """)
 
-    @contextmanager
-    def get_connection(self):
-        """Get database connection with proper error handling"""
+    @asynccontextmanager
+    async def get_connection(self):
+        """Get database connection with proper error handling."""
         conn = None
         try:
-            conn = sqlite3.connect(str(self.db_path), timeout=30.0)
-            conn.row_factory = sqlite3.Row  # Enable dict-like access
+            conn = await aiosqlite.connect(str(self.db_path), timeout=30.0)
+            conn.row_factory = aiosqlite.Row
             yield conn
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             if conn:
-                conn.rollback()
+                await conn.rollback()
             self.logger.error(f"Database error: {e}")
             raise
         finally:
             if conn:
-                conn.close()
+                await conn.close()
 
-    def is_video_processed(self, reddit_url: str) -> bool:
-        """Check if a video has already been processed"""
+    async def is_video_processed(self, reddit_url: str) -> bool:
+        """Check if a video has already been processed."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
                     "SELECT COUNT(*) FROM uploads WHERE reddit_url = ? AND status != 'failed'",
                     (reddit_url,),
                 )
-                count = cursor.fetchone()[0]
-                return count > 0
-
-        except sqlite3.Error as e:
+                row = await cursor.fetchone()
+                return row[0] > 0 if row else False
+        except aiosqlite.Error as e:
             self.logger.error(f"Error checking if video processed: {e}")
             return False
 
-    def record_upload(
+    async def record_upload(
         self,
         reddit_url: str,
         reddit_post_id: str,
@@ -175,17 +172,10 @@ class DatabaseManager:
         status: str = "completed",
         error_message: Optional[str] = None,
     ) -> Optional[int]:
-        """
-        Record a video upload to the database
-
-        Returns:
-            Upload ID if successful, None if failed
-        """
+        """Record a video upload to the database."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                cursor.execute(
+            async with self.get_connection() as conn:
+                await conn.execute(
                     """
                     INSERT INTO uploads (
                         reddit_url, reddit_post_id, youtube_url, youtube_video_id,
@@ -209,7 +199,7 @@ class DatabaseManager:
                         thumbnail_uploaded = excluded.thumbnail_uploaded,
                         ai_analysis_used = excluded.ai_analysis_used,
                         updated_at = excluded.updated_at
-                """,
+                    """,
                     (
                         reddit_url,
                         reddit_post_id,
@@ -229,25 +219,21 @@ class DatabaseManager:
                         datetime.now(),
                     ),
                 )
+                await conn.commit()
 
-                upload_id = cursor.lastrowid
-                if not upload_id:
-                    cursor.execute(
-                        "SELECT id FROM uploads WHERE reddit_url = ?",
-                        (reddit_url,),
-                    )
-                    row = cursor.fetchone()
-                    upload_id = row[0] if row else None
-                conn.commit()
+                cursor = await conn.execute(
+                    "SELECT id FROM uploads WHERE reddit_url = ?", (reddit_url,)
+                )
+                row = await cursor.fetchone()
+                upload_id = row[0] if row else None
 
                 self.logger.info(f"Recorded upload: {title[:50]}... (ID: {upload_id})")
                 return upload_id
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error recording upload: {e}")
             return None
 
-    def update_upload_status(
+    async def update_upload_status(
         self,
         upload_id: int,
         status: str,
@@ -255,16 +241,13 @@ class DatabaseManager:
         youtube_url: Optional[str] = None,
         youtube_video_id: Optional[str] = None,
     ):
-        """Update the status of an upload"""
+        """Update the status of an upload."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                cursor.execute(
+            async with self.get_connection() as conn:
+                await conn.execute(
                     """
                     UPDATE uploads
-                    SET status = ?,
-                        updated_at = ?,
+                    SET status = ?, updated_at = ?,
                         error_message = COALESCE(?, error_message),
                         youtube_url = COALESCE(?, youtube_url),
                         youtube_video_id = COALESCE(?, youtube_video_id)
@@ -279,14 +262,12 @@ class DatabaseManager:
                         upload_id,
                     ),
                 )
-
-                conn.commit()
+                await conn.commit()
                 self.logger.info(f"Updated upload {upload_id} status to {status}")
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error updating upload status: {e}")
 
-    def record_local_artifacts(
+    async def record_local_artifacts(
         self,
         reddit_url: str,
         local_project_id: Optional[str],
@@ -297,10 +278,8 @@ class DatabaseManager:
         """Store/update local artifact mapping for a Reddit source."""
         try:
             local_thumbnail_paths_json = json.dumps(local_thumbnail_paths or [])
-
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                await conn.execute(
                     """
                     INSERT INTO local_artifacts (
                         reddit_url, local_project_id, local_video_path,
@@ -313,7 +292,7 @@ class DatabaseManager:
                         local_thumbnail_paths_json = excluded.local_thumbnail_paths_json,
                         youtube_video_id = excluded.youtube_video_id,
                         updated_at = CURRENT_TIMESTAMP
-                """,
+                    """,
                     (
                         reddit_url,
                         local_project_id,
@@ -322,71 +301,60 @@ class DatabaseManager:
                         youtube_video_id,
                     ),
                 )
-
-                cursor.execute(
+                cursor = await conn.execute(
                     "SELECT id FROM local_artifacts WHERE reddit_url = ?", (reddit_url,)
                 )
-                row = cursor.fetchone()
-                conn.commit()
+                row = await cursor.fetchone()
+                await conn.commit()
                 return row[0] if row else None
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error recording local artifacts: {e}")
             return None
 
-    def get_local_artifacts_by_video_id(
+    async def get_local_artifacts_by_video_id(
         self, video_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get local artifact mapping by YouTube video ID."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
                     """
                     SELECT * FROM local_artifacts
-                    WHERE youtube_video_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                """,
+                    WHERE youtube_video_id = ? ORDER BY updated_at DESC LIMIT 1
+                    """,
                     (video_id,),
                 )
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
                 return self._normalize_local_artifacts_row(row)
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting local artifacts by video ID: {e}")
             return None
 
-    def get_local_artifacts_by_reddit_url(
+    async def get_local_artifacts_by_reddit_url(
         self, reddit_url: str
     ) -> Optional[Dict[str, Any]]:
         """Get local artifact mapping by Reddit URL."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
                     """
                     SELECT * FROM local_artifacts
-                    WHERE reddit_url = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                """,
+                    WHERE reddit_url = ? ORDER BY updated_at DESC LIMIT 1
+                    """,
                     (reddit_url,),
                 )
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
                 return self._normalize_local_artifacts_row(row)
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting local artifacts by Reddit URL: {e}")
             return None
 
+    @staticmethod
     def _normalize_local_artifacts_row(
-        self, row: Optional[sqlite3.Row]
+        row: Optional[aiosqlite.Row],
     ) -> Optional[Dict[str, Any]]:
-        """Normalize local artifact row and parse JSON fields."""
         if not row:
             return None
-
         result = dict(row)
         raw_paths = result.get("local_thumbnail_paths_json")
         if raw_paths:
@@ -399,202 +367,135 @@ class DatabaseManager:
                 result["local_thumbnail_paths"] = []
         else:
             result["local_thumbnail_paths"] = []
-
         return result
 
-    def get_upload_history(self, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get recent upload history"""
+    async def get_upload_history(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get recent upload history."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT * FROM uploads 
-                    ORDER BY upload_timestamp DESC 
-                    LIMIT ?
-                """,
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT * FROM uploads ORDER BY upload_timestamp DESC LIMIT ?",
                     (limit,),
                 )
-
-                rows = cursor.fetchall()
+                rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting upload history: {e}")
             return []
 
-    def get_failed_uploads(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Get failed uploads for retry analysis"""
+    async def get_failed_uploads(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get failed uploads for retry analysis."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT * FROM uploads 
-                    WHERE status = 'failed'
-                    ORDER BY upload_timestamp DESC 
-                    LIMIT ?
-                """,
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT * FROM uploads WHERE status = 'failed' ORDER BY upload_timestamp DESC LIMIT ?",
                     (limit,),
                 )
-
-                rows = cursor.fetchall()
+                rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting failed uploads: {e}")
             return []
 
-    def export_data(self, output_path: Path, format: str = "json"):
-        """Export database data for backup or analysis"""
+    async def export_data(self, output_path: Path, fmt: str = "json"):
+        """Export database data for backup or analysis."""
         try:
-            import json
-
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                # Export uploads
-                cursor.execute("SELECT * FROM uploads")
-                uploads = [dict(row) for row in cursor.fetchall()]
+            async with self.get_connection() as conn:
+                cursor = await conn.execute("SELECT * FROM uploads")
+                rows = await cursor.fetchall()
+                uploads = [dict(row) for row in rows]
 
                 data = {
                     "uploads": uploads,
                     "export_timestamp": datetime.now().isoformat(),
                 }
-
                 output_path.parent.mkdir(parents=True, exist_ok=True)
 
-                if format.lower() == "json":
-                    with open(output_path, "w") as f:
-                        json.dump(data, f, indent=2, default=str)
+                if fmt.lower() == "json":
+                    output_path.write_text(
+                        json.dumps(data, indent=2, default=str), encoding="utf-8"
+                    )
                 else:
-                    raise ValueError(f"Unsupported export format: {format}")
+                    raise ValueError(f"Unsupported export format: {fmt}")
 
                 self.logger.info(f"Database exported to {output_path}")
-
         except Exception as e:
             self.logger.error(f"Error exporting database: {e}")
 
-    # A/B Thumbnail Testing Methods
+    # ── A/B Thumbnail Testing ──────────────────────────────────────────
 
-    def start_thumbnail_ab_test(self, upload_id: int) -> bool:
-        """Start A/B test for thumbnail by recording test start date"""
+    async def start_thumbnail_ab_test(self, upload_id: int) -> bool:
+        """Start A/B test for thumbnail."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                await conn.execute(
                     """
                     UPDATE uploads
-                    SET thumbnail_test_start_date = ?,
-                        active_thumbnail = 'A',
-                        updated_at = ?
+                    SET thumbnail_test_start_date = ?, active_thumbnail = 'A', updated_at = ?
                     WHERE id = ?
-                """,
+                    """,
                     (datetime.now(), datetime.now(), upload_id),
                 )
-
-                conn.commit()
+                await conn.commit()
                 self.logger.info(f"Started thumbnail A/B test for upload {upload_id}")
                 return True
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error starting thumbnail A/B test: {e}")
             return False
 
-    def update_thumbnail_ctr(self, upload_id: int, variant: str, ctr: float) -> bool:
-        """
-        Update CTR for a specific thumbnail variant
-
-        Args:
-            upload_id: ID of the upload
-            variant: 'A' or 'B'
-            ctr: Click-through rate as decimal (e.g., 0.05 for 5%)
-        """
+    async def update_thumbnail_ctr(
+        self, upload_id: int, variant: str, ctr: float
+    ) -> bool:
+        """Update CTR for a specific thumbnail variant."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-
-                if variant.upper() == "A":
-                    cursor.execute(
-                        """
-                        UPDATE uploads
-                        SET thumbnail_ctr_a = ?, updated_at = ?
-                        WHERE id = ?
-                    """,
-                        (ctr, datetime.now(), upload_id),
-                    )
-                elif variant.upper() == "B":
-                    cursor.execute(
-                        """
-                        UPDATE uploads
-                        SET thumbnail_ctr_b = ?, updated_at = ?
-                        WHERE id = ?
-                    """,
-                        (ctr, datetime.now(), upload_id),
-                    )
-                else:
-                    raise ValueError(f"Invalid variant: {variant}. Must be 'A' or 'B'")
-
-                conn.commit()
+            variant = variant.upper()
+            if variant not in ("A", "B"):
+                raise ValueError(f"Invalid variant: {variant}. Must be 'A' or 'B'")
+            column = "thumbnail_ctr_a" if variant == "A" else "thumbnail_ctr_b"
+            async with self.get_connection() as conn:
+                await conn.execute(
+                    f"UPDATE uploads SET {column} = ?, updated_at = ? WHERE id = ?",
+                    (ctr, datetime.now(), upload_id),
+                )
+                await conn.commit()
                 self.logger.info(
                     f"Updated thumbnail CTR for upload {upload_id}, variant {variant}: {ctr:.4f}"
                 )
                 return True
-
-        except (sqlite3.Error, ValueError) as e:
+        except (aiosqlite.Error, ValueError) as e:
             self.logger.error(f"Error updating thumbnail CTR: {e}")
             return False
 
-    def switch_active_thumbnail(self, upload_id: int, variant: str) -> bool:
-        """
-        Switch the active thumbnail variant
-
-        Args:
-            upload_id: ID of the upload
-            variant: 'A' or 'B'
-        """
+    async def switch_active_thumbnail(self, upload_id: int, variant: str) -> bool:
+        """Switch the active thumbnail variant."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    UPDATE uploads
-                    SET active_thumbnail = ?, updated_at = ?
-                    WHERE id = ?
-                """,
+            async with self.get_connection() as conn:
+                await conn.execute(
+                    "UPDATE uploads SET active_thumbnail = ?, updated_at = ? WHERE id = ?",
                     (variant.upper(), datetime.now(), upload_id),
                 )
-
-                conn.commit()
+                await conn.commit()
                 self.logger.info(
                     f"Switched active thumbnail for upload {upload_id} to variant {variant}"
                 )
                 return True
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error switching active thumbnail: {e}")
             return False
 
-    def complete_thumbnail_ab_test(self, upload_id: int, winning_variant: str) -> bool:
-        """
-        Complete the A/B test and record the winning variant
-
-        Args:
-            upload_id: ID of the upload
-            winning_variant: 'A' or 'B'
-        """
+    async def complete_thumbnail_ab_test(
+        self, upload_id: int, winning_variant: str
+    ) -> bool:
+        """Complete the A/B test and record the winning variant."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                await conn.execute(
                     """
                     UPDATE uploads
-                    SET thumbnail_test_complete = TRUE,
-                        winning_thumbnail = ?,
-                        active_thumbnail = ?,
-                        updated_at = ?
+                    SET thumbnail_test_complete = TRUE, winning_thumbnail = ?,
+                        active_thumbnail = ?, updated_at = ?
                     WHERE id = ?
-                """,
+                    """,
                     (
                         winning_variant.upper(),
                         winning_variant.upper(),
@@ -602,101 +503,78 @@ class DatabaseManager:
                         upload_id,
                     ),
                 )
-
-                conn.commit()
+                await conn.commit()
                 self.logger.info(
                     f"Completed thumbnail A/B test for upload {upload_id}, winner: {winning_variant}"
                 )
                 return True
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error completing thumbnail A/B test: {e}")
             return False
 
-    def get_pending_ab_tests(self, hours_since_start: int = 24) -> List[Dict[str, Any]]:
-        """
-        Get uploads that are ready for thumbnail A/B test evaluation
-
-        Args:
-            hours_since_start: Minimum hours since test started
-
-        Returns:
-            List of uploads ready for evaluation
-        """
+    async def get_pending_ab_tests(
+        self, hours_since_start: int = 24
+    ) -> List[Dict[str, Any]]:
+        """Get uploads ready for thumbnail A/B test evaluation."""
         try:
             hours_int = max(0, int(hours_since_start))
-            hours_modifier = f"+{hours_int} hours"
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
                     """
                     SELECT * FROM uploads
                     WHERE thumbnail_test_start_date IS NOT NULL
                     AND thumbnail_test_complete = FALSE
                     AND datetime(thumbnail_test_start_date, ?) <= datetime('now')
                     ORDER BY thumbnail_test_start_date ASC
-                """,
-                    (hours_modifier,),
+                    """,
+                    (f"+{hours_int} hours",),
                 )
-
-                rows = cursor.fetchall()
+                rows = await cursor.fetchall()
                 return [dict(row) for row in rows]
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting pending A/B tests: {e}")
             return []
 
-    def get_ab_test_results(self, upload_id: int) -> Optional[Dict[str, Any]]:
-        """Get A/B test results for a specific upload"""
+    async def get_ab_test_results(self, upload_id: int) -> Optional[Dict[str, Any]]:
+        """Get A/B test results for a specific upload."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
                     """
                     SELECT thumbnail_ctr_a, thumbnail_ctr_b, active_thumbnail,
-                           thumbnail_test_start_date, thumbnail_test_complete,
-                           winning_thumbnail
+                           thumbnail_test_start_date, thumbnail_test_complete, winning_thumbnail
                     FROM uploads WHERE id = ?
-                """,
+                    """,
                     (upload_id,),
                 )
-
-                row = cursor.fetchone()
-                if row:
-                    return dict(row)
-                return None
-
-        except sqlite3.Error as e:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting A/B test results: {e}")
             return None
 
-    def get_upload_by_video_id(self, youtube_video_id: str) -> Optional[Dict[str, Any]]:
+    async def get_upload_by_video_id(
+        self, youtube_video_id: str
+    ) -> Optional[Dict[str, Any]]:
         """Get latest upload row by YouTube video ID."""
         try:
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT * FROM uploads
-                    WHERE youtube_video_id = ?
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                    """,
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
+                    "SELECT * FROM uploads WHERE youtube_video_id = ? ORDER BY updated_at DESC LIMIT 1",
                     (youtube_video_id,),
                 )
-                row = cursor.fetchone()
+                row = await cursor.fetchone()
                 return dict(row) if row else None
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error getting upload by video ID: {e}")
             return None
 
-    def complete_thumbnail_ab_test_by_video_id(
+    async def complete_thumbnail_ab_test_by_video_id(
         self, youtube_video_id: str, winning_variant: str
     ) -> bool:
         """Complete thumbnail test by video ID and persist winner variant."""
         try:
-            normalized_variant = str(winning_variant).strip().upper()
+            normalized_variant = winning_variant.strip().upper()
             if normalized_variant not in {"A", "B"}:
                 self.logger.warning(
                     "Invalid winning variant '%s' for video %s",
@@ -704,16 +582,12 @@ class DatabaseManager:
                     youtube_video_id,
                 )
                 return False
-
-            with self.get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
+            async with self.get_connection() as conn:
+                await conn.execute(
                     """
                     UPDATE uploads
-                    SET thumbnail_test_complete = TRUE,
-                        winning_thumbnail = ?,
-                        active_thumbnail = ?,
-                        updated_at = ?
+                    SET thumbnail_test_complete = TRUE, winning_thumbnail = ?,
+                        active_thumbnail = ?, updated_at = ?
                     WHERE youtube_video_id = ?
                     """,
                     (
@@ -723,28 +597,77 @@ class DatabaseManager:
                         youtube_video_id,
                     ),
                 )
-                conn.commit()
+                await conn.commit()
                 return cursor.rowcount > 0
-
-        except sqlite3.Error as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error completing thumbnail test by video ID: {e}")
             return False
 
+    async def close(self) -> None:
+        """Close the persistent connection if open."""
+        if self._conn:
+            await self._conn.close()
+            self._conn = None
 
-# Global database manager instance
+    async def get_engagement_metrics(self, days: int = 30) -> List[Dict[str, Any]]:
+        """Get video metrics for trend analysis. Used by EnhancementOptimizer."""
+        try:
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
+                    """
+                    SELECT enhancements_used, engagement_rate, retention_rate,
+                           completion_rate, click_through_rate
+                    FROM video_metrics
+                    WHERE upload_date >= datetime('now', ?)
+                    """,
+                    (f"-{days} days",),
+                )
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        except aiosqlite.Error:
+            return []
+
+    async def get_avg_metrics(self, days: int = 30) -> Dict[str, float]:
+        """Get average metrics across recent videos."""
+        try:
+            async with self.get_connection() as conn:
+                cursor = await conn.execute(
+                    """
+                    SELECT AVG(engagement_rate), AVG(retention_rate),
+                           AVG(completion_rate), AVG(click_through_rate)
+                    FROM video_metrics
+                    WHERE upload_date >= datetime('now', ?)
+                    """,
+                    (f"-{days} days",),
+                )
+                row = await cursor.fetchone()
+                if row and row[0] is not None:
+                    return {
+                        "avg_engagement_rate": row[0] or 0.0,
+                        "avg_retention_rate": row[1] or 0.0,
+                        "avg_completion_rate": row[2] or 0.0,
+                        "avg_ctr": row[3] or 0.0,
+                    }
+        except aiosqlite.Error:
+            pass
+        return {}
+
+
 _db_manager: Optional[DatabaseManager] = None
 
 
-def get_db_manager() -> DatabaseManager:
-    """Get the global database manager instance"""
+async def get_db_manager() -> DatabaseManager:
+    """Get the global database manager instance."""
     global _db_manager
     if _db_manager is None:
         _db_manager = DatabaseManager()
+        await _db_manager.initialize_database()
     return _db_manager
 
 
-def init_db_manager(db_path: Optional[Path] = None) -> DatabaseManager:
-    """Initialize the global database manager"""
+async def init_db_manager(db_path: Optional[Path] = None) -> DatabaseManager:
+    """Initialize the global database manager."""
     global _db_manager
     _db_manager = DatabaseManager(db_path)
+    await _db_manager.initialize_database()
     return _db_manager

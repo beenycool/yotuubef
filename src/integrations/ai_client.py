@@ -21,6 +21,7 @@ except ImportError:
     OPENAI_AVAILABLE = False
 
 from src.config.settings import get_config
+from src.integrations.ai_provider import OpenAIProvider, ProviderRegistry
 from src.models import (
     AudioDuckingConfig,
     AudioHook,
@@ -127,6 +128,12 @@ class AIClient:
         self._max_cache_size = 128
         self._model_supports_vision: Optional[bool] = None
 
+        # Backward-compatible active_client reference (orchestrator accesses it)
+        self.active_client = self
+
+        # Initialize provider registry for multi-provider support
+        self.provider_registry = ProviderRegistry()
+
         # Initialize NVIDIA NIM client if available
         if OPENAI_AVAILABLE and hasattr(self.config.api, "nvidia_nim_api_key"):
             api_key = self.config.api.nvidia_nim_api_key
@@ -148,6 +155,15 @@ class AIClient:
                 self.alt_model = getattr(self.config.api, "nvidia_nim_alt_model", None)
                 self.nim_available = True
                 self.ai_available = True
+
+                # Register NVIDIA NIM as primary provider
+                self.active_provider = OpenAIProvider(
+                    api_key=api_key,
+                    base_url=base_url,
+                    model=self.model,
+                    alt_model=self.alt_model,
+                )
+                self.provider_registry.register(self.active_provider, make_default=True)
 
                 # Setup rate limiting
                 rpm_limit = getattr(self.config.api, "nvidia_nim_rate_limit_rpm", 60)
@@ -177,11 +193,13 @@ class AIClient:
         Research Facts: {deep_research}
 
         CRITICAL SCRIPTING FORMULA (Follow exactly):
-        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff.
-        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date. (e.g., "You might think it's [X], but if you look at the data...")
-        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs. Make the viewer feel like they are solving the mystery alongside you.
+        1. THE DIRECT HOOK (0-3s): Start with a direct, compelling question or statement about the mystery. NO fluff. Hook segment intended_duration_seconds <= 3.0.
+        2. THE MISDIRECTION (3-10s): State what people *usually* think, then debunk it immediately using a specific fact, number, or date.
+        3. THE BREADCRUMB TRAIL (10-35s): Walk the viewer through the detective work. Cite specific archival forums, exact dates, deleted tweets, or hidden IDs.
         4. THE REVEAL (35-45s): Reveal the final answer, referencing the visual evidence.
-        5. THE PERFECT LOOP: The final sentence MUST grammatically and sonically flow perfectly back into the first word of the hook.
+        5. THE PERFECT LOOP: The final sentence MUST grammatically flow back into the hook.
+        WORD-COUNT LIMITS (per segment, based on intended_duration_seconds):
+        - 3-5s: max 8 words | 6-8s: max 15 words | 9-12s: max 22 words
 
         FORBIDDEN PHRASES (DO NOT USE THESE):
         - "Did you know?"
