@@ -68,7 +68,7 @@ def get_youtube_credentials() -> Credentials | None:
     token_file = os.getenv("YOUTUBE_TOKEN_FILE", "youtube_token.json")
 
     token_json = os.getenv("YOUTUBE_TOKEN_JSON", "").strip()
-    if token_json and not os.path.exists(token_file):
+    if token_json:
         _write_token_file_secure(token_file, token_json)
         logger.info("Materialized YOUTUBE_TOKEN_JSON env var to %s", token_file)
 
@@ -812,6 +812,46 @@ class YouTubeClient:
 
         except Exception as e:
             self.logger.error(f"Failed to reply to comment {comment_id}: {e}")
+            return False
+
+    async def pin_comment(self, comment_id: str) -> bool:
+        """Pin a comment to the top of the comment section."""
+        try:
+            await self._ensure_services_initialized()
+            if not self.youtube_service:
+                return False
+            request = self.youtube_service.commentThreads().list(
+                part="snippet",
+                id=comment_id,
+            )
+            response = await self._execute_request_async(request)
+            if not response or not response.get("items"):
+                return False
+            thread = response["items"][0]
+            thread["snippet"]["isPinned"] = True
+            update_request = self.youtube_service.commentThreads().update(
+                part="snippet",
+                body=thread,
+            )
+            result = await self._execute_request_async(update_request)
+            return result is not None
+        except Exception as e:
+            self.logger.error(f"Failed to pin comment {comment_id}: {e}")
+            return False
+
+    async def heart_comment(self, comment_id: str) -> bool:
+        """Heart (like) a comment on YouTube."""
+        try:
+            await self._ensure_services_initialized()
+            if not self.youtube_service:
+                return False
+            request = self.youtube_service.comments().setModerationStatus(
+                id=comment_id, moderationStatus="published"
+            )
+            result = await self._execute_request_async(request)
+            return result is not None
+        except Exception as e:
+            self.logger.error(f"Failed to heart comment {comment_id}: {e}")
             return False
 
     async def _execute_request_async(self, request):

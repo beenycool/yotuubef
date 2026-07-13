@@ -76,10 +76,11 @@ class AssetVectorStore:
                 logger.warning("ChromaDB init failed, using fallback: %s", exc)
                 self._collection = None
 
-        if not CHROMA_AVAILABLE or self._collection is None:
-            self._id_to_path = {}
-            self._path_to_id = {}
-            self._load_fallback_index()
+        self._id_to_path = {}
+        self._path_to_id = {}
+        self._load_fallback_index()
+
+        if self._collection is None:
             logger.info("AssetVectorStore: using fallback in-memory index")
 
         self._initialized = True
@@ -168,14 +169,14 @@ class AssetVectorStore:
         ext = file_path.suffix.lower()
         parent = file_path.parent.name.lower()
 
+        if "background" in parent or "music" in parent:
+            return "background"
         if (
             "sound" in parent
             or "effect" in parent
             or ext in {".mp3", ".wav", ".ogg", ".flac"}
         ):
             return "sound_effect"
-        if "background" in parent or "music" in parent:
-            return "background"
         if ext in {".mp4", ".webm", ".mov", ".avi"}:
             return "video"
         return "image"
@@ -296,6 +297,7 @@ class AssetVectorStore:
     ) -> List[Dict[str, Any]]:
         """Fallback search using cosine similarity on lightweight embeddings."""
         query_vec = self._fallback_embedding(query)
+        results: List[Dict[str, Any]] = []
         scored: List[Tuple[float, str]] = []
 
         for asset_id, asset_path in self._id_to_path.items():

@@ -244,6 +244,9 @@ class VideoAnalysis(BaseModel):
 
 
 class VideoAnalysisEnhanced(VideoAnalysis):
+    b_roll_moments: List[Dict[str, Any]] = Field(default_factory=list)
+    loop_bridge_text: Optional[str] = None
+
     model_config = ConfigDict(use_enum_values=True)
 
 

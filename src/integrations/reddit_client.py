@@ -81,17 +81,6 @@ class RedditPost:
                 width = reddit_video.get("width", 0)
                 height = reddit_video.get("height", 0)
                 fps = reddit_video.get("fps", 0) or 0
-
-                # Estimate FPS from duration and frame count if available
-                if (
-                    not fps
-                    and reddit_video.get("duration")
-                    and reddit_video.get("scanned_size")
-                ):
-                    try:
-                        fps = reddit_video["scanned_size"] / reddit_video["duration"]
-                    except (ZeroDivisionError, TypeError):
-                        fps = 0
         elif submission.url and any(
             submission.url.lower().endswith(ext)
             for ext in [".mp4", ".webm", ".mov", ".avi"]

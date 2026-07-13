@@ -3,7 +3,7 @@
 # =============================================================================
 # ConfigManager (src/config/settings.py) applies only a subset of sections at
 # runtime:
-#   paths, database, video, video_processing, text_overlay, subtitles, effects,
+#   paths, database, video, video_processing, text_overlay, subtitles, effects, tts,
 #   looping, fallbacks, audio (+ nested audio.background_music.volume),
 #   api/apis, content, and top-level "subreddits".
 # Other sections (ai_features, channel_management, logging, optimization, etc.)

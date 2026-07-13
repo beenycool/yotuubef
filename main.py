@@ -82,9 +82,9 @@ class HybridYouTubeGenerator:
                 self.logger.error("Hybrid workflow failed: %s", result.get("error"))
 
             return result
-        except Exception as e:
-            self.logger.error(f"Hybrid workflow failed: {e}")
-            return {"success": False, "error": str(e)}
+        except Exception as exc:
+            self.logger.exception("Hybrid workflow failed")
+            return {"success": False, "error": str(exc)}
 
     async def __aenter__(self):
         return self

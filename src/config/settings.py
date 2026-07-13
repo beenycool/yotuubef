@@ -188,12 +188,6 @@ class ContentConfig:
     max_reddit_posts_to_fetch: int = 10
 
     curated_subreddits: List[str] = field(default_factory=list)
-    forbidden_words: List[str] = field(default_factory=list)
-    hard_disallowed: List[str] = field(default_factory=list)
-    demonetization_risk: List[str] = field(default_factory=list)
-    caution: List[str] = field(default_factory=list)
-    unsuitable_content_types: List[str] = field(default_factory=list)
-    monetization_tags: List[str] = field(default_factory=list)
 
     forbidden_words: List[str] = field(
         default_factory=lambda: [
@@ -559,6 +553,18 @@ class ConfigManager:
 
     def _apply_yaml_paths_and_database(self, yaml_config: Dict) -> None:
         """Apply `paths` and `database` sections so PathConfig matches config.yaml."""
+        if not isinstance(yaml_config, dict):
+            raise ValueError("yaml_config must be a dict")
+        if (
+            not isinstance(yaml_config.get("paths"), dict)
+            and yaml_config.get("paths") is not None
+        ):
+            raise ValueError("yaml_config['paths'] must be a mapping")
+        if (
+            not isinstance(yaml_config.get("database"), dict)
+            and yaml_config.get("database") is not None
+        ):
+            raise ValueError("yaml_config['database'] must be a mapping")
         paths_cfg = yaml_config.get("paths") or {}
         cfg_parent = self._config_yaml_parent()
 
@@ -894,8 +900,15 @@ def init_config(config_file: Optional[Union[str, Path]] = None) -> ConfigManager
 
 def setup_logging(level: str = "INFO") -> None:
     """Set up logging configuration"""
+    from pathlib import Path
+
     console_handler = logging.StreamHandler()
-    file_handler = logging.FileHandler("youtube_generator.log", encoding="utf-8")
+    cfg = get_config()
+    log_dir = cfg.paths.base_dir / "data" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    file_handler = logging.FileHandler(
+        log_dir / "youtube_generator.log", encoding="utf-8"
+    )
     formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )

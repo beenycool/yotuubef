@@ -395,7 +395,8 @@ class AIClient:
 
             content = response.choices[0].message.content
             parsed = json.loads(content)
-            return int(parsed.get("score", 50))
+            score = int(parsed.get("score", 50))
+            return max(0, min(100, score))
         except Exception as e:
             self.logger.warning(f"Failed to score story potential: {e}")
             return 50
@@ -952,6 +953,7 @@ Example:
         self,
         messages: List[Dict[str, str]],
         temperature: float,
+        max_tokens: int,
         model: str,
         response_format: Optional[Dict[str, str]] = None,
     ) -> str:
@@ -961,6 +963,7 @@ Example:
             {
                 "messages": messages,
                 "temperature": temperature,
+                "max_tokens": max_tokens,
                 "model": model,
                 "response_format": response_format,
             },
@@ -986,7 +989,7 @@ Example:
         # Check cache
         for model_name in models_to_try:
             cache_key = self._make_cache_key(
-                messages, temperature, model_name, response_format
+                messages, temperature, max_tokens, model_name, response_format
             )
             cached = self._response_cache.get(cache_key)
             if cached is not None:
@@ -1019,7 +1022,7 @@ Example:
                         )
                     # Cache response
                     cache_key = self._make_cache_key(
-                        messages, temperature, model_name, response_format
+                        messages, temperature, max_tokens, model_name, response_format
                     )
                     if len(self._response_cache) >= self._max_cache_size:
                         self._response_cache.clear()
@@ -1322,7 +1325,10 @@ Example:
                 and not hasattr(reddit_content, "get")
             ):
                 title = getattr(reddit_content, "title", "Video")
-                description = getattr(reddit_content, "title", "Amazing content!")[:200]
+                description = (
+                    getattr(reddit_content, "selftext", "")
+                    or getattr(reddit_content, "title", "Amazing content!")
+                )[:200]
             else:
                 title = (
                     reddit_content.get("title", "Video")
@@ -1397,7 +1403,9 @@ Example:
                 and not hasattr(reddit_content, "get")
             ):
                 title = getattr(reddit_content, "title", "Engaging Video")[:60]
-                description = "Check out this content!"
+                description = (
+                    getattr(reddit_content, "selftext", "") or "Check out this content!"
+                )[:200]
             else:
                 title = (
                     reddit_content.get("title", "Engaging Video")

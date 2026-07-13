@@ -6,6 +6,7 @@ Uses aiosqlite for async-safe database access.
 
 import logging
 import json
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
@@ -583,7 +584,7 @@ class DatabaseManager:
                 )
                 return False
             async with self.get_connection() as conn:
-                await conn.execute(
+                cursor = await conn.execute(
                     """
                     UPDATE uploads
                     SET thumbnail_test_complete = TRUE, winning_thumbnail = ?,
@@ -654,20 +655,34 @@ class DatabaseManager:
 
 
 _db_manager: Optional[DatabaseManager] = None
+_db_manager_lock = asyncio.Lock()
 
 
 async def get_db_manager() -> DatabaseManager:
     """Get the global database manager instance."""
     global _db_manager
     if _db_manager is None:
-        _db_manager = DatabaseManager()
-        await _db_manager.initialize_database()
+        async with _db_manager_lock:
+            if _db_manager is None:
+                manager = DatabaseManager()
+                try:
+                    await manager.initialize_database()
+                except Exception:
+                    manager = None
+                    raise
+                _db_manager = manager
     return _db_manager
 
 
 async def init_db_manager(db_path: Optional[Path] = None) -> DatabaseManager:
     """Initialize the global database manager."""
     global _db_manager
-    _db_manager = DatabaseManager(db_path)
-    await _db_manager.initialize_database()
+    async with _db_manager_lock:
+        manager = DatabaseManager(db_path)
+        try:
+            await manager.initialize_database()
+        except Exception:
+            manager = None
+            raise
+        _db_manager = manager
     return _db_manager

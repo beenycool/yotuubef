@@ -137,12 +137,7 @@ def test_config_manager_paths_and_database_from_yaml(clean_config, tmp_path):
     assert manager.paths.google_client_secrets_file == (base / "secrets.json").resolve()
 
 
-def test_config_manager_yaml_loading(clean_config, tmp_path, monkeypatch):
-    # Ensure env var doesn't override our yaml config
-    monkeypatch.delenv("ENABLE_SEAMLESS_LOOPING", raising=False)
-    monkeypatch.delenv("ENABLE_AUDIO_CROSSFADE", raising=False)
-    monkeypatch.delenv("LOOP_TRIM_FROM_CENTER", raising=False)
-
+def test_config_manager_yaml_loading(clean_config, tmp_path):
     config_data = {
         "video": {"target_fps": 60, "video_quality_profile": "high"},
         "audio": {

@@ -58,8 +58,9 @@ try:
         "IDEA_GENERATION": IdeaGenerationSchema,
         "EVIDENCE_GATHERING": EvidenceGatheringSchema,
     }
-except ImportError:
-    pass
+except ImportError as exc:
+    logger.critical("Failed to import phase validation schemas: %s", exc)
+    raise
 
 
 def validate_phase_output(

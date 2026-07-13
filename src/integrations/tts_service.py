@@ -170,7 +170,9 @@ class TTSService:
         Returns:
             Path to generated audio file or None if failed
         """
+        created_temp = False
         if output_path is None:
+            created_temp = True
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 output_path = Path(tmp.name)
 
@@ -180,6 +182,11 @@ class TTSService:
                 return result
 
         self.logger.error("No TTS service available for speech generation")
+        if created_temp and output_path and output_path.exists():
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
         return None
 
     def _generate_with_qwen(

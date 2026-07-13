@@ -755,9 +755,10 @@ class ChannelManager:
 
             self.active_thumbnail_tests[video_id] = test_info
 
-            upload_row = await self._get_db_manager().get_upload_by_video_id(video_id)
+            db = await self._get_db_manager()
+            upload_row = await db.get_upload_by_video_id(video_id)
             if upload_row:
-                await self._get_db_manager().start_thumbnail_ab_test(upload_row["id"])
+                await db.start_thumbnail_ab_test(upload_row["id"])
 
             self.logger.info(
                 f"Started thumbnail A/B test for video {video_id} with {len(variants)} variants"
@@ -1166,16 +1167,26 @@ class ChannelManager:
 
         upload_id = upload_row["id"]
         variant_ctrs = winner_analysis.get("variant_ctrs", {})
+        all_success = True
         if 0 in variant_ctrs:
-            await db_manager.update_thumbnail_ctr(
+            if not await db_manager.update_thumbnail_ctr(
                 upload_id, "A", float(variant_ctrs[0])
-            )
+            ):
+                all_success = False
         if 1 in variant_ctrs:
-            await db_manager.update_thumbnail_ctr(
+            if not await db_manager.update_thumbnail_ctr(
                 upload_id, "B", float(variant_ctrs[1])
-            )
+            ):
+                all_success = False
 
-        await db_manager.complete_thumbnail_ab_test(upload_id, winner_label)
+        if not await db_manager.complete_thumbnail_ab_test(upload_id, winner_label):
+            all_success = False
+
+        if not all_success:
+            self.logger.warning(
+                "Thumbnail persistence partially failed for video %s; test will remain active",
+                video_id,
+            )
 
     def _variant_label_for_index(self, index: int) -> str:
         """Map 0 -> A, 1 -> B, 2 -> C, ... for DB winner storage."""

@@ -2794,14 +2794,7 @@ class VideoProcessor:
                 # Apply volume adjustment for original audio with safe access
                 if source_audio:
                     try:
-                        # Create a proper mock video clip with audio
-                        class MockVideoClip:
-                            def __init__(self, audio_clip):
-                                self.audio = audio_clip
-
-                        original_audio = self._process_original_audio(
-                            MockVideoClip(source_audio)
-                        )
+                        original_audio = self._process_original_audio(source_audio)
                     except Exception as e:
                         self.logger.warning(f"Error processing original audio: {e}")
                         original_audio = source_audio
@@ -3542,6 +3535,7 @@ class VideoProcessor:
         max_retries: int = 2,
     ) -> bool:
         """Write video with retry logic and temporary file management"""
+        temp_output = None
         for attempt in range(max_retries + 1):
             try:
                 if attempt > 0:
