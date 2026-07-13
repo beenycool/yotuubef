@@ -42,6 +42,7 @@ from src.integrations.search_client import (
     DeepResearchClient,
     AgenticResearcher,
     AgenticExaResearcher,
+    ExaSearchClient,
 )
 from src.integrations.ai_client import AIClient
 from src.integrations.youtube_client import YouTubeClient
@@ -51,7 +52,6 @@ from src.processing.video_processor import VideoProcessor
 from src.processing.background_manager import BackgroundManager
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 from src.hybrid_documentary_state_machine import (
-    ExaSearchClient,
     PipelinePhase,
     build_state_machine_prompt,
     build_validation_feedback_prompt,

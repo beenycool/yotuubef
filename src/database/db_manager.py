@@ -610,7 +610,7 @@ class DatabaseManager:
             self._conn = None
 
     async def get_engagement_metrics(self, days: int = 30) -> List[Dict[str, Any]]:
-        """Get video metrics for trend analysis. Used by EnhancementOptimizer."""
+        """Get video metrics for trend analysis."""
         try:
             async with self.get_connection() as conn:
                 cursor = await conn.execute(

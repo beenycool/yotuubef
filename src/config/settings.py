@@ -428,9 +428,7 @@ class ConfigManager:
 
     YAML: only matching dataclass field names are applied (see `_load_yaml_config`).
     Sections such as ``ai_features`` or ``channel_management`` are ignored at
-    runtime but may remain in ``config.yaml`` for documentation or because
-    ``EnhancementOptimizer`` (``src/processing/enhancement_optimizer.py``)
-    round-trips the full file when updating tunable parameters.
+    runtime but may remain in ``config.yaml`` for documentation.
     """
 
     def __init__(self, config_file: Optional[Union[str, Path]] = None):

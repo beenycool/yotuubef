@@ -118,17 +118,7 @@ class EngagementMetricsDB:
     def __init__(self, db_path: Optional[Path] = None):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
-
-        if db_path:
-            self.db_path = db_path
-        else:
-            self.db_path = (
-                self.config.paths.base_dir
-                / "data"
-                / "databases"
-                / "engagement_metrics.db"
-            )
-
+        self.db_path = db_path or self.config.paths.db_file
         self._init_database()
 
     def _init_database(self):

@@ -2,9 +2,8 @@
 
 This directory contains all data files organized by type:
 
-## `/databases/`
-- `engagement_metrics.db` - Video performance and engagement metrics
-- `uploaded_videos.db` - Track uploaded videos and prevent duplicates
+## Consolidated Database
+- `youtube_shorts.db` - Single SQLite database containing all tables (uploads, local_artifacts, processing_history, video_metrics, enhancement_tracking, performance_snapshots, ab_test_results)
 
 ## `/logs/`
 - `youtube_generator.log` - Main application logs
