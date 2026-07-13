@@ -39,8 +39,6 @@ class RateLimiter:
     """Rate limiter for API requests"""
 
     def __init__(self, max_requests_per_minute: int = 60):
-        if max_requests_per_minute < 1:
-            raise ValueError("max_requests_per_minute must be at least 1")
         self.max_rpm = max_requests_per_minute
         self.requests_this_minute = []
         self.last_reset = time.time()
@@ -397,7 +395,8 @@ class AIClient:
 
             content = response.choices[0].message.content
             parsed = json.loads(content)
-            return int(parsed.get("score", 50))
+            score = int(parsed.get("score", 50))
+            return max(0, min(100, score))
         except Exception as e:
             self.logger.warning(f"Failed to score story potential: {e}")
             return 50
@@ -420,8 +419,6 @@ Comments to analyze:
 Return a JSON object with a single key "comments" containing an array of the 3 most engaging comments.
 Each object in the array should have:
 - comment_id: string
-- engagement_score: number (0-100)
-- toxicity_score: number (0-100)
 - interaction_priority: integer (0-100)
 - suggested_reply: string
 - sentiment: string (positive/negative/neutral)
@@ -709,10 +706,6 @@ Example:
                 if content.strip():
                     parsed_response = json.loads(content)
                     if isinstance(parsed_response, dict):
-                        if not self._validate_script_safety(
-                            parsed_response, self.config
-                        ):
-                            return self._analyze_with_fallback(context)
                         return parsed_response
                     else:
                         self.logger.error(
@@ -726,15 +719,10 @@ Example:
                 )
                 parsed_json = self._extract_json_object(content)
                 if isinstance(parsed_json, dict):
-                    if not self._validate_script_safety(parsed_json, self.config):
-                        return self._analyze_with_fallback(context)
                     return parsed_json
 
             # If JSON parsing fails, create structured response from text
-            parsed_text = self._parse_nim_text_response(content, context)
-            if not self._validate_script_safety(parsed_text, self.config):
-                return self._analyze_with_fallback(context)
-            return parsed_text
+            return self._parse_nim_text_response(content, context)
 
         except Exception as e:
             self.logger.error(f"NVIDIA NIM analysis failed: {e}")
@@ -965,6 +953,7 @@ Example:
         self,
         messages: List[Dict[str, str]],
         temperature: float,
+        max_tokens: int,
         model: str,
         response_format: Optional[Dict[str, str]] = None,
     ) -> str:
@@ -974,6 +963,7 @@ Example:
             {
                 "messages": messages,
                 "temperature": temperature,
+                "max_tokens": max_tokens,
                 "model": model,
                 "response_format": response_format,
             },
@@ -999,7 +989,7 @@ Example:
         # Check cache
         for model_name in models_to_try:
             cache_key = self._make_cache_key(
-                messages, temperature, model_name, response_format
+                messages, temperature, max_tokens, model_name, response_format
             )
             cached = self._response_cache.get(cache_key)
             if cached is not None:
@@ -1032,7 +1022,7 @@ Example:
                         )
                     # Cache response
                     cache_key = self._make_cache_key(
-                        messages, temperature, model_name, response_format
+                        messages, temperature, max_tokens, model_name, response_format
                     )
                     if len(self._response_cache) >= self._max_cache_size:
                         self._response_cache.clear()
@@ -1237,32 +1227,29 @@ Example:
                 if not text:
                     continue
 
-                try:
-                    b_roll_query = item.get("b_roll_search_query")
-                    expression_cue = item.get("expression_cue")
-                    time_sec = float(item.get("time_seconds", 0.0))
-                    duration = float(item.get("intended_duration_seconds", 4.0))
+                b_roll_query = item.get("b_roll_search_query")
+                expression_cue = item.get("expression_cue")
+                time_sec = float(item.get("time_seconds", 0.0))
+                duration = float(item.get("intended_duration_seconds", 4.0))
 
-                    ns_append(
-                        NarrativeSegment(
-                            text=text,
-                            time_seconds=time_sec,
-                            intended_duration_seconds=duration,
-                            b_roll_search_query=b_roll_query,
-                            expression_cue=expression_cue,
-                        )
+                ns_append(
+                    NarrativeSegment(
+                        text=text,
+                        time_seconds=time_sec,
+                        intended_duration_seconds=duration,
+                        b_roll_search_query=b_roll_query,
+                        expression_cue=expression_cue,
                     )
+                )
 
-                    if b_roll_query:
-                        bm_append(
-                            {
-                                "search_query": b_roll_query,
-                                "timestamp_seconds": time_sec,
-                                "duration": duration,
-                            }
-                        )
-                except (ValueError, TypeError) as e:
-                    self.logger.warning("Skipping malformed segment item: %s", e)
+                if b_roll_query:
+                    bm_append(
+                        {
+                            "search_query": b_roll_query,
+                            "timestamp_seconds": time_sec,
+                            "duration": duration,
+                        }
+                    )
 
             if not narrative_segments:
                 narrative_segments = [
@@ -1324,16 +1311,13 @@ Example:
                 text = str(item.get("text", "")).strip()
                 if not text:
                     continue
-                try:
-                    text_overlays.append(
-                        TextOverlay(
-                            text=text,
-                            timestamp_seconds=float(item.get("timestamp_seconds", 0.0)),
-                            duration=float(item.get("duration", 2.0)),
-                        )
+                text_overlays.append(
+                    TextOverlay(
+                        text=text,
+                        timestamp_seconds=float(item.get("timestamp_seconds", 0.0)),
+                        duration=float(item.get("duration", 2.0)),
                     )
-                except (ValueError, TypeError) as e:
-                    self.logger.warning("Skipping malformed overlay item: %s", e)
+                )
 
             if (
                 hasattr(reddit_content, "__dict__")
@@ -1341,7 +1325,10 @@ Example:
                 and not hasattr(reddit_content, "get")
             ):
                 title = getattr(reddit_content, "title", "Video")
-                description = getattr(reddit_content, "title", "Amazing content!")[:200]
+                description = (
+                    getattr(reddit_content, "selftext", "")
+                    or getattr(reddit_content, "title", "Amazing content!")
+                )[:200]
             else:
                 title = (
                     reddit_content.get("title", "Video")
@@ -1416,7 +1403,9 @@ Example:
                 and not hasattr(reddit_content, "get")
             ):
                 title = getattr(reddit_content, "title", "Engaging Video")[:60]
-                description = "Check out this content!"
+                description = (
+                    getattr(reddit_content, "selftext", "") or "Check out this content!"
+                )[:200]
             else:
                 title = (
                     reddit_content.get("title", "Engaging Video")

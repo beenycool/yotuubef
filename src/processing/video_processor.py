@@ -70,6 +70,7 @@ from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
+from src.processing.advanced_audio_processor import AdvancedAudioProcessor
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.speed_optimizer import create_speed_optimizer
@@ -1433,7 +1434,7 @@ class VideoEffects:
             inner = inner.with_position(("center", "center"))
 
             border = CompositeVideoClip([border, inner])
-            border = MoviePyCompat.with_opacity(border, 0.8)
+            border = border.set_opacity(0.8)
             border = MoviePyCompat.with_start(border, timestamp)
             border = MoviePyCompat.with_duration(border, duration)
 
@@ -2111,6 +2112,7 @@ class VideoProcessor:
         self.downloader = VideoDownloader()
         self.effects = VideoEffects()
         self.text_processor = TextOverlayProcessor()
+        self.audio_processor = AdvancedAudioProcessor()
         self.advanced_enhancer = AdvancedVideoEnhancer()
         self.cta_processor = CTAProcessor()
         self.thumbnail_generator = ThumbnailGenerator()
@@ -2792,14 +2794,7 @@ class VideoProcessor:
                 # Apply volume adjustment for original audio with safe access
                 if source_audio:
                     try:
-                        # Create a proper mock video clip with audio
-                        class MockVideoClip:
-                            def __init__(self, audio_clip):
-                                self.audio = audio_clip
-
-                        original_audio = self._process_original_audio(
-                            MockVideoClip(source_audio)
-                        )
+                        original_audio = self._process_original_audio(source_audio)
                     except Exception as e:
                         self.logger.warning(f"Error processing original audio: {e}")
                         original_audio = source_audio
@@ -3026,18 +3021,11 @@ class VideoProcessor:
                     music_clip = music_clip.with_volume_scaled(background_volume)
                 except Exception as e:
                     self.logger.warning(f"Error applying volume to fallback music: {e}")
+                    # Fallback to trying volumex method
                     try:
-                        vol_attr = getattr(music_clip, "volumex", None)
-                        if callable(vol_attr):
-                            music_clip = vol_attr(background_volume)
-                        else:
-                            self.logger.warning(
-                                "No alternative volume method available; using clip at original volume"
-                            )
+                        music_clip = music_clip.with_volume_scaled(background_volume)
                     except Exception as e2:
-                        self.logger.warning(
-                            f"Error with alternative volume method: {e2}"
-                        )
+                        self.logger.warning(f"Error with volumex fallback: {e2}")
                 resource_manager.register_clip(music_clip)
 
                 self.logger.info(
@@ -3547,6 +3535,7 @@ class VideoProcessor:
         max_retries: int = 2,
     ) -> bool:
         """Write video with retry logic and temporary file management"""
+        temp_output = None
         for attempt in range(max_retries + 1):
             try:
                 if attempt > 0:

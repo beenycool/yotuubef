@@ -1,9 +1,10 @@
 openai>=1.0.0
 aiohttp>=3.14.1
 asyncpraw>=7.7
+asyncprawcore>=2.4.0
 moviepy>=2.0
 numpy>=1.24
-opencv-python>=4.8
+
 pillow>=10
 psutil>=5.9
 pydantic>=2.0
@@ -23,6 +24,11 @@ filelock>=3.13
 chromadb>=1.5.0
 sentence-transformers>=2.2.0
 
-# Optional: torch, transformers (uncomment if needed)
-# torch>=2.0.0
-# transformers>=4.30.0
+torch>=2.0.0
+transformers>=4.30.0
+
+# Colab
+nest_asyncio
+opencv-python-headless
+gputil
+pynvml

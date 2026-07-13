@@ -4,9 +4,9 @@ Handles SQLite operations with proper error handling and migrations.
 Uses aiosqlite for async-safe database access.
 """
 
-import asyncio
 import logging
 import json
+import asyncio
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
@@ -26,26 +26,11 @@ class DatabaseManager:
         self.logger = logging.getLogger(__name__)
         self._conn: Optional[aiosqlite.Connection] = None
 
-    _conn_lock: asyncio.Lock = asyncio.Lock()
-
     async def _ensure_connection(self) -> aiosqlite.Connection:
-        async with self._conn_lock:
-            if self._conn is None:
-                self._conn = await aiosqlite.connect(str(self.db_path), timeout=30.0)
-                self._conn.row_factory = aiosqlite.Row
-                await self._conn.execute("PRAGMA journal_mode=WAL")
-            return self._conn
-
-    @asynccontextmanager
-    async def get_connection(self):
-        """Get database connection using persistent connection."""
-        conn = await self._ensure_connection()
-        try:
-            yield conn
-        except aiosqlite.Error as e:
-            await conn.rollback()
-            self.logger.error(f"Database error: {e}")
-            raise
+        if self._conn is None:
+            self._conn = await aiosqlite.connect(str(self.db_path), timeout=30.0)
+            self._conn.row_factory = aiosqlite.Row
+        return self._conn
 
     async def initialize_database(self):
         """Initialize database with required tables."""
@@ -140,6 +125,23 @@ class DatabaseManager:
             )
         """)
 
+    @asynccontextmanager
+    async def get_connection(self):
+        """Get database connection with proper error handling."""
+        conn = None
+        try:
+            conn = await aiosqlite.connect(str(self.db_path), timeout=30.0)
+            conn.row_factory = aiosqlite.Row
+            yield conn
+        except aiosqlite.Error as e:
+            if conn:
+                await conn.rollback()
+            self.logger.error(f"Database error: {e}")
+            raise
+        finally:
+            if conn:
+                await conn.close()
+
     async def is_video_processed(self, reddit_url: str) -> bool:
         """Check if a video has already been processed."""
         try:
@@ -214,8 +216,8 @@ class DatabaseManager:
                         error_message,
                         thumbnail_uploaded,
                         ai_analysis_used,
-                        datetime.now(timezone.utc),
-                        datetime.now(timezone.utc),
+                        datetime.now(),
+                        datetime.now(),
                     ),
                 )
                 await conn.commit()
@@ -406,7 +408,7 @@ class DatabaseManager:
 
                 data = {
                     "uploads": uploads,
-                    "export_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "export_timestamp": datetime.now().isoformat(),
                 }
                 output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -433,7 +435,7 @@ class DatabaseManager:
                     SET thumbnail_test_start_date = ?, active_thumbnail = 'A', updated_at = ?
                     WHERE id = ?
                     """,
-                    (datetime.now(timezone.utc), datetime.now(timezone.utc), upload_id),
+                    (datetime.now(), datetime.now(), upload_id),
                 )
                 await conn.commit()
                 self.logger.info(f"Started thumbnail A/B test for upload {upload_id}")
@@ -454,7 +456,7 @@ class DatabaseManager:
             async with self.get_connection() as conn:
                 await conn.execute(
                     f"UPDATE uploads SET {column} = ?, updated_at = ? WHERE id = ?",
-                    (ctr, datetime.now(timezone.utc), upload_id),
+                    (ctr, datetime.now(), upload_id),
                 )
                 await conn.commit()
                 self.logger.info(
@@ -471,7 +473,7 @@ class DatabaseManager:
             async with self.get_connection() as conn:
                 await conn.execute(
                     "UPDATE uploads SET active_thumbnail = ?, updated_at = ? WHERE id = ?",
-                    (variant.upper(), datetime.now(timezone.utc), upload_id),
+                    (variant.upper(), datetime.now(), upload_id),
                 )
                 await conn.commit()
                 self.logger.info(
@@ -498,7 +500,7 @@ class DatabaseManager:
                     (
                         winning_variant.upper(),
                         winning_variant.upper(),
-                        datetime.now(timezone.utc),
+                        datetime.now(),
                         upload_id,
                     ),
                 )
@@ -507,7 +509,7 @@ class DatabaseManager:
                     f"Completed thumbnail A/B test for upload {upload_id}, winner: {winning_variant}"
                 )
                 return True
-        except Exception as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error completing thumbnail A/B test: {e}")
             return False
 
@@ -592,13 +594,13 @@ class DatabaseManager:
                     (
                         normalized_variant,
                         normalized_variant,
-                        datetime.now(timezone.utc),
+                        datetime.now(),
                         youtube_video_id,
                     ),
                 )
                 await conn.commit()
                 return cursor.rowcount > 0
-        except Exception as e:
+        except aiosqlite.Error as e:
             self.logger.error(f"Error completing thumbnail test by video ID: {e}")
             return False
 
@@ -609,7 +611,7 @@ class DatabaseManager:
             self._conn = None
 
     async def get_engagement_metrics(self, days: int = 30) -> List[Dict[str, Any]]:
-        """Get video metrics for trend analysis. Used by EnhancementOptimizer."""
+        """Get video metrics for trend analysis."""
         try:
             async with self.get_connection() as conn:
                 cursor = await conn.execute(
@@ -653,23 +655,34 @@ class DatabaseManager:
 
 
 _db_manager: Optional[DatabaseManager] = None
-_init_lock: asyncio.Lock = asyncio.Lock()
+_db_manager_lock = asyncio.Lock()
 
 
 async def get_db_manager() -> DatabaseManager:
     """Get the global database manager instance."""
     global _db_manager
-    async with _init_lock:
-        if _db_manager is None:
-            _db_manager = DatabaseManager()
-            await _db_manager.initialize_database()
+    if _db_manager is None:
+        async with _db_manager_lock:
+            if _db_manager is None:
+                manager = DatabaseManager()
+                try:
+                    await manager.initialize_database()
+                except Exception:
+                    manager = None
+                    raise
+                _db_manager = manager
     return _db_manager
 
 
 async def init_db_manager(db_path: Optional[Path] = None) -> DatabaseManager:
     """Initialize the global database manager."""
     global _db_manager
-    async with _init_lock:
-        _db_manager = DatabaseManager(db_path)
-        await _db_manager.initialize_database()
+    async with _db_manager_lock:
+        manager = DatabaseManager(db_path)
+        try:
+            await manager.initialize_database()
+        except Exception:
+            manager = None
+            raise
+        _db_manager = manager
     return _db_manager

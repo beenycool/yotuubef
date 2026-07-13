@@ -99,6 +99,7 @@ class BraveImageClient:
                     query, asset_type="image", top_k=count
                 )
                 if local_results:
+                    threshold = 0.5
                     local_paths = [
                         {
                             "url": f"file://{r['path']}",
@@ -109,7 +110,9 @@ class BraveImageClient:
                             "local_path": r["path"],
                         }
                         for r in local_results
-                        if r.get("path") and Path(r["path"]).exists()
+                        if r.get("path")
+                        and Path(r["path"]).exists()
+                        and r.get("score", 0) >= threshold
                     ]
                     if local_paths:
                         self.logger.info(

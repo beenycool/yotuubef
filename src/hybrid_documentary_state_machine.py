@@ -9,7 +9,6 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
@@ -26,11 +25,9 @@ from typing import (
 )
 from uuid import uuid4
 
-import aiohttp
-
-if TYPE_CHECKING:
-    from src.utils.search_audit_logger import SearchAuditLogger
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from src.integrations.search_client import ExaSearchClient
 
 OpenAI = None
 try:
@@ -61,8 +58,9 @@ try:
         "IDEA_GENERATION": IdeaGenerationSchema,
         "EVIDENCE_GATHERING": EvidenceGatheringSchema,
     }
-except ImportError:
-    pass
+except ImportError as exc:
+    logger.critical("Failed to import phase validation schemas: %s", exc)
+    raise
 
 
 def validate_phase_output(
@@ -148,15 +146,6 @@ class RunState(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
     model_config = ConfigDict(validate_assignment=True)
-
-
-@dataclass(frozen=True)
-class MediaSearchResult:
-    title: str
-    url: str
-    description: str
-    source: str
-    thumbnail_url: str = ""
 
 
 class SummaryResult(BaseModel):
@@ -377,32 +366,13 @@ def load_run_state(project_dir: Union[str, Path]) -> RunState:
 
 def save_run_state(state: RunState) -> Path:
     import os as _os
-    import tempfile as _tempfile
 
     state.updated_at = datetime.now(UTC).isoformat()
     state_path = _state_path(state.project_dir)
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = None
-    try:
-        with _tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=state_path.parent,
-            prefix=f"{state_path.name}.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp_file:
-            tmp_file.write(state.model_dump_json(indent=2))
-            tmp_file.flush()
-            _os.fsync(tmp_file.fileno())
-            tmp_path = Path(tmp_file.name)
-        _os.replace(str(tmp_path), str(state_path))  # atomic on POSIX & Windows
-    finally:
-        if tmp_path and tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except OSError:
-                pass
+    tmp = state_path.with_suffix(".json.tmp")
+    tmp.write_text(state.model_dump_json(indent=2), encoding="utf-8")
+    _os.replace(str(tmp), str(state_path))  # atomic on POSIX & Windows
     logger.debug("Saved run state to %s", state_path)
     return state_path
 
@@ -451,253 +421,6 @@ def save_finding(
         is_json_payload,
     )
     return target_path
-
-
-class ExaSearchClient:
-    """Exa web search client via Hack Club AI proxy."""
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        base_url: str = "https://ai.hackclub.com/proxy/v1/exa",
-        timeout_seconds: int = 20,
-        audit_logger: Optional["SearchAuditLogger"] = None,
-    ):
-        self.api_key = api_key or os.getenv("HACKCLUB_SEARCH_API_KEY") or ""
-        self.base_url = base_url.rstrip("/")
-        self.timeout_seconds = timeout_seconds
-        self.audit_logger = audit_logger
-        self._session: Optional[aiohttp.ClientSession] = None
-        self._session_lock = asyncio.Lock()
-
-    async def _ensure_session(self) -> aiohttp.ClientSession:
-        if self._session is not None and not self._session.closed:
-            return self._session
-        async with self._session_lock:
-            if self._session is None or self._session.closed:
-                self._session = aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
-                )
-        return self._session
-
-    async def close(self) -> None:
-        if self._session is not None and not self._session.closed:
-            await self._session.close()
-        self._session = None
-
-    async def __aenter__(self) -> "ExaSearchClient":
-        await self._ensure_session()
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[override]
-        await self.close()
-
-    async def search_web(self, query: str, count: int = 10) -> List[MediaSearchResult]:
-        return await self._search(query, count)
-
-    async def search_images(
-        self, query: str, count: int = 10
-    ) -> List[MediaSearchResult]:
-        logger.warning(
-            "Exa does not support image search; use BraveImageClient instead"
-        )
-        return []
-
-    async def search_videos(
-        self, query: str, count: int = 10
-    ) -> List[MediaSearchResult]:
-        logger.warning("Exa does not support video search; use Brave directly")
-        return []
-
-    async def _search(
-        self,
-        query: str,
-        count: int,
-    ) -> List[MediaSearchResult]:
-        if not self.api_key:
-            logger.warning("HACKCLUB_SEARCH_API_KEY is not configured")
-            return []
-
-        session = await self._ensure_session()
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-        body = {"query": query, "numResults": max(1, min(count, 50))}
-        url = f"{self.base_url}/search"
-
-        if self.audit_logger:
-            self.audit_logger.log_request("POST", url, body, headers)
-
-        max_retries = 3
-        base_delay = 1.0
-        last_exc = None
-        for attempt in range(max_retries):
-            start = time.perf_counter()
-            try:
-                async with session.post(url, headers=headers, json=body) as response:
-                    resp_body = await response.text()
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            response.status,
-                            resp_body,
-                            duration_ms,
-                            url=url,
-                        )
-                    if response.status >= 400:
-                        if 500 <= response.status < 600 or response.status == 429:
-                            last_exc = Exception(f"HTTP {response.status}")
-                            delay = base_delay * (attempt + 1)
-                            logger.warning(
-                                "Exa search attempt %d/%d failed status=%s, retrying in %.1fs",
-                                attempt + 1,
-                                max_retries,
-                                response.status,
-                                delay,
-                            )
-                            await asyncio.sleep(delay)
-                            continue
-                        logger.warning(
-                            "Exa search failed status=%s body=%s",
-                            response.status,
-                            resp_body[:300],
-                        )
-                        return []
-                    try:
-                        payload = json.loads(resp_body)
-                        return self._parse_search_results(payload)
-                    except json.JSONDecodeError:
-                        return []
-            except (asyncio.TimeoutError, aiohttp.ClientError) as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    logger.warning(
-                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
-                        attempt + 1,
-                        max_retries,
-                        exc,
-                        delay,
-                    )
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            500, str(exc), duration_ms, url=url
-                        )
-                    await asyncio.sleep(delay)
-                    continue
-                duration_ms = (time.perf_counter() - start) * 1000
-                if self.audit_logger:
-                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-                logger.error("Exa search request failed: %s", exc)
-                return []
-            except Exception as exc:
-                last_exc = exc
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    logger.warning(
-                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
-                        attempt + 1,
-                        max_retries,
-                        exc,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-                duration_ms = (time.perf_counter() - start) * 1000
-                if self.audit_logger:
-                    self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
-                logger.error("Exa search request failed: %s", exc)
-                return []
-        logger.warning("Exa search failed after %d attempts: %s", max_retries, last_exc)
-
-        return self._parse_search_results(payload)
-
-    def _parse_search_results(
-        self,
-        payload: Any,
-    ) -> List[MediaSearchResult]:
-        candidates: List[Dict[str, Any]] = []
-
-        if isinstance(payload, list):
-            candidates = [item for item in payload if isinstance(item, dict)]
-        elif isinstance(payload, dict):
-            candidates = [
-                item for item in payload.get("results", []) if isinstance(item, dict)
-            ]
-
-        parsed: List[MediaSearchResult] = []
-        for item in candidates:
-            url = item.get("url") or item.get("link") or ""
-            if not isinstance(url, str) or not url:
-                continue
-
-            # Filter out logos and icons
-            url_path = url.split("?")[0].split("#")[0]
-            filename = url_path.rsplit("/", 1)[-1] if "/" in url_path else url_path
-            filename_lower = filename.lower()
-            if any(kw in filename_lower for kw in LOGO_FILTER_KEYWORDS):
-                continue
-
-            title = item.get("title") or item.get("name") or item.get("title") or ""
-            description = (
-                item.get("text") or item.get("snippet") or item.get("description") or ""
-            )
-            source = item.get("source") or item.get("domain") or "unknown"
-            thumbnail_url = (
-                item.get("thumbnail")
-                or item.get("thumbnail_url")
-                or item.get("image")
-                or ""
-            )
-
-            # Strict filtering for logos, icons, and avatars
-            if item.get("logo") is True:
-                continue
-            title_lower = str(title).lower()
-            if any(bad in title_lower for bad in LOGO_FILTER_KEYWORDS):
-                continue
-
-            if isinstance(thumbnail_url, dict):
-                if thumbnail_url.get("logo"):
-                    continue
-                thumbnail_url = (
-                    thumbnail_url.get("url")
-                    or thumbnail_url.get("src")
-                    or str(thumbnail_url)
-                )
-            elif isinstance(thumbnail_url, str) and "logo" in thumbnail_url.lower():
-                parsed_thumb = None
-                try:
-                    parsed_thumb = json.loads(thumbnail_url)
-                except json.JSONDecodeError:
-                    try:
-                        parsed_thumb = ast.literal_eval(thumbnail_url)
-                    except (ValueError, SyntaxError):
-                        pass
-
-                if isinstance(parsed_thumb, dict):
-                    if parsed_thumb.get("logo"):
-                        continue
-                    thumbnail_url = (
-                        parsed_thumb.get("url")
-                        or parsed_thumb.get("src")
-                        or thumbnail_url
-                    )
-
-            parsed.append(
-                MediaSearchResult(
-                    title=str(title),
-                    url=url,
-                    description=str(description),
-                    source=str(source),
-                    thumbnail_url="",
-                )
-            )
-
-        logger.debug("Parsed %d Exa search results", len(parsed))
-        return parsed
 
 
 def transcribe_media_file(
@@ -934,8 +657,6 @@ def build_state_machine_prompt(
 __all__ = [
     "DEFAULT_SUMMARY_MODEL",
     "DEFAULT_TRANSCRIBE_MODEL",
-    "ExaSearchClient",
-    "MediaSearchResult",
     "NVIDIA_BASE_URL",
     "PHASE_JSON_CONTRACTS",
     "PHASE_VALIDATION_SCHEMAS",

@@ -18,18 +18,18 @@ jobs:
         with:
           python-version: "3.12"
           cache: "pip"
-          cache-dependency-path: requirements-ci.txt
+          cache-dependency-path: requirements.txt
 
       - name: Install CI dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-ci.txt
+          pip install -r requirements.txt
 
       - name: Ruff
         run: ruff check src tests --select E9,F63,F7,F82,E4,E7,W --ignore W291,W292,W293
 
       - name: Byte-compile Python sources
-        run: python -m compileall -q src main.py tests/
+        run: python -m compileall -q src main.py
 
       - name: Pytest
         # Temporary CI filter for environment-sensitive fallback audio tests.

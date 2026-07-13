@@ -6,7 +6,6 @@ Creates compelling, clickable thumbnails that drive engagement.
 import logging
 import tempfile
 import json
-import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import cv2
@@ -156,7 +155,6 @@ class ThumbnailGenerator:
         self, video_path: Path, analysis: VideoAnalysis
     ) -> Optional[np.ndarray]:
         """Extract the best frame for thumbnail based on AI analysis"""
-        timestamp = 0.0
         try:
             timestamp = analysis.thumbnail_info.timestamp_seconds
 
@@ -300,31 +298,34 @@ class ThumbnailGenerator:
                 return image
 
             # Load watermark
-            watermark = Image.open(watermark_path).convert("RGBA")
+            with Image.open(watermark_path) as img:
+                watermark = img.convert("RGBA")
 
-            # Resize watermark to be proportional to image
-            max_watermark_size = min(image.width // 6, image.height // 6)
-            watermark.thumbnail(
-                (max_watermark_size, max_watermark_size), Image.Resampling.LANCZOS
-            )
+                # Resize watermark to be proportional to image
+                max_watermark_size = min(image.width // 6, image.height // 6)
+                watermark.thumbnail(
+                    (max_watermark_size, max_watermark_size), Image.Resampling.LANCZOS
+                )
 
-            # Position watermark in bottom right corner with padding
-            padding = 20
-            position = (
-                image.width - watermark.width - padding,
-                image.height - watermark.height - padding,
-            )
+                # Position watermark in bottom right corner with padding
+                padding = 20
+                position = (
+                    image.width - watermark.width - padding,
+                    image.height - watermark.height - padding,
+                )
 
-            # Create a copy and paste watermark
-            img_with_watermark = image.copy().convert("RGBA")
-            img_with_watermark.paste(watermark, position, watermark)
+                # Create a copy and paste watermark
+                img_with_watermark = image.copy().convert("RGBA")
+                img_with_watermark.paste(watermark, position, watermark)
 
-            # Convert back to RGB
-            final_image = Image.new("RGB", img_with_watermark.size, (255, 255, 255))
-            final_image.paste(img_with_watermark, mask=img_with_watermark.split()[-1])
+                # Convert back to RGB
+                final_image = Image.new("RGB", img_with_watermark.size, (255, 255, 255))
+                final_image.paste(
+                    img_with_watermark, mask=img_with_watermark.split()[-1]
+                )
 
-            self.logger.debug("Added watermark to thumbnail")
-            return final_image
+                self.logger.debug("Added watermark to thumbnail")
+                return final_image
 
         except Exception as e:
             self.logger.warning(f"Failed to add watermark: {e}")
@@ -394,7 +395,7 @@ class ThumbnailGenerator:
 
             for i, timestamp in enumerate(timestamps):
                 # Create modified analysis for this variant
-                    variant_analysis = analysis.model_copy(deep=True)
+                variant_analysis = analysis.copy(deep=True)
                 variant_analysis.thumbnail_info.timestamp_seconds = timestamp
 
                 # Modify headline text for variants
@@ -750,6 +751,9 @@ class ThumbnailGenerator:
             # Convert to PIL Image
             pil_image = self._cv2_to_pil(frame)
 
+            # Normalize to standard 1280x720 thumbnail dimensions
+            pil_image = pil_image.resize((1280, 720), Image.Resampling.LANCZOS)
+
             # Apply emotional tone adjustments
             enhanced_image = self._apply_emotional_tone(
                 pil_image, config["emotional_tone"]
@@ -1006,24 +1010,8 @@ class ThumbnailGenerator:
             # Calculate performance score
             performance_score = self._calculate_performance_score(performance_metrics)
 
-            # Map PerformanceMetrics to VideoMetrics
-            from src.monitoring.engagement_metrics import VideoMetrics
-
-            video_metrics = VideoMetrics(
-                video_id=performance_metrics.video_id,
-                title="",
-                upload_date=datetime.now(),
-                duration_seconds=0.0,
-                views=performance_metrics.views,
-                likes=performance_metrics.likes,
-                comments=performance_metrics.comments,
-                shares=performance_metrics.shares,
-                retention_rate=performance_metrics.watch_time_percentage / 100.0,
-                click_through_rate=performance_metrics.click_through_rate,
-            )
-
             # Store performance data
-            self.engagement_db.store_video_metrics(video_metrics)
+            self.engagement_db.store_video_metrics(performance_metrics)
 
             # Update variant with performance data
             # This would integrate with the variant tracking system

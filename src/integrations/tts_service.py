@@ -170,7 +170,9 @@ class TTSService:
         Returns:
             Path to generated audio file or None if failed
         """
+        created_temp = False
         if output_path is None:
+            created_temp = True
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
                 output_path = Path(tmp.name)
 
@@ -179,13 +181,12 @@ class TTSService:
             if result:
                 return result
 
-        try:
-            pyttsx3_module = importlib.import_module("pyttsx3")
-            return self._generate_with_pyttsx3(segment, output_path, pyttsx3_module)
-        except ModuleNotFoundError:
-            pass
-
         self.logger.error("No TTS service available for speech generation")
+        if created_temp and output_path and output_path.exists():
+            try:
+                output_path.unlink()
+            except OSError:
+                pass
         return None
 
     def _generate_with_qwen(
@@ -254,8 +255,7 @@ class TTSService:
             "The same narrator is speaking. Keep the voice identity identical."
         )
 
-        raw_cue = getattr(segment, "expression_cue", None)
-        expression_cue = (raw_cue or "").strip()
+        expression_cue = getattr(segment, "expression_cue", "").strip()
         if expression_cue:
             return f"{base_instructions} Deliver this line with this expression: {expression_cue}."
 
@@ -634,31 +634,3 @@ class TTSService:
         if QWEN_TTS_AVAILABLE:
             services.append("qwen3_tts")
         return services
-
-    def _generate_with_pyttsx3(
-        self, segment: NarrativeSegment, output_path: Path, pyttsx3_module: Any
-    ) -> Optional[Path]:
-        """Generate speech using system TTS (pyttsx3) as fallback."""
-        try:
-            engine = pyttsx3_module.init()
-
-            # Configure voice settings based on emotion and pacing
-            rate = 200  # Default rate
-            if segment.pacing == PacingType.SLOW:
-                rate = 150
-            elif segment.pacing == PacingType.FAST:
-                rate = 250
-
-            engine.setProperty("rate", rate)
-            engine.setProperty("volume", 0.9)
-
-            # Save to file
-            engine.save_to_file(segment.text, str(output_path))
-            engine.runAndWait()
-
-            self.logger.info(f"Generated pyttsx3 TTS: '{segment.text[:30]}...'")
-            return output_path
-
-        except Exception as e:
-            self.logger.warning(f"pyttsx3 TTS failed: {e}")
-            return None

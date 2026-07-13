@@ -82,23 +82,15 @@ class HybridYouTubeGenerator:
                 self.logger.error("Hybrid workflow failed: %s", result.get("error"))
 
             return result
-        except Exception as e:
-            self.logger.error(f"Hybrid workflow failed: {e}")
-            return {"success": False, "error": str(e)}
+        except Exception as exc:
+            self.logger.exception("Hybrid workflow failed")
+            return {"success": False, "error": str(exc)}
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.close()
-
-    async def close(self):
-        """Clean up resources used by the generator."""
-        try:
-            if hasattr(self, "orchestrator") and hasattr(self.orchestrator, "close"):
-                await self.orchestrator.close()
-        except Exception as e:
-            self.logger.warning(f"Error during generator cleanup: {e}")
+        pass
 
 
 def setup_argparse():
@@ -193,22 +185,13 @@ async def main() -> int:
     # Handle cleanup
     if args.cleanup:
         print("Cleaning up...", flush=True)
-        clear_temp_files(keep=args.keep)
-        clear_results(keep=args.keep)
+        clear_temp_files()
+        clear_results()
         if args.logs:
             clear_logs()
+        if args.keep:
+            print(f"Keeping last {args.keep} project directories.", flush=True)
         print("Cleanup complete.", flush=True)
-        return 0
-
-    # Handle dry run
-    if args.dry_run:
-        print("Dry run: configuration validated successfully.", flush=True)
-        print(f"Project: {args.project}", flush=True)
-        print(f"Reddit URL: {args.reddit_url}", flush=True)
-        print(f"Resume: {args.resume}", flush=True)
-        print(f"Phase: {args.phase}", flush=True)
-        print(f"No upload: {args.no_upload}", flush=True)
-        print(f"No auto research: {args.no_auto_research}", flush=True)
         return 0
 
     # Require project name
@@ -218,29 +201,29 @@ async def main() -> int:
         print("Example: python main.py my_documentary --reddit-url <url>")
         return 1
 
+    generator = HybridYouTubeGenerator()
     exit_code = 0
 
     try:
-        async with HybridYouTubeGenerator() as generator:
-            result = await generator.run_hybrid_workflow(
-                project_name=args.project,
-                reddit_url=args.reddit_url,
-                resume=args.resume,
-                phase_override=args.phase,
-                gemini_report_path=args.gemini_report,
-                no_upload=args.no_upload,
-                no_auto_research=args.no_auto_research,
-            )
+        result = await generator.run_hybrid_workflow(
+            project_name=args.project,
+            reddit_url=args.reddit_url,
+            resume=args.resume,
+            phase_override=args.phase,
+            gemini_report_path=args.gemini_report,
+            no_upload=args.no_upload,
+            no_auto_research=args.no_auto_research,
+        )
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
-            result_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(result_file, "w") as f:
-                json.dump(result, f, indent=2)
-            print(f"Results saved to: {result_file}")
-            if not result.get("success"):
-                print(f"ERROR: Hybrid workflow failed: {result.get('error')}")
-                exit_code = 1
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = Path(f"data/results/results_hybrid_{timestamp}.json")
+        result_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(result_file, "w") as f:
+            json.dump(result, f, indent=2)
+        print(f"Results saved to: {result_file}")
+        if not result.get("success"):
+            print(f"ERROR: Hybrid workflow failed: {result.get('error')}")
+            exit_code = 1
     except KeyboardInterrupt:
         print("\nInterrupted by user", flush=True)
         exit_code = 130

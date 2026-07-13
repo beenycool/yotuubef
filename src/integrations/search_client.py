@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import aiohttp
@@ -17,6 +18,163 @@ except ImportError:
 
 if TYPE_CHECKING:
     from src.utils.search_audit_logger import SearchAuditLogger
+
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class MediaSearchResult:
+    title: str
+    url: str
+    description: str
+    source: str
+    thumbnail_url: str = ""
+
+
+class ExaSearchClient:
+    """Exa web search client via Hack Club AI proxy."""
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        base_url: str = "https://ai.hackclub.com/proxy/v1/exa",
+        timeout_seconds: int = 20,
+        audit_logger: Optional["SearchAuditLogger"] = None,
+    ):
+        self.api_key = api_key or os.getenv("HACKCLUB_SEARCH_API_KEY") or ""
+        self.base_url = base_url.rstrip("/")
+        self.timeout_seconds = timeout_seconds
+        self.audit_logger = audit_logger
+        self._session: Optional[aiohttp.ClientSession] = None
+        self._session_lock = asyncio.Lock()
+
+    async def _ensure_session(self) -> aiohttp.ClientSession:
+        if self._session is not None and not self._session.closed:
+            return self._session
+        async with self._session_lock:
+            if self._session is None or self._session.closed:
+                self._session = aiohttp.ClientSession(
+                    timeout=aiohttp.ClientTimeout(total=self.timeout_seconds)
+                )
+        return self._session
+
+    async def close(self) -> None:
+        if self._session is not None and not self._session.closed:
+            await self._session.close()
+        self._session = None
+
+    async def __aenter__(self) -> "ExaSearchClient":
+        await self._ensure_session()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
+
+    async def search_web(self, query: str, count: int = 10) -> List[MediaSearchResult]:
+        return await self._search(query, count)
+
+    async def search_images(
+        self, query: str, count: int = 10
+    ) -> List[MediaSearchResult]:
+        logger.warning(
+            "Exa does not support image search; use BraveImageClient instead"
+        )
+        return []
+
+    async def search_videos(
+        self, query: str, count: int = 10
+    ) -> List[MediaSearchResult]:
+        logger.warning("Exa does not support video search; use Brave directly")
+        return []
+
+    async def _search(
+        self,
+        query: str,
+        count: int,
+    ) -> List[MediaSearchResult]:
+        if not self.api_key:
+            logger.warning("HACKCLUB_SEARCH_API_KEY is not configured")
+            return []
+
+        session = await self._ensure_session()
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        body = {"query": query, "numResults": max(1, min(count, 50))}
+        url = f"{self.base_url}/search"
+
+        if self.audit_logger:
+            self.audit_logger.log_request("POST", url, body, headers)
+
+        start = time.perf_counter()
+        try:
+            async with session.post(url, headers=headers, json=body) as response:
+                resp_body = await response.text()
+                duration_ms = (time.perf_counter() - start) * 1000
+                if self.audit_logger:
+                    self.audit_logger.log_response(
+                        response.status,
+                        resp_body,
+                        duration_ms,
+                        url=url,
+                    )
+                if response.status >= 400:
+                    logger.warning(
+                        "Exa search failed status=%s body=%s",
+                        response.status,
+                        resp_body[:300],
+                    )
+                    return []
+                try:
+                    payload = json.loads(resp_body)
+                except json.JSONDecodeError:
+                    return []
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(500, str(exc), duration_ms, url=url)
+            logger.error("Exa search request failed: %s", exc)
+            return []
+
+        return self._parse_search_results(payload)
+
+    def _parse_search_results(
+        self,
+        payload: Any,
+    ) -> List[MediaSearchResult]:
+        candidates: List[Dict[str, Any]] = []
+
+        if isinstance(payload, list):
+            candidates = [item for item in payload if isinstance(item, dict)]
+        elif isinstance(payload, dict):
+            candidates = [
+                item for item in payload.get("results", []) if isinstance(item, dict)
+            ]
+
+        parsed: List[MediaSearchResult] = []
+        for item in candidates:
+            url = item.get("url") or item.get("link") or ""
+            if not isinstance(url, str) or not url:
+                continue
+
+            title = item.get("title") or ""
+            description = item.get("text") or item.get("snippet") or ""
+            source = item.get("source") or "unknown"
+
+            parsed.append(
+                MediaSearchResult(
+                    title=str(title),
+                    url=url,
+                    description=str(description),
+                    source=str(source),
+                    thumbnail_url="",
+                )
+            )
+
+        logger.debug("Parsed %d Exa search results", len(parsed))
+        return parsed
 
 
 class DeepResearchClient:
@@ -52,107 +210,47 @@ class DeepResearchClient:
         if self.audit_logger:
             self.audit_logger.log_request("POST", self.base_url, body, headers)
 
-        max_retries = 3
-        base_delay = 1.0
-        last_error = None
-        for attempt in range(max_retries):
-            start = time.perf_counter()
-            try:
-                session = await self._ensure_session()
-                async with session.post(
-                    self.base_url,
-                    headers=headers,
-                    json=body,
-                    timeout=aiohttp.ClientTimeout(total=20),
-                ) as response:
-                    resp_body = await response.text()
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            response.status,
-                            resp_body,
-                            duration_ms,
-                            url=self.base_url,
-                        )
-                    if response.status == 200:
-                        try:
-                            data = json.loads(resp_body)
-                        except json.JSONDecodeError:
-                            data = {}
-                        return self._compile_report(data)
-                    if 500 <= response.status < 600 or response.status == 429:
-                        last_error = f"HTTP {response.status}"
-                        delay = base_delay * (attempt + 1)
-                        self.logger.warning(
-                            "Exa search attempt %d/%d failed with status %s, retrying in %.1fs",
-                            attempt + 1,
-                            max_retries,
-                            response.status,
-                            delay,
-                        )
-                        await asyncio.sleep(delay)
-                        continue
-                    self.logger.warning(
-                        "Exa search failed with status %s", response.status
-                    )
-                    return "Research failed."
-            except (asyncio.TimeoutError, aiohttp.ClientError) as e:
-                last_error = str(e)
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    self.logger.warning(
-                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
-                        attempt + 1,
-                        max_retries,
-                        e,
-                        delay,
-                    )
-                    duration_ms = (time.perf_counter() - start) * 1000
-                    if self.audit_logger:
-                        self.audit_logger.log_response(
-                            500, str(e), duration_ms, url=self.base_url
-                        )
-                    await asyncio.sleep(delay)
-                    continue
-                self.logger.error("Deep research error: %s", e)
-                return "Research error."
-            except Exception as e:
-                last_error = str(e)
-                if attempt < max_retries - 1:
-                    delay = base_delay * (attempt + 1)
-                    self.logger.warning(
-                        "Exa search attempt %d/%d failed: %s, retrying in %.1fs",
-                        attempt + 1,
-                        max_retries,
-                        e,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
+        start = time.perf_counter()
+        try:
+            session = await self._ensure_session()
+            async with session.post(
+                self.base_url,
+                headers=headers,
+                json=body,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as response:
+                resp_body = await response.text()
                 duration_ms = (time.perf_counter() - start) * 1000
                 if self.audit_logger:
                     self.audit_logger.log_response(
-                        500, str(e), duration_ms, url=self.base_url
+                        response.status,
+                        resp_body,
+                        duration_ms,
+                        url=self.base_url,
                     )
-                self.logger.error("Deep research error: %s", e)
-                return "Research error."
-        self.logger.warning(
-            "Exa search failed after %d attempts: %s", max_retries, last_error
-        )
-        return "Research failed."
+                if response.status == 200:
+                    try:
+                        data = json.loads(resp_body)
+                    except json.JSONDecodeError:
+                        data = {}
+                    return self._compile_report(data)
+                self.logger.warning("Exa search failed with status %s", response.status)
+                return "Research failed."
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start) * 1000
+            if self.audit_logger:
+                self.audit_logger.log_response(
+                    500, str(e), duration_ms, url=self.base_url
+                )
+            self.logger.error("Deep research error: %s", e)
+            return "Research error."
 
     def _compile_report(self, data: dict) -> str:
         compiled_lore = "EXTERNAL FACTS:\n"
         for result in data.get("results", []):
-            if not isinstance(result, dict):
-                continue
-            title = str(result.get("title", "")).strip()
-            url = str(result.get("url", "")).strip()
             text = result.get("text", "").strip()
             if text:
-                source = f" Source: {url}" if url else ""
-                heading = f"{title}: " if title else ""
-                compiled_lore += f"- {heading}{text}{source}\n"
+                compiled_lore += f"- {text}\n"
         return compiled_lore
 
 
@@ -394,21 +492,19 @@ class AgenticExaResearcher:
             search_tasks = [
                 self.search_client.search_web(q, count=3) for q in current_queries
             ]
-            search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+            search_results = await asyncio.gather(*search_tasks)
 
             # Mark queries as done
             self.previous_queries.update(current_queries)
 
-            # 2. Flatten raw results (skip failed queries)
+            # 2. Flatten raw results
             raw_results: List[Dict[str, str]] = []
             for result_list in search_results:
-                if isinstance(result_list, Exception):
-                    continue
                 for r in result_list:
                     raw_results.append(
                         {
-                            "url": getattr(r, "url", ""),
-                            "title": getattr(r, "title", ""),
+                            "url": r.url,
+                            "title": r.title,
                             "text": getattr(r, "description", "") or "",
                         }
                     )
