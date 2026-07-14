@@ -8,6 +8,11 @@ from pydantic import BaseModel, Field, field_validator, ConfigDict
 from enum import Enum
 
 
+class EffectType(str, Enum):
+    ZOOM = "zoom"
+    HIGHLIGHT = "highlight"
+
+
 class PositionType(str, Enum):
     """Valid text overlay positions"""
 
@@ -154,6 +159,15 @@ class ThumbnailInfo(BaseModel):
     timestamp_seconds: float = 0.0
     reason: str = ""
     headline_text: str = ""
+
+
+class VisualCue(BaseModel):
+    timestamp_seconds: float = Field(..., ge=0)
+    description: str = ""
+    effect_type: str = "zoom"
+    visual_directive: Optional[str] = None
+    duration: float = Field(1.0, ge=0.1)
+    intensity: float = Field(0.5, ge=0, le=1.0)
 
 
 class CameraMovement(BaseModel):
