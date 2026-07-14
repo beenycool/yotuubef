@@ -566,6 +566,11 @@ class EnhancedVideoOrchestrator:
             script_payload,
         )
         state.metadata["final_script_path"] = str(final_script_path)
+        state = set_phase(
+            state,
+            PipelinePhase.VIDEO_RENDER,
+            "Script completed",
+        )
         state.status = "paused_for_script_review"
         save_run_state(state)
         print(f"[Hybrid] Script saved to: {final_script_path}", flush=True)
@@ -588,7 +593,7 @@ class EnhancedVideoOrchestrator:
             save_run_state(state)
             return state, self._phase_result(
                 state,
-                error="Missing final_script_path in state metadata",
+                error="Missing final_script_path in state metadata. Run SCRIPTING phase first to generate a script, then resume with --resume --phase VIDEO_RENDER",
             )
 
         script_path = Path(final_script_path)
