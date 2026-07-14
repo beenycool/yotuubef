@@ -571,17 +571,9 @@ class EnhancedVideoOrchestrator:
             PipelinePhase.VIDEO_RENDER,
             "Script completed",
         )
-        state.status = "paused_for_script_review"
+        state.status = "active"
         save_run_state(state)
         print(f"[Hybrid] Script saved to: {final_script_path}", flush=True)
-        print(
-            f"[Hybrid] PAUSED for script review. Edit the JSON above, then run:",
-            flush=True,
-        )
-        print(
-            f"  python main.py hybrid {state.project_name} --resume --phase VIDEO_RENDER",
-            flush=True,
-        )
         return state
 
     async def _handle_video_render_phase(
@@ -709,22 +701,6 @@ class EnhancedVideoOrchestrator:
 
             if phase == PipelinePhase.SCRIPTING:
                 state = await self._handle_scripting_phase(state, phase)
-                if getattr(state, "status", "") == "paused_for_script_review":
-                    return {
-                        "success": True,
-                        "paused": True,
-                        "status": state.status,
-                        "current_phase": PipelinePhase.SCRIPTING.value,
-                        "project_name": state.project_name,
-                        "pipeline": "hybrid_documentary_studio",
-                        "final_script_path": state.metadata.get(
-                            "final_script_path", ""
-                        ),
-                        "workspace_path": str(Path(state.project_dir).resolve()),
-                        "no_upload": bool(
-                            state.metadata.get("hybrid_no_upload", False)
-                        ),
-                    }
                 continue
 
             if phase == PipelinePhase.VIDEO_RENDER:
