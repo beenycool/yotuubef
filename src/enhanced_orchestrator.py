@@ -112,12 +112,22 @@ class EnhancedVideoOrchestrator:
             project_dir = setup_project_workspace(project_name)
             state = load_run_state(project_dir)
 
-            if not resume and state.status == "completed":
-                self.logger.info(
-                    "Resetting completed hybrid run for project=%s", project_name
-                )
-                self._reset_hybrid_run_state(state)
-                save_run_state(state)
+            if not resume:
+                curr_phase = self._coerce_hybrid_phase(state.current_phase)
+                needs_reset = state.status == "completed"
+                if curr_phase == PipelinePhase.VIDEO_RENDER and not state.metadata.get(
+                    "final_script_path"
+                ):
+                    needs_reset = True
+                if needs_reset:
+                    self.logger.info(
+                        "Resetting hybrid run for project=%s (status=%s phase=%s)",
+                        project_name,
+                        state.status,
+                        state.current_phase,
+                    )
+                    self._reset_hybrid_run_state(state)
+                    save_run_state(state)
 
             if reddit_url:
                 state.metadata["reddit_url"] = reddit_url
