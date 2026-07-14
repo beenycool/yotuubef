@@ -375,18 +375,14 @@ class EnhancedVideoOrchestrator:
         evidence_questions = synthesis_payload.get("evidence_questions", [])
         verified_evidence: List[Dict[str, str]] = []
         if topic and evidence_questions:
-            hackclub_api_key = (
-                os.getenv("HACKCLUB_SEARCH_KEY")
-                or os.getenv("HACKCLUB_SEARCH_API_KEY")
-                or ""
-            ).strip()
-            if hackclub_api_key:
+            exa_api_key = (os.getenv("EXA_API_KEY") or "").strip()
+            if exa_api_key:
                 self.logger.info(
                     "Starting agentic research for topic='%s' with %d claims",
                     topic,
                     len(evidence_questions),
                 )
-                search_client = ExaSearchClient(api_key=hackclub_api_key)
+                search_client = ExaSearchClient(api_key=exa_api_key)
                 researcher = AgenticExaResearcher(
                     search_client,
                     max_iterations=4,
@@ -419,9 +415,7 @@ class EnhancedVideoOrchestrator:
                 finally:
                     await search_client.close()
             else:
-                self.logger.info(
-                    "HACKCLUB_SEARCH_API_KEY not set; skipping agentic research"
-                )
+                self.logger.info("EXA_API_KEY not set; skipping agentic research")
         else:
             self.logger.info(
                 "No chosen_angle or evidence_questions; skipping agentic research"
@@ -772,10 +766,7 @@ class EnhancedVideoOrchestrator:
     async def _run_idea_generation_search_first(self, state) -> tuple:
         """Search-first IDEA_GENERATION: run searches, then LLM extracts angles with source_urls."""
         api_key = (
-            os.getenv("HACKCLUB_SEARCH_API_KEY")
-            or os.getenv("HACKCLUB_SEARCH_KEY")
-            or os.getenv("BRAVE_SEARCH_API_KEY")
-            or ""
+            os.getenv("EXA_API_KEY") or os.getenv("BRAVE_SEARCH_API_KEY") or ""
         ).strip()
 
         logs_dir = Path(state.project_dir) / "research" / "logs"
@@ -786,7 +777,7 @@ class EnhancedVideoOrchestrator:
 
         if not api_key:
             self.logger.warning(
-                "No HACKCLUB_SEARCH_API_KEY or BRAVE_SEARCH_API_KEY. "
+                "No EXA_API_KEY or BRAVE_SEARCH_API_KEY. "
                 "Falling back to LLM-only idea generation (may invent content)."
             )
             idea_payload = await self._generate_hybrid_phase_payload(
@@ -927,11 +918,7 @@ Search results:
     async def _run_auto_gemini_research(self, state) -> tuple:
         """Run AgenticResearcher or DeepResearchClient to produce gemini report."""
         api_key_brave = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
-        api_key_hack = str(
-            os.getenv("HACKCLUB_SEARCH_API_KEY")
-            or os.getenv("HACKCLUB_SEARCH_KEY")
-            or ""
-        ).strip()
+        api_key_exa = (os.getenv("EXA_API_KEY") or "").strip()
 
         idea_path = Path(state.metadata.get("idea_generation_path", ""))
         if not idea_path.exists():
@@ -982,13 +969,13 @@ Search results:
                 initial_context=research_query,
                 max_turns=3,
             )
-        elif api_key_hack:
+        elif api_key_exa:
             client = DeepResearchClient(audit_logger=audit_logger)
             report_text = await client.conduct_deep_research(research_query)
             await client.close()
         else:
             self.logger.warning(
-                "No BRAVE_SEARCH_API_KEY or HACKCLUB_SEARCH_API_KEY for auto research"
+                "No BRAVE_SEARCH_API_KEY or EXA_API_KEY for auto research"
             )
             return None, None
 
@@ -1848,16 +1835,12 @@ Search results:
         video_queries: List[str],
         count: int = 6,
     ) -> Dict[str, Any]:
-        hackclub_api_key = (
-            os.getenv("HACKCLUB_SEARCH_KEY")
-            or os.getenv("HACKCLUB_SEARCH_API_KEY")
-            or ""
-        ).strip()
+        exa_api_key = (os.getenv("EXA_API_KEY") or "").strip()
         brave_api_key = os.getenv("BRAVE_SEARCH_API_KEY", "").strip()
         results: Dict[str, Any] = {"image": {}, "video": {}, "web": {}}
 
-        if hackclub_api_key:
-            async with ExaSearchClient(api_key=hackclub_api_key) as client:
+        if exa_api_key:
+            async with ExaSearchClient(api_key=exa_api_key) as client:
                 for query in image_queries:
                     web_hits = await client.search_web(query, count=min(count, 4))
                     results["web"][query] = [hit.__dict__ for hit in web_hits]
@@ -1876,7 +1859,7 @@ Search results:
             )
             for media_type in ("image", "video"):
                 results[media_type] = brave_results.get(media_type, {})
-            if not hackclub_api_key:
+            if not exa_api_key:
                 results["web"] = brave_results.get("web", {})
 
         return results

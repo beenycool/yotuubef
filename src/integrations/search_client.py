@@ -33,16 +33,16 @@ class MediaSearchResult:
 
 
 class ExaSearchClient:
-    """Exa web search client via Hack Club AI proxy."""
+    """Exa web search client via official Exa API."""
 
     def __init__(
         self,
         api_key: Optional[str] = None,
-        base_url: str = "https://ai.hackclub.com/proxy/v1/exa",
+        base_url: str = "https://api.exa.ai",
         timeout_seconds: int = 20,
         audit_logger: Optional["SearchAuditLogger"] = None,
     ):
-        self.api_key = api_key or os.getenv("HACKCLUB_SEARCH_API_KEY") or ""
+        self.api_key = api_key or os.getenv("EXA_API_KEY") or ""
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self.audit_logger = audit_logger
@@ -94,15 +94,19 @@ class ExaSearchClient:
         count: int,
     ) -> List[MediaSearchResult]:
         if not self.api_key:
-            logger.warning("HACKCLUB_SEARCH_API_KEY is not configured")
+            logger.warning("EXA_API_KEY is not configured")
             return []
 
         session = await self._ensure_session()
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-api-key": self.api_key,
             "Content-Type": "application/json",
         }
-        body = {"query": query, "numResults": max(1, min(count, 50))}
+        body = {
+            "query": query,
+            "numResults": max(1, min(count, 50)),
+            "contents": {"text": True},
+        }
         url = f"{self.base_url}/search"
 
         if self.audit_logger:
@@ -178,12 +182,12 @@ class ExaSearchClient:
 
 
 class DeepResearchClient:
-    """Exa-based deep research client via Hack Club AI proxy."""
+    """Exa-based deep research client via official Exa API."""
 
     def __init__(self, audit_logger: Optional[SearchAuditLogger] = None):
         self.logger = logging.getLogger(__name__)
-        self.api_key = os.getenv("HACKCLUB_SEARCH_API_KEY")
-        self.base_url = "https://ai.hackclub.com/proxy/v1/exa/search"
+        self.api_key = os.getenv("EXA_API_KEY")
+        self.base_url = "https://api.exa.ai/search"
         self.audit_logger = audit_logger
         self._session = None
 
@@ -202,10 +206,10 @@ class DeepResearchClient:
             return "No external research available."
 
         headers = {
-            "Authorization": f"Bearer {self.api_key}",
+            "x-api-key": self.api_key,
             "Content-Type": "application/json",
         }
-        body = {"query": query, "numResults": 3}
+        body = {"query": query, "numResults": 3, "contents": {"text": True}}
 
         if self.audit_logger:
             self.audit_logger.log_request("POST", self.base_url, body, headers)

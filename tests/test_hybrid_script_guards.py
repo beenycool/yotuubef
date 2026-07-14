@@ -1100,9 +1100,8 @@ async def test_handle_evidence_gathering_phase_uses_evidence_contract_and_querie
 
 
 @pytest.mark.asyncio
-async def test_run_hybrid_media_queries_uses_brave_when_hackclub_missing(monkeypatch):
-    monkeypatch.delenv("HACKCLUB_SEARCH_KEY", raising=False)
-    monkeypatch.delenv("HACKCLUB_SEARCH_API_KEY", raising=False)
+async def test_run_hybrid_media_queries_uses_brave_when_exa_missing(monkeypatch):
+    monkeypatch.delenv("EXA_API_KEY", raising=False)
     monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-token")
 
     orchestrator = _build_orchestrator_stub()
