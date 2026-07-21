@@ -27,6 +27,9 @@ sentence-transformers>=2.2.0
 torch>=2.0.0
 transformers>=4.30.0
 
+# GUI
+gradio>=5.0.0
+
 # Colab
 nest_asyncio
 opencv-python-headless
