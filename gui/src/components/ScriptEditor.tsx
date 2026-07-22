@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { ScriptData, ScriptSegment } from '../api/types';
 import { SegmentCard } from './SegmentCard';
 import { useToast } from './Toast';
@@ -13,6 +13,10 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialScript, onSav
   const [script, setScript] = useState<ScriptData>(initialScript);
   const [saving, setSaving] = useState(false);
   const toast = useToast();
+
+  // Keep latest script state in a ref for event listener (advanced-event-handler-refs)
+  const scriptRef = useRef(script);
+  scriptRef.current = script;
 
   const handleSegmentChange = (index: number, updated: ScriptSegment) => {
     const newSegments = [...script.segments];
@@ -42,7 +46,7 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialScript, onSav
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave(script);
+      await onSave(scriptRef.current);
       toast.success('Script saved successfully!');
     } catch (err: any) {
       toast.error(err.message, 'Save Failed');
@@ -54,10 +58,10 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialScript, onSav
   const handleSaveAndRender = async () => {
     setSaving(true);
     try {
-      await onSave(script);
+      await onSave(scriptRef.current);
       toast.success('Script saved! Initiating video render...');
       if (onSaveAndRender) {
-        await onSaveAndRender(script);
+        await onSaveAndRender(scriptRef.current);
       }
     } catch (err: any) {
       toast.error(err.message, 'Render Trigger Error');
@@ -66,7 +70,7 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialScript, onSav
     }
   };
 
-  // Keyboard shortcut Ctrl+S / Ctrl+Enter
+  // Keyboard shortcut Ctrl+S / Ctrl+Enter bound once on mount (advanced-use-latest)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -79,9 +83,12 @@ export const ScriptEditor: React.FC<ScriptEditorProps> = ({ initialScript, onSav
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [script]);
+  }, []);
 
-  const totalDuration = script.segments.reduce((acc, s) => acc + (s.intended_duration_seconds || 0), 0);
+  // Re-render Optimization (rerender-memo)
+  const totalDuration = useMemo(() => {
+    return script.segments.reduce((acc, s) => acc + (s.intended_duration_seconds || 0), 0);
+  }, [script.segments]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>

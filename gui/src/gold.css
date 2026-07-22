@@ -1,0 +1,305 @@
+/* 
+  GOLD OVERRIDE STYLESHEET
+  Visual Redesign Surgical Upgrade for Yotuubef Studio GUI
+  Awwwards / Cinema Studio Tier Aesthetic Upgrade
+*/
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  /* Elevated Dark Cinema Tokens */
+  --bg-primary: #07070c;
+  --bg-secondary: #0d0d15;
+  --bg-tertiary: #141421;
+  --bg-card: rgba(255, 255, 255, 0.035);
+  --bg-glass: rgba(255, 255, 255, 0.05);
+  --bg-glass-hover: rgba(255, 255, 255, 0.08);
+
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-hover: rgba(162, 155, 254, 0.35);
+  --border-focus: rgba(108, 92, 231, 0.6);
+
+  --text-primary: #f8f9fc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent-primary: #6c5ce7;
+  --accent-secondary: #a29bfe;
+  --accent-gradient: linear-gradient(135deg, #7c3aed 0%, #6366f1 50%, #4ecdc4 100%);
+  --accent-glow: rgba(124, 58, 237, 0.4);
+  --accent-success: #10b981;
+  --accent-warning: #f59e0b;
+  --accent-danger: #ef4444;
+
+  /* Display & Body Typography */
+  --font-display: 'Outfit', 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-body: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 22px;
+  --radius-xl: 30px;
+
+  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Base Body with Atmospheric Radial Mesh */
+body {
+  background-color: var(--bg-primary);
+  background-image: 
+    radial-gradient(circle at 15% 0%, rgba(124, 58, 237, 0.15) 0%, transparent 45%),
+    radial-gradient(circle at 85% 50%, rgba(78, 205, 196, 0.1) 0%, transparent 45%),
+    radial-gradient(circle at 50% 100%, rgba(99, 102, 241, 0.12) 0%, transparent 50%);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Subtle Film Grain Atmosphere Overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0.022;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+}
+
+/* Display Headings */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text-primary);
+  text-wrap: balance;
+}
+
+h1 {
+  font-weight: 800;
+}
+
+h2 {
+  font-weight: 700;
+}
+
+h3 {
+  font-weight: 600;
+}
+
+/* Glassmorphism Cards with Tactical Depth */
+.glass-card {
+  background: rgba(18, 18, 28, 0.65);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: 
+    0 4px 24px -2px rgba(0, 0, 0, 0.5),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  transition: 
+    transform 0.35s var(--ease-snap),
+    border-color 0.35s var(--ease-snap),
+    box-shadow 0.35s var(--ease-snap);
+}
+
+.glass-card:hover {
+  border-color: var(--border-hover);
+  box-shadow: 
+    0 12px 36px -6px rgba(108, 92, 231, 0.25),
+    0 0 0 1px rgba(162, 155, 254, 0.2),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+  transform: translateY(-3px);
+}
+
+/* Buttons with Physical Hover Physics & Active Press Feedback */
+.btn {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.88rem;
+  letter-spacing: -0.01em;
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  transition: 
+    transform 0.3s var(--ease-snap),
+    box-shadow 0.3s var(--ease-snap),
+    background 0.3s var(--ease-snap),
+    border-color 0.3s var(--ease-snap),
+    opacity 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.97) !important;
+  transition-duration: 0.08s !important;
+}
+
+.btn-primary {
+  background: var(--accent-gradient);
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 
+    0 4px 18px rgba(124, 58, 237, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.btn-primary:hover:not(:disabled) {
+  opacity: 1;
+  box-shadow: 
+    0 8px 25px rgba(124, 58, 237, 0.6),
+    0 0 0 1px rgba(255, 255, 255, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(10px);
+  color: var(--text-primary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.22);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.14);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+}
+
+/* Sidebar & Navigation Upgrade */
+.sidebar-aside {
+  background: rgba(13, 13, 21, 0.75) !important;
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border-right: 1px solid var(--border-subtle) !important;
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+}
+
+.sidebar-proj-link {
+  transition: 
+    transform 0.25s var(--ease-snap),
+    background 0.25s var(--ease-snap),
+    color 0.25s var(--ease-snap) !important;
+}
+
+.sidebar-proj-link:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  transform: translateX(4px);
+  color: #ffffff !important;
+}
+
+.sidebar-proj-link.active {
+  background: rgba(124, 58, 237, 0.18) !important;
+  border-left: 3px solid var(--accent-secondary);
+  color: #ffffff !important;
+  font-weight: 600;
+  box-shadow: 0 2px 12px rgba(108, 92, 231, 0.25);
+}
+
+/* Badges & Tag Chips */
+.badge {
+  font-family: var(--font-mono);
+  border-radius: var(--radius-xl) !important;
+  padding: 4px 12px !important;
+  font-size: 0.72rem !important;
+  letter-spacing: 0.06em !important;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Form Controls & Inputs */
+input[type="text"],
+input[type="url"],
+input[type="number"],
+input[type="password"],
+textarea,
+select {
+  background: rgba(0, 0, 0, 0.45) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  border-radius: var(--radius-sm) !important;
+  color: var(--text-primary) !important;
+  transition: 
+    border-color 0.25s var(--ease-snap),
+    box-shadow 0.25s var(--ease-snap),
+    background 0.25s var(--ease-snap) !important;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+input[type="text"]:focus,
+input[type="url"]:focus,
+input[type="number"]:focus,
+input[type="password"]:focus,
+textarea:focus,
+select:focus {
+  background: rgba(0, 0, 0, 0.6) !important;
+  border-color: var(--accent-secondary) !important;
+  box-shadow: 
+    0 0 0 3px rgba(124, 58, 237, 0.3),
+    0 0 16px rgba(124, 58, 237, 0.2),
+    inset 0 2px 4px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* Custom Entry Keyframes & Animations */
+@keyframes enterUp {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.99);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.dashboard-stats > div,
+.yaml-section-box,
+main > div {
+  animation: enterUp 0.6s var(--ease-out) both;
+}
+
+.dashboard-stats > div:nth-child(1) { animation-delay: 50ms; }
+.dashboard-stats > div:nth-child(2) { animation-delay: 100ms; }
+.dashboard-stats > div:nth-child(3) { animation-delay: 150ms; }
+.dashboard-stats > div:nth-child(4) { animation-delay: 200ms; }
+
+/* Custom Scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(7, 7, 12, 0.8);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  border: 2px solid rgba(7, 7, 12, 0.8);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(162, 155, 254, 0.4);
+}

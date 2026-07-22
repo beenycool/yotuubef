@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useProjects } from '../hooks/useProjects';
 import { ProjectCard } from '../components/ProjectCard';
 import { useToast } from '../components/Toast';
@@ -11,9 +11,23 @@ export const Dashboard: React.FC = () => {
   const [newRedditUrl, setNewRedditUrl] = useState('');
   const [creating, setCreating] = useState(false);
 
+  // Performance (js-combine-iterations + rerender-memo): Compute project stats in a single pass
+  const stats = useMemo(() => {
+    let completed = 0;
+    let scriptReview = 0;
+    let active = 0;
+    for (const p of projects) {
+      if (p.has_video) completed++;
+      if (p.status === 'paused_for_script_review' || p.current_phase === 'SCRIPTING') scriptReview++;
+      if (p.status === 'active') active++;
+    }
+    return { total: projects.length, completed, scriptReview, active };
+  }, [projects]);
+
   useEffect(() => {
+    if (!showModal) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && showModal) {
+      if (e.key === 'Escape') {
         setShowModal(false);
       }
     };
@@ -58,24 +72,24 @@ export const Dashboard: React.FC = () => {
       <div className="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
         <div className="glass-card" style={{ padding: '20px' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Projects</span>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{projects.length}</div>
+          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{stats.total}</div>
         </div>
         <div className="glass-card" style={{ padding: '20px' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Completed Videos</span>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-success)' }}>
-            {projects.filter((p) => p.has_video).length}
+            {stats.completed}
           </div>
         </div>
         <div className="glass-card" style={{ padding: '20px' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ready for Script Review</span>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--phase-scripting)' }}>
-            {projects.filter((p) => p.status === 'paused_for_script_review' || p.current_phase === 'SCRIPTING').length}
+            {stats.scriptReview}
           </div>
         </div>
         <div className="glass-card" style={{ padding: '20px' }}>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active / In Progress</span>
           <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-secondary)' }}>
-            {projects.filter((p) => p.status === 'active').length}
+            {stats.active}
           </div>
         </div>
       </div>

@@ -25,16 +25,16 @@ export function useProjects() {
     fetchProjects();
   }, [fetchProjects]);
 
-  const createProject = async (name: string, reddit_url?: string) => {
+  const createProject = useCallback(async (name: string, reddit_url?: string) => {
     const newProj = await api.createProject(name, reddit_url);
     await fetchProjects();
     return newProj;
-  };
+  }, [fetchProjects]);
 
-  const deleteProject = async (name: string) => {
+  const deleteProject = useCallback(async (name: string) => {
     await api.deleteProject(name);
     await fetchProjects();
-  };
+  }, [fetchProjects]);
 
   return { projects, loading, error, refresh: fetchProjects, createProject, deleteProject };
 }

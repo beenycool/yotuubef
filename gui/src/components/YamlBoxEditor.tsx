@@ -123,9 +123,9 @@ export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onCha
     }
   };
 
-  // Mutate nested field value helper
+  // Mutate nested field value helper (js-performance: use structuredClone instead of JSON stringify overhead)
   const handleFieldChange = (path: string[], value: any) => {
-    const copy = JSON.parse(JSON.stringify(parsedData));
+    const copy = typeof structuredClone === 'function' ? structuredClone(parsedData) : JSON.parse(JSON.stringify(parsedData));
     let curr = copy;
     for (let i = 0; i < path.length - 1; i++) {
       if (!curr[path[i]]) curr[path[i]] = {};
@@ -137,7 +137,7 @@ export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onCha
 
   // Delete field helper
   const handleDeleteField = (path: string[]) => {
-    const copy = JSON.parse(JSON.stringify(parsedData));
+    const copy = typeof structuredClone === 'function' ? structuredClone(parsedData) : JSON.parse(JSON.stringify(parsedData));
     let curr = copy;
     for (let i = 0; i < path.length - 1; i++) {
       if (!curr[path[i]]) return;

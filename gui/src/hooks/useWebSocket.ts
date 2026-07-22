@@ -31,7 +31,7 @@ export function useWebSocket(projectName?: string) {
       try {
         const data = JSON.parse(event.data);
         if (data.type === 'log') {
-          setLogs((prev) => [...prev, data as WSLogMessage]);
+          setLogs((prev) => (prev.length >= 1000 ? [...prev.slice(-999), data as WSLogMessage] : [...prev, data as WSLogMessage]));
         } else {
           setLastEvent(data as WSEventMessage);
         }

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { usePipeline } from '../hooks/usePipeline';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -25,16 +25,37 @@ export const ProjectView: React.FC = () => {
   const [selectedFileContent, setSelectedFileContent] = useState<any>(null);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
 
+  const rawStatus = status?.status || 'idle';
+  const isRunning = status?.is_running || false;
+  const currentPhase = status?.current_phase || 'IDEA_GENERATION';
+
+  // Eliminating Waterfalls (async-parallel) & Re-render Optimization (rerender-dependencies):
+  // Fetch artifacts, assets & video in parallel using Promise.allSettled with primitive dependencies
   useEffect(() => {
     if (!projectName) return;
-    api.listArtifacts(projectName).then(setArtifacts).catch(console.error);
-    api.listMediaAssets(projectName).then(setMediaAssets).catch(console.error);
-    api.getRenderedVideo(projectName).then(setVideoInfo).catch(() => setVideoInfo(null));
-  }, [projectName, status]);
+    let isCancelled = false;
+
+    Promise.allSettled([
+      api.listArtifacts(projectName),
+      api.listMediaAssets(projectName),
+      api.getRenderedVideo(projectName),
+    ]).then(([artifactsRes, mediaRes, videoRes]) => {
+      if (isCancelled) return;
+      if (artifactsRes.status === 'fulfilled') setArtifacts(artifactsRes.value);
+      if (mediaRes.status === 'fulfilled') setMediaAssets(mediaRes.value);
+      if (videoRes.status === 'fulfilled') setVideoInfo(videoRes.value);
+      else setVideoInfo(null);
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [projectName, rawStatus, isRunning, currentPhase]);
 
   useEffect(() => {
+    if (!selectedFileContent) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && selectedFileContent) {
+      if (e.key === 'Escape') {
         setSelectedFileContent(null);
       }
     };
@@ -50,9 +71,6 @@ export const ProjectView: React.FC = () => {
       toast.error(err.message, 'Error Loading File');
     }
   };
-
-  const currentPhase = status?.current_phase || 'IDEA_GENERATION';
-  const isRunning = status?.is_running || false;
 
   const [reportText, setReportText] = useState('');
   const [submittingReport, setSubmittingReport] = useState(false);
@@ -101,8 +119,8 @@ export const ProjectView: React.FC = () => {
     }
   };
 
-  const getStatusBannerDetails = () => {
-    const rawStatus = status?.status || 'idle';
+  // Re-render Optimization (rerender-memo): Memoize status banner details
+  const banner = useMemo(() => {
     if (isRunning) {
       return {
         bg: 'rgba(0, 210, 160, 0.1)',
@@ -146,9 +164,7 @@ export const ProjectView: React.FC = () => {
       desc: 'Click "Start Pipeline" to begin documentary generation.',
       icon: 'ℹ️',
     };
-  };
-
-  const banner = getStatusBannerDetails();
+  }, [isRunning, rawStatus, currentPhase]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
