@@ -18,11 +18,11 @@ def run_colab_studio(port: int = 8420):
 
     # Build frontend if dist does not exist
     dist_dir = os.path.join(gui_dir, "dist")
-    if not os.path.exists(dist_dir):
+    if not os.path.exists(dist_dir) or not os.path.exists(os.path.join(dist_dir, "index.html")):
         print("🔨 Building frontend assets for Colab...")
         subprocess.run(["npm", "run", "build"], cwd=gui_dir, check=True)
 
-    print("🚀 Launching FastAPI server on port", port)
+    print(f"🚀 Launching FastAPI backend + Web Studio server on port {port}...")
     backend_cmd = [
         sys.executable,
         "-m",
@@ -35,10 +35,60 @@ def run_colab_studio(port: int = 8420):
     ]
     proc = subprocess.Popen(backend_cmd, cwd=root_dir)
 
+    time.sleep(2)
+
     try:
         from google.colab import output
+        from IPython.display import display, HTML
+
         output.serve_kernel_port(port)
-        print("✨ Colab kernel port served. Click the link above to open Yotuubef Studio!")
+        url = output.eval_js(f'google.colab.kernel.proxyPort({port})')
+
+        html_code = f"""
+        <div style="
+            background: linear-gradient(135deg, #12121a 0%, #1a1a26 100%);
+            border: 2px solid #6c5ce7;
+            border-radius: 12px;
+            padding: 24px;
+            margin: 16px 0;
+            color: #f0f0f5;
+            font-family: system-ui, sans-serif;
+            box-shadow: 0 8px 24px rgba(108, 92, 231, 0.3);
+        ">
+            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+                <span style="font-size: 28px;">🎬</span>
+                <div>
+                    <h2 style="margin: 0; font-size: 1.3rem; color: #fff;">Yotuubef Studio is Live!</h2>
+                    <span style="font-size: 0.85rem; color: #a29bfe;">Google Colab Tunnel Active</span>
+                </div>
+            </div>
+
+            <p style="margin: 8px 0 16px 0; color: #8c8ca1; font-size: 0.9rem;">
+                Click the button below to open Yotuubef Studio in a new tab:
+            </p>
+
+            <a href="{url}" target="_blank" style="
+                display: inline-block;
+                background: linear-gradient(135deg, #6c5ce7 0%, #4ecdc4 100%);
+                color: #ffffff;
+                text-decoration: none;
+                font-weight: 700;
+                font-size: 1rem;
+                padding: 14px 28px;
+                border-radius: 8px;
+                box-shadow: 0 4px 14px rgba(108, 92, 231, 0.5);
+                transition: transform 0.2s;
+            ">
+                👉 OPEN YOTUUBEF STUDIO WORKSPACE 🚀
+            </a>
+
+            <div style="margin-top: 16px; font-size: 0.8rem; color: #5a5a70;">
+                Direct URL: <a href="{url}" target="_blank" style="color: #4ecdc4;">{url}</a>
+            </div>
+        </div>
+        """
+        display(HTML(html_code))
+        print(f"✨ Studio URL: {url}")
     except ImportError:
         print(f"✨ FastAPI running on http://localhost:{port} (serving GUI static app at /)")
 
