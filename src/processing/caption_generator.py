@@ -140,7 +140,7 @@ class CaptionGenerator:
         caption_clips = []
         composite_clip = None
         try:
-            from moviepy import TextClip, CompositeVideoClip
+            from moviepy import CompositeVideoClip
             from src.processing.video_processor_fixes import MoviePyCompat
 
             # Transcribe audio

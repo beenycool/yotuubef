@@ -3,14 +3,9 @@ Pydantic models for robust data validation and type checking.
 Replaces dataclasses with validated models for AI analysis results.
 """
 
-from typing import Optional, Dict, List, Any
-from pydantic import BaseModel, Field, field_validator, ConfigDict
 from enum import Enum
-
-
-class EffectType(str, Enum):
-    ZOOM = "zoom"
-    HIGHLIGHT = "highlight"
+from typing import Optional, Dict, List, Any
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class PositionType(str, Enum):
@@ -66,12 +61,6 @@ class TextOverlay(BaseModel):
     )
     style: TextStyle = Field(default=TextStyle.DEFAULT, description="Text style")
 
-    @field_validator("text")
-    @classmethod
-    def validate_text_content(cls, v):
-        if not v.strip():
-            raise ValueError("Text content cannot be empty or whitespace only")
-        return v.strip()
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -103,12 +92,6 @@ class NarrativeSegment(BaseModel):
         default=None, description="B-roll image search query for this segment"
     )
 
-    @field_validator("text")
-    @classmethod
-    def validate_narrative_text(cls, v):
-        if not v.strip():
-            raise ValueError("Narrative text cannot be empty")
-        return v.strip()
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -222,11 +205,6 @@ class CommentEngagement(BaseModel):
     toxicity_score: float = 0.0
 
 
-class EnhancementOptimization(BaseModel):
-    last_optimization_date: Optional[str] = None
-    parameter_history: Dict[str, Any] = Field(default_factory=dict)
-    performance_trends: Dict[str, Any] = Field(default_factory=dict)
-
 
 class VideoAnalysis(BaseModel):
     suggested_title: str = ""
@@ -309,17 +287,6 @@ class IdeaGenerationSchema(BaseModel):
     gemini_deep_research_prompt: str = Field(..., min_length=20)
     next_phase: str = Field(default="WAIT_FOR_GEMINI_REPORT")
 
-
-class ScriptJudgeResult(BaseModel):
-    """Result from the LLM Judge evaluating script quality."""
-
-    score: int = Field(..., ge=1, le=10)
-    hook_under_3_seconds: bool = True
-    sounds_natural: bool = True
-    sentences_too_long: bool = False
-    has_forbidden_phrases: bool = False
-    feedback: str = Field(default="", max_length=1000)
-    passes_quality_bar: bool = Field(default=True)
 
 
 class EvidencePlanItem(BaseModel):

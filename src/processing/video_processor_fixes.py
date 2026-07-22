@@ -3,25 +3,12 @@ MoviePy API compatibility fixes for video processing
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Union, Any
-import numpy as np
 from pathlib import Path
 from moviepy import (
     VideoFileClip,
-    AudioFileClip,
     CompositeVideoClip,
-    CompositeAudioClip,
     TextClip,
-    ImageClip,
     ColorClip,
-    concatenate_videoclips,
-    concatenate_audioclips,
-    vfx,
-    afx,
-)
-from moviepy.video.VideoClip import ColorClip as ColorClipImport
-from moviepy.video.compositing.CompositeVideoClip import (
-    CompositeVideoClip as CompositeVideoClipImport,
 )
 
 
@@ -341,24 +328,6 @@ class MoviePyCompat:
         except Exception as e:
             logging.warning(f"Error cropping clip: {e}")
             return clip
-
-    @staticmethod
-    def get_audio_channels(clip):
-        """Safely get number of audio channels"""
-        try:
-            # Try different attribute names for channel count
-            if hasattr(clip, "nchannels"):
-                return clip.nchannels
-            elif hasattr(clip, "audio") and hasattr(clip.audio, "nchannels"):
-                return clip.audio.nchannels
-            elif hasattr(clip, "reader") and hasattr(clip.reader, "nchannels"):
-                return clip.reader.nchannels
-            else:
-                # Default to stereo if can't determine
-                return 2
-        except Exception as e:
-            logging.warning(f"Could not determine audio channels: {e}")
-            return 2
 
     @staticmethod
     def with_audio(video_clip, audio_clip):

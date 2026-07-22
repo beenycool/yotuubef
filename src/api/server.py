@@ -1,6 +1,5 @@
 """FastAPI application entrypoint for Yotuubef Studio."""
 
-import os
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware

@@ -92,7 +92,7 @@ async def test_get_broll_images_concurrent_mapping(tmp_path):
     ):
         client = BraveImageClient(max_concurrent_downloads=4)
 
-    async def _fake_search(query, count=1):
+    async def _fake_search(query, count=1, **kwargs):
         return [{"url": f"https://example.com/{query}.jpg"}]
 
     async def _fake_download(url, query):
@@ -120,7 +120,7 @@ async def test_get_broll_images_respects_semaphore_limit(tmp_path):
     ):
         client = BraveImageClient(max_concurrent_downloads=2)
 
-    async def _fake_search(query, count=1):
+    async def _fake_search(query, count=1, **kwargs):
         return [{"url": f"https://example.com/{query}.jpg"}]
 
     active_downloads = 0

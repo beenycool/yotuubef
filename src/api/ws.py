@@ -1,6 +1,5 @@
 """WebSocket connection manager for real-time pipeline log streaming."""
 
-import asyncio
 import json
 import logging
 from typing import Dict, Set

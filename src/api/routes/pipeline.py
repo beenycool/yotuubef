@@ -4,7 +4,7 @@ import asyncio
 import logging
 from pathlib import Path
 from typing import Dict, Optional
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.enhanced_orchestrator import EnhancedVideoOrchestrator

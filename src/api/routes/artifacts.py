@@ -2,9 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
 
 router = APIRouter()
 
@@ -92,7 +90,7 @@ async def submit_research_report(project: str, body: ReportSubmitRequest):
     if not project_dir.exists():
         raise HTTPException(status_code=404, detail=f"Project '{project}' not found")
 
-    from src.hybrid_documentary_state_machine import save_finding, load_run_state, save_run_state, set_phase, PipelinePhase
+    from src.hybrid_documentary_state_machine import save_finding, load_run_state, set_phase, PipelinePhase
     report_file = save_finding(project_dir, "reports", "gemini_report.txt", body.content.strip())
 
     state = load_run_state(project_dir)

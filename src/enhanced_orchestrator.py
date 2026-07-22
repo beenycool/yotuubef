@@ -66,6 +66,7 @@ from src.hybrid_documentary_state_machine import (
 )
 from src.utils.search_audit_logger import SearchAuditLogger
 from src.processing.asset_vector_store import AssetVectorStore
+from src.processing.cinematic_editor import CinematicEditor
 
 
 class EnhancedVideoOrchestrator:
@@ -90,7 +91,44 @@ class EnhancedVideoOrchestrator:
         # Local vector store for asset dedup + semantic retrieval
         self.asset_store = AssetVectorStore()
 
+        # AI-powered Cinematic Editor for video scene analysis and pacing adjustment
+        self.cinematic_editor = CinematicEditor()
+
         self.logger.info("Enhanced AI-powered video orchestrator initialized")
+
+    def analyze_rendered_video_cinematically(
+        self, video_path: Path, analysis: Optional[Any] = None
+    ) -> Any:
+        """
+        Perform cinematic scene analysis on a video using CinematicEditor.
+        """
+        cinematic_editor = getattr(self, "cinematic_editor", None)
+        if cinematic_editor is not None and hasattr(
+            cinematic_editor, "analyze_video_cinematically"
+        ):
+            if analysis is None:
+                from src.models import VideoAnalysisEnhanced
+
+                analysis = VideoAnalysisEnhanced(
+                    topic="Cinematic Analysis",
+                    target_audience="General",
+                    key_themes=["Documentary"],
+                    recommended_style="Cinematic",
+                    suggested_music_genre="Dramatic",
+                )
+            return cinematic_editor.analyze_video_cinematically(video_path, analysis)
+        return analysis
+
+    def adjust_cinematic_pacing(
+        self, segments: List[Dict[str, Any]], target_style: str = "dynamic"
+    ) -> List[Dict[str, Any]]:
+        """
+        Adjust segment pacing using CinematicEditor.
+        """
+        cinematic_editor = getattr(self, "cinematic_editor", None)
+        if cinematic_editor is not None and hasattr(cinematic_editor, "adjust_pacing"):
+            return cinematic_editor.adjust_pacing(segments, target_style=target_style)
+        return segments
 
     async def process_hybrid_documentary_studio(
         self,
@@ -478,13 +516,14 @@ class EnhancedVideoOrchestrator:
         )
 
         # Index downloaded assets into local vector store for future dedup + retrieval
-        await self.asset_store.initialize()
-        raw_media_dir = Path(state.project_dir) / "raw_media"
-        if raw_media_dir.exists():
-            indexed = await self.asset_store.scan_directory(raw_media_dir)
-            self.logger.info(
-                "Indexed %d downloaded assets into local vector store", indexed
-            )
+        if getattr(self, "asset_store", None) is not None:
+            await self.asset_store.initialize()
+            raw_media_dir = Path(state.project_dir) / "raw_media"
+            if raw_media_dir.exists():
+                indexed = await self.asset_store.scan_directory(raw_media_dir)
+                self.logger.info(
+                    "Indexed %d downloaded assets into local vector store", indexed
+                )
 
         transcripts = await self._transcribe_hybrid_media_assets(
             state,
@@ -624,15 +663,15 @@ class EnhancedVideoOrchestrator:
         last_error = ""
 
         for attempt in range(max_render_retries + 1):
-            if attempt > 0:
-                print(
-                    f"[Hybrid] Render retry {attempt}/{max_render_retries} "
-                    f"(lowering quality)...",
-                    flush=True,
+            try:
+                render_result = await self._render_hybrid_local_video(
+                    state, script_payload, render_attempt=attempt
                 )
-            render_result = await self._render_hybrid_local_video(
-                state, script_payload, render_attempt=attempt
-            )
+            except TypeError:
+                render_result = await self._render_hybrid_local_video(
+                    state, script_payload
+                )
+
             if render_result.get("success"):
                 break
             last_error = str(render_result.get("error", "Unknown render error"))
@@ -2833,7 +2872,8 @@ Search results:
         if not isinstance(segments, list) or not segments:
             return script_payload
 
-        active_client = getattr(self.ai_client, "active_client", None)
+        ai_client = getattr(self, "ai_client", None)
+        active_client = getattr(ai_client, "active_client", None) if ai_client else None
         if not active_client or not hasattr(
             active_client, "_chat_completion_with_fallback"
         ):
@@ -3137,6 +3177,14 @@ Script to judge:
                 "success": False,
                 "error": "No script segments available for hybrid render",
             }
+
+        # Apply cinematic editor pacing adjustment
+        cinematic_editor = getattr(self, "cinematic_editor", None)
+        if cinematic_editor is not None and hasattr(cinematic_editor, "adjust_pacing"):
+            try:
+                segments = cinematic_editor.adjust_pacing(segments)
+            except Exception as exc:
+                self.logger.warning("CinematicEditor pacing adjustment failed: %s", exc)
 
         min_segment_duration = self._read_env_float(
             "HYBRID_MIN_SEGMENT_DURATION_SECONDS",

@@ -13,7 +13,7 @@ import tempfile
 import shutil
 import types
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Dict, List, Optional, Tuple, Any
 import subprocess
 import psutil
 import os
@@ -64,13 +64,14 @@ from src.models import (
     TextOverlay,
     NarrativeSegment,
     VisualCue,
-    CallToAction,
+    AudioDuckingConfig,
 )
 from src.integrations.tts_service import TTSService
 from src.processing.cta_processor import CTAProcessor
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.processing.sound_effects_manager import SoundEffectsManager
 from src.processing.advanced_audio_processor import AdvancedAudioProcessor
+from src.processing.caption_generator import CaptionGenerator
 from src.processing.video_processor_fixes import MoviePyCompat, ensure_shorts_format
 from src.utils.gpu_memory_manager import GPUMemoryManager
 from src.processing.speed_optimizer import create_speed_optimizer
@@ -2113,6 +2114,7 @@ class VideoProcessor:
         self.effects = VideoEffects()
         self.text_processor = TextOverlayProcessor()
         self.audio_processor = AdvancedAudioProcessor()
+        self.caption_generator = CaptionGenerator()
         self.advanced_enhancer = AdvancedVideoEnhancer()
         self.cta_processor = CTAProcessor()
         self.thumbnail_generator = ThumbnailGenerator()
@@ -2204,6 +2206,7 @@ class VideoProcessor:
         music_path: Optional[Path],
         video_duration: float,
         narrative_segments: List[NarrativeSegment],
+        ducking_config: Optional[AudioDuckingConfig] = None,
     ) -> Optional[AudioFileClip]:
         """Add background music with comprehensive error handling"""
         if not (
@@ -2216,7 +2219,7 @@ class VideoProcessor:
 
         try:
             music_clip = self._add_background_music(
-                music_path, video_duration, narrative_segments
+                music_path, video_duration, narrative_segments, ducking_config
             )
             if music_clip:
                 self.logger.info("Successfully added background music")
@@ -2305,6 +2308,7 @@ class VideoProcessor:
         music_path: Path,
         video_duration: float,
         narrative_segments: List[NarrativeSegment],
+        ducking_config: Optional[AudioDuckingConfig] = None,
     ) -> Optional[AudioFileClip]:
         """Add background music with ducking during narration"""
         try:
@@ -2327,9 +2331,11 @@ class VideoProcessor:
             except Exception as e:
                 self.logger.warning(f"Error applying base volume to music: {e}")
 
-            # Duck music during narration
+            # Duck music during narration using AdvancedAudioProcessor
             if narrative_segments:
-                music_clip = self._apply_audio_ducking(music_clip, narrative_segments)
+                music_clip = self._apply_audio_ducking(
+                    music_clip, narrative_segments, ducking_config
+                )
 
             return music_clip
 
@@ -2338,54 +2344,51 @@ class VideoProcessor:
             return None
 
     def _apply_audio_ducking(
-        self, music_clip: AudioFileClip, narrative_segments: List[NarrativeSegment]
+        self,
+        music_clip: AudioFileClip,
+        narrative_segments: List[NarrativeSegment],
+        ducking_config: Optional[AudioDuckingConfig] = None,
     ) -> AudioFileClip:
-        """Reduce music volume during narration"""
+        """Reduce music volume during narration using AdvancedAudioProcessor.process_audio_with_ducking"""
         try:
-            duck_factor = self.config.audio.background_music_narrative_volume_factor
-
-            # Create ducking segments
-            segments = []
-            current_time = 0
-
-            for segment in narrative_segments:
-                start_time = segment.time_seconds
-                end_time = start_time + segment.intended_duration_seconds
-
-                # Add normal volume segment before narration
-                if current_time < start_time:
-                    segments.append(
-                        MoviePyCompat.subclip(music_clip, current_time, start_time)
-                    )
-
-                # Add ducked segment during narration
-                if start_time < music_clip.duration:
-                    duck_end = min(end_time, music_clip.duration)
-                    ducked_segment = MoviePyCompat.subclip(
-                        music_clip, start_time, duck_end
-                    )
-                    try:
-                        ducked_segment = ducked_segment.with_volume_scaled(duck_factor)
-                    except Exception as e:
-                        self.logger.warning(f"Error applying ducking volume: {e}")
-                    segments.append(ducked_segment)
-
-                current_time = end_time
-
-            # Add remaining segment
-            if current_time < music_clip.duration:
-                segments.append(
-                    MoviePyCompat.subclip(music_clip, current_time, music_clip.duration)
+            if ducking_config is None:
+                duck_factor = getattr(
+                    self.config.audio, "background_music_narrative_volume_factor", 0.3
                 )
+                ducking_config = AudioDuckingConfig(duck_volume=duck_factor)
 
-            if segments:
-                return concatenate_audioclips(segments)
-            else:
-                return music_clip
-
+            return self.audio_processor.process_audio_with_ducking(
+                background_music=music_clip,
+                narrative_segments=narrative_segments,
+                ducking_config=ducking_config,
+            )
         except Exception as e:
-            self.logger.warning(f"Error applying audio ducking: {e}")
+            self.logger.warning(f"Error applying audio ducking via AdvancedAudioProcessor: {e}")
             return music_clip
+
+    def add_captions(
+        self,
+        video_clip: VideoFileClip,
+        narrative_segments: Optional[List[NarrativeSegment]] = None,
+        audio_path: Optional[Path] = None,
+    ) -> VideoFileClip:
+        """Generate and overlay dynamic word-level text captions on video clip using CaptionGenerator."""
+        try:
+            captioned_clip = None
+            if audio_path and Path(audio_path).exists():
+                captioned_clip = self.caption_generator.generate_word_captions(
+                    video_clip, Path(audio_path)
+                )
+            if captioned_clip is None and narrative_segments:
+                captioned_clip = self.caption_generator.generate_captions_from_known_text(
+                    video_clip, narrative_segments
+                )
+            if captioned_clip is not None:
+                self.logger.info("Successfully added dynamic word-level text captions overlay")
+                return captioned_clip
+        except Exception as e:
+            self.logger.warning(f"Error generating dynamic captions overlay: {e}")
+        return video_clip
 
     def _get_emotion_volume_factor(self, emotion: str) -> float:
         """Get volume adjustment factor based on emotion"""
@@ -3151,6 +3154,20 @@ class VideoProcessor:
                     self.logger.info(f"Added {len(analysis.visual_cues)} visual cues")
                 except Exception as e:
                     self.logger.warning(f"Visual cues failed: {e}")
+
+            # Apply dynamic word-level text captions overlay
+            if getattr(analysis, "narrative_script_segments", None):
+                try:
+                    captioned = self.add_captions(
+                        video_clip,
+                        narrative_segments=analysis.narrative_script_segments,
+                    )
+                    if captioned is not None and captioned is not video_clip:
+                        video_clip = captioned
+                        resource_manager.register_clip(video_clip)
+                        self.logger.info("Applied dynamic word-level text captions overlay")
+                except Exception as e:
+                    self.logger.warning(f"Dynamic caption overlay failed: {e}")
 
             # Apply duration constraints
             video_clip = self._apply_duration_constraints(video_clip)

@@ -10,9 +10,15 @@ import src.enhanced_orchestrator as orchestrator_module
 from src.hybrid_documentary_state_machine import PipelinePhase
 
 
+from unittest.mock import Mock, AsyncMock
+
+
 def _build_orchestrator_stub() -> EnhancedVideoOrchestrator:
     orchestrator = EnhancedVideoOrchestrator.__new__(EnhancedVideoOrchestrator)
     orchestrator.logger = logging.getLogger(__name__)
+    mock_store = AsyncMock()
+    mock_store.scan_directory = AsyncMock(return_value=0)
+    orchestrator.asset_store = mock_store
     return orchestrator
 
 

@@ -6,7 +6,7 @@ Handles dynamic audio mixing, ducking during narration, and audio optimization.
 import logging
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 import tempfile
 from dataclasses import dataclass
 
@@ -17,7 +17,7 @@ try:
 except ImportError:
     LIBROSA_AVAILABLE = False
 
-from moviepy import AudioFileClip, CompositeAudioClip, afx
+from moviepy import AudioFileClip, CompositeAudioClip
 from src.config.settings import get_config
 from src.models import AudioDuckingConfig, NarrativeSegment
 from src.integrations.tts_service import TTSService
@@ -103,7 +103,11 @@ class AdvancedAudioProcessor:
             
             for i, segment in enumerate(narrative_segments):
                 # Generate TTS audio
-                audio_path = self.tts_service.generate_speech(segment, temp_path / f"tts_{i}.wav")
+                audio_path = None
+                try:
+                    audio_path = self.tts_service.generate_speech(segment, temp_path / f"tts_{i}.wav")
+                except Exception as e:
+                    self.logger.warning(f"TTS generation failed for segment {i}: {e}")
                 
                 if audio_path and audio_path.exists():
                     try:
@@ -125,6 +129,23 @@ class AdvancedAudioProcessor:
                             
                     except Exception as e:
                         self.logger.warning(f"Failed to analyze TTS segment {i}: {e}")
+                        duration = getattr(segment, "intended_duration_seconds", 3.0) or 3.0
+                        tts_segments.append(AudioSegment(
+                            start_time=segment.time_seconds,
+                            end_time=segment.time_seconds + duration,
+                            audio_type="narration",
+                            volume_level=1.0,
+                            energy_level=1.0
+                        ))
+                else:
+                    duration = getattr(segment, "intended_duration_seconds", 3.0) or 3.0
+                    tts_segments.append(AudioSegment(
+                        start_time=segment.time_seconds,
+                        end_time=segment.time_seconds + duration,
+                        audio_type="narration",
+                        volume_level=1.0,
+                        energy_level=1.0
+                    ))
         
         return tts_segments
     

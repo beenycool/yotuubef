@@ -4,7 +4,6 @@ Main entry point for the hybrid documentary workflow with AI-powered deep resear
 """
 
 from pathlib import Path
-import os
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)

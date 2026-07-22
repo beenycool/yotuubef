@@ -12,7 +12,6 @@ from src.config.settings import (
     PathConfig,
     ConfigManager,
     get_config,
-    init_config,
     setup_logging,
 )
 import src.config.settings as settings_module
@@ -214,53 +213,7 @@ def test_get_font_path(clean_config, tmp_path):
     assert manager.get_font_path("Existing.ttf") == str(font_file)
 
 
-def test_get_music_path(clean_config, tmp_path):
-    manager = ConfigManager(config_file=tmp_path / "non_existent.yaml")
-    manager.paths.music_folder = tmp_path
-
-    assert manager.get_music_path("NonExistent.mp3") is None
-
-    music_file = tmp_path / "Existing.mp3"
-    music_file.touch()
-    assert manager.get_music_path("Existing.mp3") == music_file
-
-
-def test_get_sound_effect_path(clean_config, tmp_path):
-    manager = ConfigManager(config_file=tmp_path / "non_existent.yaml")
-    manager.paths.sound_effects_folder = tmp_path
-
-    assert manager.get_sound_effect_path("NonExistent.wav") is None
-
-    sfx_file = tmp_path / "Existing.wav"
-    sfx_file.touch()
-    assert manager.get_sound_effect_path("Existing.wav") == sfx_file
-
-
-def test_global_config_init(clean_config, tmp_path):
-    assert settings_module.config is None
-
-    fake_config_path = tmp_path / "non_existent.yaml"
-    config1 = init_config(config_file=fake_config_path)
-    assert isinstance(config1, ConfigManager)
-    assert settings_module.config is config1
-
-    config2 = get_config()
-    assert config2 is config1
-
-
-def test_config_manager_validation(clean_config, tmp_path, caplog):
-    fake_config_path = tmp_path / "non_existent.yaml"
-    manager = ConfigManager(config_file=fake_config_path)
-
-    # Since API keys are empty by default, they should log warnings
-    assert "REDDIT_CLIENT_ID not set" in caplog.text
-    assert "NVIDIA_NIM_API_KEY not set" in caplog.text
-
-
-def test_setup_logging(tmp_path, monkeypatch):
-    # Change current working directory to tmp_path to write log file there
-    monkeypatch.chdir(tmp_path)
+def test_setup_logging(clean_config, tmp_path, monkeypatch):
     setup_logging(level="DEBUG")
-
-    log_file = tmp_path / "youtube_generator.log"
+    log_file = get_config().paths.base_dir / "data" / "logs" / "youtube_generator.log"
     assert log_file.exists()

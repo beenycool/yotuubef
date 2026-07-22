@@ -9,16 +9,16 @@ import json
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 
 from src.config.settings import get_config
-from src.models import CommentEngagement, ThumbnailVariant, PerformanceMetrics
+from src.models import PerformanceMetrics
 from src.integrations.youtube_client import YouTubeClient
 from src.integrations.ai_client import AIClient
 from src.processing.thumbnail_generator import ThumbnailGenerator
 from src.monitoring.engagement_metrics import EngagementMonitor
-from src.database.db_manager import get_db_manager, DatabaseManager
+from src.database.db_manager import DatabaseManager
 
 
 @dataclass

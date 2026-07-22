@@ -4,8 +4,7 @@ Handles Reddit authentication, post fetching, and content validation.
 """
 
 import logging
-import re
-from typing import List, Optional, Dict, Any, Pattern
+from typing import List, Optional
 from dataclasses import dataclass
 from datetime import datetime
 

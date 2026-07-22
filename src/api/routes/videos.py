@@ -2,9 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
 
 router = APIRouter()
 

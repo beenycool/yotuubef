@@ -448,15 +448,6 @@ class ConfigManager:
         self.paths = PathConfig()
         self.tts: Dict[str, Any] = {}  # TTS config loaded from YAML
 
-    def reload(self) -> "ConfigManager":
-        """Reload configuration from current config file and environment."""
-        self._reset_to_defaults()
-        self._load_yaml_config()
-        self._load_env_config()
-        self._validate_config()
-        self.logger.info("Configuration reloaded")
-        return self
-
     def _load_yaml_config(self):
         """Load configuration from YAML file"""
         if not self.config_file:
@@ -842,42 +833,6 @@ class ConfigManager:
         self.logger.warning(f"Font {font_name} not found, using Arial")
         return "Arial"
 
-    def get_music_path(self, filename: str) -> Optional[Path]:
-        """Get the full path to a music file"""
-        music_path = self.paths.music_folder / filename
-        return music_path if music_path.exists() else None
-
-    def get_sound_effect_path(self, filename: str) -> Optional[Path]:
-        """Get the full path to a sound effect file"""
-        effect_path = self.paths.sound_effects_folder / filename
-        return effect_path if effect_path.exists() else None
-
-    def log_config_summary(self):
-        """Log a summary of the current configuration"""
-        self.logger.info("=== Configuration Summary ===")
-        self.logger.info(
-            f"Video: {self.video.target_resolution[0]}x{self.video.target_resolution[1]} @ {self.video.target_fps}fps"
-        )
-        self.logger.info(
-            f"Reddit: {'[OK]' if self.api.reddit_client_id else '[FAIL]'} configured"
-        )
-        self.logger.info(
-            f"YouTube: {'[OK]' if self.paths.youtube_token_file and self.paths.youtube_token_file.exists() else '[FAIL]'} configured"
-        )
-        self.logger.info(
-            f"NVIDIA NIM: {'[OK]' if self.api.nvidia_nim_api_key else '[FAIL]'} configured"
-        )
-        self.logger.info(f"AI provider: {self.api.ai_provider}")
-        self.logger.info(
-            f"Seamless looping: {'[ENABLED]' if self.effects.enable_seamless_looping else '[DISABLED]'}"
-        )
-        self.logger.info(
-            f"Background music: {'[ENABLED]' if self.audio.background_music_enabled else '[DISABLED]'}"
-        )
-        self.logger.info(f"Base directory: {self.paths.base_dir}")
-        self.logger.info(f"Temp directory: {self.paths.temp_dir}")
-        self.logger.info("================================")
-
 
 # Global configuration instance
 config: Optional[ConfigManager] = None
@@ -890,12 +845,6 @@ def get_config() -> ConfigManager:
         config = ConfigManager()
     return config
 
-
-def init_config(config_file: Optional[Union[str, Path]] = None) -> ConfigManager:
-    """Initialize the global configuration"""
-    global config
-    config = ConfigManager(config_file)
-    return config
 
 
 def setup_logging(level: str = "INFO") -> None:

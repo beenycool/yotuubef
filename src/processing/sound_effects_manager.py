@@ -4,11 +4,10 @@ Provides intelligent sound effect mapping, directory-based search, and automated
 """
 
 import logging
-import json
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
-import re
+
 from moviepy.audio.io.AudioFileClip import AudioFileClip
 
 from src.config.settings import get_config

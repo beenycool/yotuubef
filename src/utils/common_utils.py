@@ -4,11 +4,10 @@ Provides reusable functions for segment selection, validation, and data processi
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 from pathlib import Path
 
-from src.models import VideoAnalysis, VideoSegment
-from src.config.settings import get_config
+from src.models import VideoAnalysis
 
 
 def select_and_validate_segments(analysis: VideoAnalysis, config: Dict[str, Any]) -> List[Dict[str, Any]]:

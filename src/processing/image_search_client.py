@@ -29,6 +29,7 @@ class BraveImageClient:
         max_concurrent_downloads: int = DEFAULT_MAX_CONCURRENT_DOWNLOADS,
         max_connections: int = DEFAULT_MAX_CONNECTIONS,
         max_connections_per_host: int = DEFAULT_MAX_CONNECTIONS_PER_HOST,
+        asset_store: Optional[Any] = None,
     ):
         self.config = get_config()
         self.logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class BraveImageClient:
         self.max_concurrent_downloads = max(1, max_concurrent_downloads)
         self.max_connections = max(1, max_connections)
         self.max_connections_per_host = max(1, max_connections_per_host)
+        self.asset_store = asset_store
 
         self._session: Optional[aiohttp.ClientSession] = None
         self._search_timeout = aiohttp.ClientTimeout(total=15)
@@ -92,21 +94,27 @@ class BraveImageClient:
         Returns:
             List of image result dictionaries with URL, title, etc.
         """
+        store = asset_store or self.asset_store
         # Query local vector store first
-        if asset_store is not None:
+        if store is not None:
             try:
-                local_results = await asset_store.search(
-                    query, asset_type="image", top_k=count
-                )
+                if hasattr(store, "get_similar_assets"):
+                    local_results = await store.get_similar_assets(
+                        query, asset_type="image", top_k=count
+                    )
+                else:
+                    local_results = await store.search(
+                        query, asset_type="image", top_k=count
+                    )
                 if local_results:
-                    threshold = 0.5
+                    threshold = 0.2
                     local_paths = [
                         {
                             "url": f"file://{r['path']}",
                             "title": Path(r["path"]).name,
                             "type": "local_vector_store",
                             "source": "local_cache",
-                            "score": r["score"],
+                            "score": r.get("score", 1.0),
                             "local_path": r["path"],
                         }
                         for r in local_results
@@ -116,7 +124,7 @@ class BraveImageClient:
                     ]
                     if local_paths:
                         self.logger.info(
-                            "Found %d images locally for query: %s",
+                            "Found %d images locally via vector store for query: %s",
                             len(local_paths),
                             query,
                         )
@@ -163,6 +171,13 @@ class BraveImageClient:
         Returns:
             Path to downloaded image, or None if failed
         """
+        if url.startswith("file://"):
+            local_p = Path(url[7:])
+            if local_p.exists():
+                return local_p
+        elif Path(url).exists():
+            return Path(url)
+
         cache_path = self._get_cache_path(query)
         candidate_extensions = (".jpg", ".png", ".webp")
 
@@ -203,7 +218,10 @@ class BraveImageClient:
             return None
 
     async def get_broll_images(
-        self, queries: List[str], max_per_query: int = 1
+        self,
+        queries: List[str],
+        max_per_query: int = 1,
+        asset_store: Optional[Any] = None,
     ) -> Dict[str, List[Path]]:
         """
         Get B-roll images for multiple queries.
@@ -211,10 +229,12 @@ class BraveImageClient:
         Args:
             queries: List of search queries
             max_per_query: Maximum images to download per query
+            asset_store: Optional AssetVectorStore for local asset search
 
         Returns:
             Dictionary mapping query to list of image paths
         """
+        store = asset_store or self.asset_store
         results: Dict[str, List[Path]] = {}
         pending_downloads: List[Tuple[str, str]] = []
 
@@ -222,7 +242,17 @@ class BraveImageClient:
             if not query:
                 continue
 
-            search_results = await self.search_images(query, count=max_per_query)
+            try:
+                if store is not None:
+                    search_results = await self.search_images(
+                        query, count=max_per_query, asset_store=store
+                    )
+                else:
+                    search_results = await self.search_images(
+                        query, count=max_per_query
+                    )
+            except TypeError:
+                search_results = await self.search_images(query, count=max_per_query)
             for result in search_results[:max_per_query]:
                 image_url = result.get("url")
                 if image_url:

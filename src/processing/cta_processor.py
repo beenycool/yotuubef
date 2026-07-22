@@ -5,17 +5,17 @@ Adds subscribe buttons, like reminders, and interactive elements to boost engage
 
 import logging
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Tuple
+from typing import Optional
 import numpy as np
 from moviepy import (
-    VideoFileClip, TextClip, CompositeVideoClip, ColorClip,
-    ImageClip, AudioFileClip, concatenate_audioclips
+    VideoFileClip, CompositeVideoClip, ColorClip,
+    ImageClip, AudioFileClip
 )
 from PIL import Image, ImageDraw, ImageFont
 import tempfile
 
 from src.config.settings import get_config
-from src.models import VideoAnalysis, CallToAction
+from src.models import VideoAnalysis
 from src.processing.video_processor_fixes import MoviePyCompat
 
 

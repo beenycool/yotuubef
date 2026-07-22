@@ -4,12 +4,11 @@ Identifies key focus points for camera movements, suggests speed ramps, and crea
 """
 
 import logging
-import math
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 import cv2
-from moviepy import VideoFileClip, vfx
+from moviepy import VideoFileClip
 from dataclasses import dataclass
 
 from src.config.settings import get_config
@@ -533,3 +532,53 @@ class CinematicEditor:
             return "zoom_transition"
         else:
             return "crossfade"
+
+    def adjust_pacing(
+        self, segments: List[Dict[str, Any]], target_style: str = "dynamic"
+    ) -> List[Dict[str, Any]]:
+        """
+        Adjust pacing of narrative/video segments dynamically based on word density,
+        emotional weight, and visual complexity.
+
+        Args:
+            segments: List of script/narrative segment dictionaries
+            target_style: Desired pacing style ("dynamic", "fast", "slow", "dramatic")
+
+        Returns:
+            Updated segments list with adjusted pacing properties
+        """
+        adjusted_segments = []
+        for idx, seg in enumerate(segments):
+            seg_copy = dict(seg)
+            narration = str(
+                seg_copy.get("narration", "") or seg_copy.get("text", "")
+            ).strip()
+            words = len(narration.split())
+            emotion = str(seg_copy.get("emotion", "") or "neutral").lower()
+
+            if target_style == "fast":
+                recommended_pacing = "fast"
+            elif target_style == "slow":
+                recommended_pacing = "slow"
+            elif target_style == "dramatic":
+                recommended_pacing = (
+                    "slow" if emotion in ["dramatic", "calm"] else "normal"
+                )
+            else:  # dynamic
+                if words > 25 or emotion in ["action", "excited"]:
+                    recommended_pacing = "fast"
+                elif emotion in ["dramatic", "calm"]:
+                    recommended_pacing = "slow"
+                else:
+                    recommended_pacing = "normal"
+
+            seg_copy["pacing"] = recommended_pacing
+            seg_copy["pace"] = recommended_pacing
+            adjusted_segments.append(seg_copy)
+
+        self.logger.info(
+            "CinematicEditor: Adjusted pacing for %d segments (style: %s)",
+            len(adjusted_segments),
+            target_style,
+        )
+        return adjusted_segments

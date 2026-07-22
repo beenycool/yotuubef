@@ -5,7 +5,7 @@ Handles GPU memory optimization, monitoring, and efficient model loading
 
 import logging
 import gc
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any
 import psutil
 
 try:

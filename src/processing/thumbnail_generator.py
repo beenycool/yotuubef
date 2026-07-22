@@ -4,13 +4,12 @@ Creates compelling, clickable thumbnails that drive engagement.
 """
 
 import logging
-import tempfile
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Any
 import cv2
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageEnhance, ImageFilter
 from moviepy import VideoFileClip
 from datetime import datetime, timedelta
 

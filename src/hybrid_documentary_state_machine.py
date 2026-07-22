@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import ast
 import json
 import logging
 import os
 import re
-import time
 from datetime import UTC, datetime
 from enum import Enum
 from pathlib import Path
 from typing import (
-    TYPE_CHECKING,
     Any,
     Dict,
     List,
@@ -27,7 +24,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from src.integrations.search_client import ExaSearchClient
+
 
 OpenAI = None
 try:
@@ -483,6 +480,40 @@ def transcribe_media_file(
     )
 
 
+def generate_dynamic_captions(
+    video_clip: Any,
+    audio_path: Optional[Union[str, Path]] = None,
+    segments: Optional[List[Any]] = None,
+) -> Any:
+    """Generate dynamic word-level text captions overlay on output video clip using CaptionGenerator.
+
+    Args:
+        video_clip: MoviePy VideoFileClip or CompositeVideoClip.
+        audio_path: Optional path to TTS audio file for Whisper transcription.
+        segments: Optional list of narrative segments with timing and text.
+
+    Returns:
+        Video clip with dynamic caption overlays added, or original clip on failure/unavailable model.
+    """
+    try:
+        from src.processing.caption_generator import CaptionGenerator
+
+        generator = CaptionGenerator()
+        if audio_path:
+            audio_p = Path(audio_path)
+            if audio_p.exists():
+                captioned = generator.generate_word_captions(video_clip, audio_p)
+                if captioned is not None:
+                    return captioned
+        if segments:
+            captioned = generator.generate_captions_from_known_text(video_clip, segments)
+            if captioned is not None:
+                return captioned
+    except Exception as e:
+        logger.warning("Failed to generate dynamic captions overlay: %s", e)
+    return video_clip
+
+
 def _extract_transcript_text(transcript: Any) -> str:
     if isinstance(transcript, dict):
         return str(transcript.get("text", ""))
@@ -669,6 +700,7 @@ __all__ = [
     "build_state_machine_prompt",
     "build_validation_feedback_prompt",
     "estimate_tokens_conservative",
+    "generate_dynamic_captions",
     "load_run_state",
     "save_finding",
     "save_run_state",

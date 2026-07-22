@@ -1,6 +1,5 @@
 """Projects CRUD endpoints."""
 
-import json
 import shutil
 from pathlib import Path
 from typing import List, Optional

@@ -7,7 +7,6 @@ Falls back to lightweight TF-IDF + cosine similarity when ChromaDB is unavailabl
 import logging
 import hashlib
 import json
-import os
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
@@ -346,16 +345,32 @@ class AssetVectorStore:
         return counts
 
     async def get_similar_assets(
-        self, asset_path: str, top_k: int = 5
+        self,
+        query_or_path: str,
+        asset_type: Optional[str] = None,
+        top_k: int = 5,
     ) -> List[Dict[str, Any]]:
-        """Find assets similar to a given asset path."""
-        resolved = Path(asset_path)
-        if not resolved.exists():
-            return []
+        """
+        Find assets semantically similar to a given asset path or text query.
 
-        tags = self._extract_tags_from_path(resolved)
-        query = " ".join(tags)
-        return await self.search(query, top_k=top_k)
+        Args:
+            query_or_path: File path string to match similar assets against, or search query string
+            asset_type: Optional filter for asset type (image, video, audio, sound_effect, background)
+            top_k: Max number of results to return
+
+        Returns:
+            List of matching asset result dicts
+        """
+        resolved = Path(query_or_path)
+        if resolved.exists() and resolved.is_file():
+            tags = self._extract_tags_from_path(resolved)
+            query = " ".join(tags)
+            if asset_type is None:
+                asset_type = self._classify_asset_type(resolved)
+        else:
+            query = query_or_path
+
+        return await self.search(query, asset_type=asset_type, top_k=top_k)
 
     @property
     def asset_count(self) -> int:
