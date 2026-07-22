@@ -20,7 +20,16 @@ def run_colab_studio(port: int = 8420):
     dist_dir = os.path.join(gui_dir, "dist")
     if not os.path.exists(dist_dir) or not os.path.exists(os.path.join(dist_dir, "index.html")):
         print("🔨 Building frontend assets for Colab...")
-        subprocess.run(["npm", "run", "build"], cwd=gui_dir, check=True)
+        node_modules_dir = os.path.join(gui_dir, "node_modules")
+        if not os.path.exists(node_modules_dir):
+            print("📦 node_modules missing. Running npm install...")
+            subprocess.run(["npm", "install"], cwd=gui_dir, check=True)
+        try:
+            subprocess.run(["npm", "run", "build"], cwd=gui_dir, check=True)
+        except subprocess.CalledProcessError:
+            print("⚠️ npm run build failed. Retrying after npm install...")
+            subprocess.run(["npm", "install"], cwd=gui_dir, check=True)
+            subprocess.run(["npm", "run", "build"], cwd=gui_dir, check=True)
 
     print(f"🚀 Launching FastAPI backend + Web Studio server on port {port}...")
     backend_cmd = [
