@@ -119,7 +119,7 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
             <div>
               <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>🔑 Environment Variables (.env)</h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Configure API keys for Gemini, Reddit, OpenAI, ElevenLabs, etc.
+                Configure API keys for Gemini, Reddit, OpenAI, NVIDIA NIM, etc.
               </p>
             </div>
             <button className="btn btn-primary" onClick={handleSaveEnv} disabled={savingEnv}>

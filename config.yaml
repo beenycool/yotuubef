@@ -96,7 +96,7 @@ paths:
   thumbnails_dir: thumbnails
 tts:
   narrator_speaker: Ryan
-  primary_service: elevenlabs
+  primary_service: qwen3_tts
 video_processing:
   audio_bitrate: 128k
   audio_codec: aac

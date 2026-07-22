@@ -44,8 +44,6 @@ except ModuleNotFoundError:
     _librosa = None
     LIBROSA_AVAILABLE = False
 
-ELEVENLABS_AVAILABLE = importlib.util.find_spec("elevenlabs") is not None
-
 DIA_AVAILABLE = importlib.util.find_spec("dia") is not None
 
 if TORCH_AVAILABLE and SOUNDFILE_AVAILABLE:

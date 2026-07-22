@@ -65,6 +65,150 @@ const formatLabel = (key: string): string => {
     .replace(/\b\w/g, (c) => c.toUpperCase());
 };
 
+// Predefined option definitions for configuration fields (with special emphasis on video processing)
+const DROPDOWN_OPTIONS: Record<string, Array<{ label: string; value: any }> | Array<string | number>> = {
+  // Video & Processing (interactive box video settings)
+  video_codec: ['libx264', 'libx265', 'h264_nvenc', 'hevc_nvenc', 'vp9', 'av1'],
+  audio_codec: ['aac', 'mp3', 'opus', 'flac', 'pcm_s16le'],
+  target_fps: [24, 30, 60, 120],
+  video_bitrate: ['2M', '5M', '8M', '10M', '12M', '16M', '25M', '50M'],
+  audio_bitrate: ['96k', '128k', '192k', '256k', '320k'],
+  pixel_format: ['yuv420p', 'yuv422p', 'yuv444p', 'nv12'],
+  video_quality_profile: [
+    'ultrafast',
+    'superfast',
+    'veryfast',
+    'faster',
+    'fast',
+    'medium',
+    'slow',
+    'slower',
+    'veryslow',
+    'speed',
+    'balanced',
+    'quality',
+  ],
+  speed_optimization_level: ['disabled', 'low', 'medium', 'high', 'aggressive'],
+  max_file_size_mb: [100, 250, 500, 1000, 2000],
+  max_video_duration: [60, 180, 300, 600, 1200],
+  min_video_duration: [3, 5, 10, 15, 30],
+
+  // Audio & Sound
+  limiter_threshold: [-1, -2, -3, -6],
+  noise_gate_threshold: [-30, -35, -40, -50],
+  volume: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+
+  // TTS & Voice
+  primary_service: ['qwen3_tts', 'gtts', 'pyttsx3', 'edge-tts', 'bark', 'coqui'],
+  narrator_speaker: ['Ryan', 'Adam', 'Antoni', 'Arnold', 'Bella', 'Domi', 'Elli', 'Josh', 'Rachel', 'Sam'],
+
+  // YouTube & Publishing
+  default_privacy: ['public', 'unlisted', 'private'],
+  default_category: [
+    { label: '22 - People & Blogs', value: '22' },
+    { label: '20 - Gaming', value: '20' },
+    { label: '24 - Entertainment', value: '24' },
+    { label: '28 - Science & Tech', value: '28' },
+    { label: '10 - Music', value: '10' },
+    { label: '27 - Education', value: '27' },
+    { label: '1 - Film & Animation', value: '1' },
+    { label: '23 - Comedy', value: '23' },
+  ],
+  thumbnail_quality: [80, 85, 90, 95, 100],
+
+  // AI & APIs
+  ai_provider: ['nvidia_nim', 'openai', 'anthropic', 'ollama', 'gemini'],
+  nvidia_nim_model: ['moonshotai/kimi-k2.6', 'minimaxai/minimax-m3', 'meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1', 'mistralai/mistral-large-2411'],
+  nvidia_nim_alt_model: ['minimaxai/minimax-m3', 'moonshotai/kimi-k2.6', 'meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1', 'mistralai/mistral-large-2411'],
+};
+
+// Resolution presets for default_output_resolution
+const RESOLUTION_PRESETS = [
+  { label: '📱 Vertical Shorts / TikTok (1080 x 1920)', value: [1080, 1920] },
+  { label: '🖥️ Horizontal 16:9 HD (1920 x 1080)', value: [1920, 1080] },
+  { label: '⏹️ Square 1:1 (1080 x 1080)', value: [1080, 1080] },
+  { label: '📱 Compact Vertical (720 x 1280)', value: [720, 1280] },
+  { label: '🌟 4K Ultra HD Shorts (2160 x 3840)', value: [2160, 3840] },
+];
+
+// Helper control component for rendering supported dropdown selection
+const DropdownControl: React.FC<{
+  value: any;
+  options: Array<{ label: string; value: any }> | Array<string | number>;
+  onChange: (newVal: any) => void;
+}> = ({ value, options, onChange }) => {
+  const [isCustomMode, setIsCustomMode] = useState(false);
+  const [customVal, setCustomVal] = useState(String(value ?? ''));
+
+  const normalizedOptions = useMemo(() => {
+    return options.map((opt) => {
+      if (typeof opt === 'object' && opt !== null && 'label' in opt) {
+        return opt;
+      }
+      return { label: String(opt), value: opt };
+    });
+  }, [options]);
+
+  const valueExistsInOptions = normalizedOptions.some((opt) => String(opt.value) === String(value));
+
+  if (isCustomMode) {
+    return (
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+        <input
+          type="text"
+          value={customVal}
+          onChange={(e) => {
+            setCustomVal(e.target.value);
+            let parsed: any = e.target.value;
+            if (typeof value === 'number' && !isNaN(Number(parsed)) && parsed !== '') {
+              parsed = Number(parsed);
+            }
+            onChange(parsed);
+          }}
+          placeholder="Enter custom value..."
+          autoFocus
+        />
+        <button
+          className="btn btn-secondary"
+          style={{ padding: '6px 10px', fontSize: '0.75rem', whiteSpace: 'nowrap' }}
+          onClick={() => setIsCustomMode(false)}
+          title="Back to Dropdown Options"
+        >
+          📋 Presets
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', width: '100%' }}>
+      <select
+        value={String(value ?? '')}
+        onChange={(e) => {
+          const selectedStr = e.target.value;
+          if (selectedStr === '__CUSTOM__') {
+            setIsCustomMode(true);
+            return;
+          }
+          const matchedOpt = normalizedOptions.find((opt) => String(opt.value) === selectedStr);
+          const newVal = matchedOpt ? matchedOpt.value : selectedStr;
+          onChange(newVal);
+        }}
+      >
+        {!valueExistsInOptions && value !== undefined && value !== null && value !== '' && (
+          <option value={String(value)}>Current ({String(value)})</option>
+        )}
+        {normalizedOptions.map((opt, idx) => (
+          <option key={idx} value={String(opt.value)}>
+            {opt.label}
+          </option>
+        ))}
+        <option value="__CUSTOM__">✏️ Custom value...</option>
+      </select>
+    </div>
+  );
+};
+
 export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onChangeYaml }) => {
   const [viewMode, setViewMode] = useState<'boxes' | 'raw'>('boxes');
   const [parsedData, setParsedData] = useState<Record<string, any>>({});
@@ -221,8 +365,52 @@ export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onCha
       );
     }
 
-    // 2. Tag / Array Chips Editor
+    // 2. Dropdown for supported fields (Video codecs, bitrates, FPS, quality profiles, TTS, YouTube, etc.)
+    if (DROPDOWN_OPTIONS[keyName]) {
+      return (
+        <DropdownControl
+          value={value}
+          options={DROPDOWN_OPTIONS[keyName]}
+          onChange={(newVal) => handleFieldChange(path, newVal)}
+        />
+      );
+    }
+
+    // 3. Tag / Array Chips Editor (with Resolution Preset dropdown if key is default_output_resolution)
     if (Array.isArray(value)) {
+      if (keyName === 'default_output_resolution') {
+        const matchingPreset = RESOLUTION_PRESETS.find(
+          (p) => p.value.length === value.length && p.value.every((v, i) => v === value[i])
+        );
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Preset:</span>
+              <select
+                style={{ fontSize: '0.8rem', padding: '6px 10px' }}
+                value={matchingPreset ? JSON.stringify(matchingPreset.value) : 'custom'}
+                onChange={(e) => {
+                  if (e.target.value !== 'custom') {
+                    handleFieldChange(path, JSON.parse(e.target.value));
+                  }
+                }}
+              >
+                {!matchingPreset && <option value="custom">Custom ({value.join(' x ')})</option>}
+                {RESOLUTION_PRESETS.map((p, idx) => (
+                  <option key={idx} value={JSON.stringify(p.value)}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <TagArrayEditor
+              tags={value}
+              onChange={(newTags) => handleFieldChange(path, newTags)}
+            />
+          </div>
+        );
+      }
+
       return (
         <TagArrayEditor
           tags={value}
@@ -231,7 +419,7 @@ export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onCha
       );
     }
 
-    // 3. Number Input
+    // 4. Number Input
     if (typeof value === 'number') {
       return (
         <input
@@ -246,7 +434,7 @@ export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onCha
       );
     }
 
-    // 4. Object (Sub-nested fields)
+    // 5. Object (Sub-nested fields)
     if (value !== null && typeof value === 'object') {
       return (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', width: '100%', marginTop: '6px' }}>
@@ -271,7 +459,7 @@ export const YamlBoxEditor: React.FC<YamlBoxEditorProps> = ({ yamlContent, onCha
       );
     }
 
-    // 5. Default String Input
+    // 6. Default String Input
     return (
       <input
         type={isSensitive ? 'password' : 'text'}
