@@ -23,7 +23,6 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-os.chdir(REPO_ROOT)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -32,6 +31,16 @@ from dotenv import load_dotenv
 load_dotenv(REPO_ROOT / ".env", override=False)
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_project_name(project_name: str) -> Path:
+    """Return resolved project dir under findings/, or raise ValueError."""
+    base = (REPO_ROOT / "findings").resolve()
+    project_dir = (base / project_name).resolve()
+    if project_dir != base and base not in project_dir.parents:
+        raise ValueError(f"Invalid project name: {project_name!r}")
+    return project_dir
+
 
 # Pipeline phases sorted in order
 PHASE_ORDER: List[str] = [
@@ -93,7 +102,8 @@ def list_projects() -> List[Dict[str, Any]]:
 
 def get_project_state(project_name: str) -> Optional[Dict[str, Any]]:
     """Return raw state.json as a dict, or None if missing."""
-    state_path = REPO_ROOT / "findings" / project_name / "research" / "state.json"
+    project_dir = _validate_project_name(project_name)
+    state_path = project_dir / "research" / "state.json"
     if not state_path.exists():
         return None
     return json.loads(state_path.read_text(encoding="utf-8"))
@@ -101,7 +111,8 @@ def get_project_state(project_name: str) -> Optional[Dict[str, Any]]:
 
 def get_project_files(project_name: str) -> Dict[str, List[Dict[str, Any]]]:
     """List research artefacts (ideas, scripts, media, etc.) for a project."""
-    research_dir = REPO_ROOT / "findings" / project_name / "research"
+    project_dir = _validate_project_name(project_name)
+    research_dir = project_dir / "research"
     folders = [
         "ideas",
         "reports",
@@ -137,7 +148,8 @@ def get_project_files(project_name: str) -> Dict[str, List[Dict[str, Any]]]:
 
 def get_project_video(project_name: str) -> Optional[str]:
     """Return the local video path if render finished."""
-    meta_path = REPO_ROOT / "findings" / project_name / "research" / "metadata.json"
+    project_dir = _validate_project_name(project_name)
+    meta_path = project_dir / "research" / "metadata.json"
     if meta_path.exists():
         try:
             meta = json.loads(meta_path.read_text())
@@ -174,15 +186,17 @@ def get_project_video(project_name: str) -> Optional[str]:
 
 def load_script(project_name: str) -> Optional[Dict[str, Any]]:
     """Load final_script.json for a project."""
-    script_path = REPO_ROOT / "findings" / project_name / "research" / "scripts" / "final_script.json"
+    project_dir = _validate_project_name(project_name)
+    script_path = project_dir / "research" / "scripts" / "final_script.json"
     if not script_path.exists():
         return None
     return json.loads(script_path.read_text(encoding="utf-8"))
 
 
 def save_script(project_name: str, script_data: Dict[str, Any]) -> str:
-    """Overwrite final_script.json and optionally run the VideoRender phase."""
-    script_path = REPO_ROOT / "findings" / project_name / "research" / "scripts" / "final_script.json"
+    """Overwrite final_script.json for a project."""
+    project_dir = _validate_project_name(project_name)
+    script_path = project_dir / "research" / "scripts" / "final_script.json"
     script_path.write_text(json.dumps(script_data, indent=2, ensure_ascii=True), encoding="utf-8")
     return f"Saved to {script_path}"
 

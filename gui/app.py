@@ -27,7 +27,6 @@ import gradio as gr
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-os.chdir(REPO_ROOT)
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
@@ -427,6 +426,7 @@ def build_app() -> gr.Blocks:
                 )
                 se_save_btn = gr.Button("\U0001F4BE Save script", variant="primary")
                 se_msg = gr.Markdown("")
+                se_preview = gr.Markdown("")
                 se_refresh_btn.click(
                     lambda: gr.Dropdown(choices=_project_choices()),
                     outputs=se_project,
@@ -434,7 +434,7 @@ def build_app() -> gr.Blocks:
                 se_load_btn.click(
                     script_load,
                     inputs=se_project,
-                    outputs=[se_title, se_hook, se_loop_bridge, se_segments, se_msg, se_msg],
+                    outputs=[se_title, se_hook, se_loop_bridge, se_segments, se_preview, se_msg],
                 )
                 se_save_btn.click(
                     script_save,
@@ -561,11 +561,16 @@ def launch(
     share: bool = True,
     server_port: int = 7860,
     debug: bool = False,
+    auth: Optional[Tuple[str, str]] = None,
     **kwargs,
 ):
-    """Build and launch the app. Convenience entry point for cells."""
+    """Build and launch the app. Convenience entry point for cells.
+
+    When ``share=True``, pass ``auth=("user", "password")`` sourced from
+    environment variables or Colab secrets so the public URL is protected.
+    """
     app = build_app()
-    return app.queue().launch(
+    launch_kwargs: Dict[str, Any] = dict(
         share=share,
         server_port=server_port,
         debug=debug,
@@ -575,8 +580,11 @@ def launch(
             "css",
             ".phase-pill { padding: 0.25em 0.5em; border-radius: 0.35em; font-size: 0.85em; }",
         ),
-        **kwargs,
     )
+    if auth is not None:
+        launch_kwargs["auth"] = auth
+    launch_kwargs.update(kwargs)
+    return app.queue().launch(**launch_kwargs)
 
 
 if __name__ == "__main__":
