@@ -2,6 +2,21 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useProjects } from '../hooks/useProjects';
 import { ProjectCard } from '../components/ProjectCard';
 import { useToast } from '../components/Toast';
+import { useAnimatedCounter, use3DTilt } from '../hooks/useMotion';
+
+const StatCard: React.FC<{ label: string; value: number; color?: string }> = ({ label, value, color }) => {
+  const animatedValue = useAnimatedCounter(value, 600);
+  const cardRef = use3DTilt<HTMLDivElement>(6);
+
+  return (
+    <div ref={cardRef} className="glass-card interactive-card-spring" style={{ padding: '20px' }}>
+      <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{label}</span>
+      <div style={{ fontSize: '1.8rem', fontWeight: 700, color: color || 'var(--text-primary)' }}>
+        {animatedValue}
+      </div>
+    </div>
+  );
+};
 
 export const Dashboard: React.FC = () => {
   const { projects, loading, error, createProject, deleteProject } = useProjects();
@@ -11,7 +26,6 @@ export const Dashboard: React.FC = () => {
   const [newRedditUrl, setNewRedditUrl] = useState('');
   const [creating, setCreating] = useState(false);
 
-  // Performance (js-combine-iterations + rerender-memo): Compute project stats in a single pass
   const stats = useMemo(() => {
     let completed = 0;
     let scriptReview = 0;
@@ -63,35 +77,17 @@ export const Dashboard: React.FC = () => {
           </p>
         </div>
 
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        <button className="btn btn-primary btn-ripple" onClick={() => setShowModal(true)}>
           ➕ New Documentary Project
         </button>
       </div>
 
       {/* Stats Summary Bar */}
-      <div className="dashboard-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Total Projects</span>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{stats.total}</div>
-        </div>
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Completed Videos</span>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-success)' }}>
-            {stats.completed}
-          </div>
-        </div>
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Ready for Script Review</span>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--phase-scripting)' }}>
-            {stats.scriptReview}
-          </div>
-        </div>
-        <div className="glass-card" style={{ padding: '20px' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Active / In Progress</span>
-          <div style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-secondary)' }}>
-            {stats.active}
-          </div>
-        </div>
+      <div className="dashboard-stats stagger-entry" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+        <StatCard label="Total Projects" value={stats.total} />
+        <StatCard label="Completed Videos" value={stats.completed} color="var(--accent-success)" />
+        <StatCard label="Ready for Script Review" value={stats.scriptReview} color="var(--phase-scripting)" />
+        <StatCard label="Active / In Progress" value={stats.active} color="var(--accent-secondary)" />
       </div>
 
       {/* Projects Grid or Onboarding Empty State */}
@@ -105,7 +101,7 @@ export const Dashboard: React.FC = () => {
         </div>
       ) : projects.length === 0 ? (
         <div
-          className="glass-card"
+          className="glass-card interactive-card-spring"
           style={{
             padding: '48px 32px',
             textAlign: 'center',
@@ -127,6 +123,7 @@ export const Dashboard: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               boxShadow: '0 8px 32px rgba(108, 92, 231, 0.4)',
+              animation: 'statusPulse 3s infinite ease-in-out',
             }}
           >
             🎬
@@ -141,12 +138,13 @@ export const Dashboard: React.FC = () => {
             </p>
           </div>
 
-          <button className="btn btn-primary" style={{ padding: '12px 24px', fontSize: '1rem' }} onClick={() => setShowModal(true)}>
+          <button className="btn btn-primary btn-ripple" style={{ padding: '12px 24px', fontSize: '1rem' }} onClick={() => setShowModal(true)}>
             🚀 Start a New Project
           </button>
 
           {/* Quick 3-Step Guide */}
           <div
+            className="stagger-entry"
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
@@ -157,24 +155,24 @@ export const Dashboard: React.FC = () => {
               textAlign: 'left',
             }}
           >
-            <div style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }}>
+            <div className="glass-card" style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--phase-idea)', fontWeight: 700, fontSize: '0.85rem' }}>1. IDEA & SEED</div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Provide a topic name or optional Reddit link as initial seed.</div>
             </div>
 
-            <div style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }}>
+            <div className="glass-card" style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--phase-research)', fontWeight: 700, fontSize: '0.85rem' }}>2. RESEARCH & SCRIPT</div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Deep research runs automatically or accepts custom report input.</div>
             </div>
 
-            <div style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }}>
+            <div className="glass-card" style={{ padding: '16px', borderRadius: 'var(--radius-sm)', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--border-subtle)' }}>
               <div style={{ color: 'var(--phase-render)', fontWeight: 700, fontSize: '0.85rem' }}>3. EDIT & RENDER</div>
               <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>Tweak cues in Director's Chair and render high-impact vertical video.</div>
             </div>
           </div>
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+        <div className="stagger-entry" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
           {projects.map((proj) => (
             <ProjectCard key={proj.name} project={proj} onDelete={deleteProject} />
           ))}
@@ -185,21 +183,21 @@ export const Dashboard: React.FC = () => {
       {showModal && (
         <div
           onClick={() => setShowModal(false)}
+          className="modal-overlay-spring"
           style={{
             position: 'fixed',
             inset: 0,
             background: 'rgba(0,0,0,0.75)',
-            backdropFilter: 'blur(8px)',
+            backdropFilter: 'blur(12px)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             zIndex: 100,
-            animation: 'fadeIn 0.15s ease',
           }}
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="glass-card"
+            className="glass-card modal-dialog-spring"
             style={{ width: '460px', maxWidth: '90vw', padding: '32px', background: 'var(--bg-secondary)' }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
@@ -240,10 +238,10 @@ export const Dashboard: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end', marginTop: '12px' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)} disabled={creating}>
+                <button type="button" className="btn btn-secondary btn-ripple" onClick={() => setShowModal(false)} disabled={creating}>
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary" disabled={creating || !newProjName.trim()}>
+                <button type="submit" className="btn btn-primary btn-ripple" disabled={creating || !newProjName.trim()}>
                   {creating ? <><span className="spinner" /> Creating...</> : 'Create Project'}
                 </button>
               </div>

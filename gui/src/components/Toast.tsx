@@ -101,22 +101,21 @@ const ToastContainer: React.FC<{ toasts: ToastMessage[]; onRemove: (id: string) 
         return (
           <div
             key={t.id}
-            className="toast-item"
+            className="toast-item-spring glass-card"
             style={{
               pointerEvents: 'auto',
               background: bg,
-              backdropFilter: 'blur(12px)',
+              backdropFilter: 'blur(16px)',
               borderLeft: `4px solid ${borderColor}`,
               borderTop: '1px solid var(--border-subtle)',
               borderRight: '1px solid var(--border-subtle)',
               borderBottom: '1px solid var(--border-subtle)',
               borderRadius: 'var(--radius-sm)',
-              padding: '12px 16px',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+              padding: '14px 16px',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
               display: 'flex',
               alignItems: 'flex-start',
               gap: '12px',
-              animation: 'toastSlideIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
             }}
           >
             <span style={{ fontSize: '1.1rem' }}>{icon}</span>
@@ -144,6 +143,7 @@ const ToastContainer: React.FC<{ toasts: ToastMessage[]; onRemove: (id: string) 
             >
               ✕
             </button>
+            <div className="toast-progress-bar" />
           </div>
         );
       })}

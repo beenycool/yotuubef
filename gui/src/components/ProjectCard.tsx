@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Project } from '../api/types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { useToast } from './Toast';
+import { use3DTilt } from '../hooks/useMotion';
 
 interface ProjectCardProps {
   project: Project;
@@ -12,6 +13,7 @@ interface ProjectCardProps {
 export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onDelete }) => {
   const [showConfirm, setShowConfirm] = useState(false);
   const toast = useToast();
+  const cardRef = use3DTilt<HTMLDivElement>(8);
 
   const getPhaseBadgeColor = (phase: string) => {
     switch (phase) {
@@ -44,7 +46,11 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onDelete }) =
 
   return (
     <>
-      <div className="glass-card" style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div
+        ref={cardRef}
+        className="glass-card interactive-card-spring"
+        style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '16px' }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
             <h3 style={{ fontSize: '1.2rem', fontWeight: 700, marginBottom: '4px' }}>{project.name}</h3>
@@ -53,7 +59,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onDelete }) =
             </span>
           </div>
           <span
-            className="badge"
+            className="badge badge-pulse"
             style={{
               background: 'rgba(0,0,0,0.3)',
               color: getPhaseBadgeColor(project.current_phase),
@@ -79,18 +85,18 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, onDelete }) =
         </div>
 
         <div style={{ display: 'flex', gap: '10px', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
-          <Link to={`/project/${project.name}`} className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }}>
+          <Link to={`/project/${project.name}`} className="btn btn-primary btn-ripple" style={{ flex: 1, justifyContent: 'center' }}>
             Open Studio
           </Link>
 
           {project.has_script && (
-            <Link to={`/project/${project.name}/script`} className="btn btn-secondary" title="Director's Chair">
+            <Link to={`/project/${project.name}/script`} className="btn btn-secondary btn-ripple" title="Director's Chair">
               ✏️ Edit Script
             </Link>
           )}
 
           <button
-            className="btn btn-danger"
+            className="btn btn-danger btn-ripple"
             style={{ padding: '8px 12px' }}
             title="Delete Project"
             onClick={(e) => {

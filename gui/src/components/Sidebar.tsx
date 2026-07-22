@@ -59,6 +59,7 @@ export const Sidebar: React.FC = () => {
             fontSize: '18px',
             fontWeight: 'bold',
             boxShadow: '0 4px 14px rgba(108, 92, 231, 0.4)',
+            animation: 'statusPulse 3s infinite ease-in-out',
           }}
         >
           🎬
@@ -73,14 +74,14 @@ export const Sidebar: React.FC = () => {
       <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <NavLink
           to="/"
-          className={({ isActive }) => `btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
+          className={({ isActive }) => `btn btn-ripple ${isActive ? 'btn-primary' : 'btn-secondary'}`}
           style={{ justifyContent: 'flex-start' }}
         >
           📊 Dashboard
         </NavLink>
         <NavLink
           to="/settings"
-          className={({ isActive }) => `btn ${isActive ? 'btn-primary' : 'btn-secondary'}`}
+          className={({ isActive }) => `btn btn-ripple ${isActive ? 'btn-primary' : 'btn-secondary'}`}
           style={{ justifyContent: 'flex-start' }}
         >
           ⚙️ Settings
@@ -93,7 +94,7 @@ export const Sidebar: React.FC = () => {
           <div style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Recent Projects
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <div className="stagger-entry" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
             {recentProjects.map((p) => (
               <NavLink
                 key={p.name}
@@ -111,7 +112,6 @@ export const Sidebar: React.FC = () => {
                   whiteSpace: 'nowrap',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
-                  transition: 'background 0.2s ease',
                 }}
               >
                 <span style={{ fontSize: '0.65rem' }}>{getPhaseDot(p.current_phase)}</span>
@@ -124,6 +124,7 @@ export const Sidebar: React.FC = () => {
 
       {/* System Status Footer */}
       <div
+        className="glass-card"
         style={{
           marginTop: 'auto',
           padding: '12px 14px',

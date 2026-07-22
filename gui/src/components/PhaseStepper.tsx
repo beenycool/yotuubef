@@ -49,13 +49,13 @@ export const PhaseStepper: React.FC<PhaseStepperProps> = ({ currentPhase, onSele
               zIndex: 1,
             }}
           >
-            {/* Filled progress bar */}
+            {/* Filled progress bar with spring decel transition */}
             <div
               style={{
                 height: '100%',
                 width: `${progressPercent}%`,
                 background: 'var(--accent-gradient)',
-                transition: 'width 0.4s ease',
+                transition: 'width var(--spring-snappy-duration) var(--spring-snappy)',
               }}
             />
           </div>
@@ -78,6 +78,7 @@ export const PhaseStepper: React.FC<PhaseStepperProps> = ({ currentPhase, onSele
                   zIndex: 2,
                   flex: 1,
                   position: 'relative',
+                  transition: 'transform 0.3s var(--spring-snappy)',
                 }}
               >
                 <div
@@ -101,9 +102,9 @@ export const PhaseStepper: React.FC<PhaseStepperProps> = ({ currentPhase, onSele
                       : isCompleted
                       ? `2px solid ${phase.color}`
                       : '1px solid var(--border-subtle)',
-                    boxShadow: isCurrent ? `0 0 16px ${phase.color}` : 'none',
-                    animation: isCurrent ? 'pulseGlow 2s infinite' : 'none',
-                    transition: 'all 0.3s ease',
+                    boxShadow: isCurrent ? `0 0 20px ${phase.color}` : 'none',
+                    animation: isCurrent ? 'statusPulse 2s infinite ease-in-out' : 'none',
+                    transition: 'all 0.35s var(--spring-snappy)',
                   }}
                 >
                   {isCompleted ? '✓' : idx + 1}
@@ -116,6 +117,7 @@ export const PhaseStepper: React.FC<PhaseStepperProps> = ({ currentPhase, onSele
                       display: 'block',
                       fontWeight: isCurrent ? 700 : 500,
                       color: isCurrent ? phase.color : isCompleted ? 'var(--text-primary)' : 'var(--text-muted)',
+                      transition: 'color 0.3s ease',
                     }}
                   >
                     {phase.label}

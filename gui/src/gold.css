@@ -1,7 +1,6 @@
 /* 
-  GOLD OVERRIDE STYLESHEET
-  Visual Redesign Surgical Upgrade for Yotuubef Studio GUI
-  Awwwards / Cinema Studio Tier Aesthetic Upgrade
+  GOLD OVERRIDE STYLESHEET - AWWWARDS-TIER MOTION DESIGN ENGINE
+  Visual & Physics Motion System for Yotuubef Studio GUI
 */
 
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -41,11 +40,58 @@
   --radius-lg: 22px;
   --radius-xl: 30px;
 
+  /* ==========================================================================
+     SPRING PHYSICS & EASING PALETTE (Tier 1 CSS linear() + Tier 2 Fallbacks)
+     ========================================================================== */
+
+  /* 1. APPLE SNAPPY SPRING — Primary entrance / reveal easing (mass=1, stiffness=400, damping=30) */
+  --spring-snappy: linear(
+    0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%,
+    0.938 16.7%, 1.017 19.4%, 1.067 22.5%, 1.089 26.0%,
+    1.079 30.3%, 1.049 36.0%, 1.024 42.6%, 1.011 50.3%,
+    1.004 59.2%, 1.001 69.3%, 1
+  );
+  --spring-snappy-duration: 0.55s;
+
+  /* 2. APPLE SMOOTH SPRING — State changes & position shifts (mass=1, stiffness=200, damping=24) */
+  --spring-smooth: linear(
+    0, 0.004, 0.016 2.3%, 0.063 4.7%, 0.141 7.2%,
+    0.25 9.9%, 0.601 16.5%, 0.815 21.0%, 0.929 25.2%,
+    0.987 29.0%, 1.025 33.5%, 1.042 38.0%, 1.04 43.5%,
+    1.027 50.0%, 1.013 57.5%, 1.005 67.0%, 1.001 79.0%, 1
+  );
+  --spring-smooth-duration: 0.7s;
+
+  /* 3. APPLE BOUNCY SPRING — Micro-interactions & pop buttons (mass=1, stiffness=500, damping=18) */
+  --spring-bouncy: linear(
+    0, 0.014, 0.055 1.8%, 0.218 3.7%, 0.867 8.5%,
+    1.085 10.7%, 1.212 12.9%, 1.264 15.0%, 1.262 17.0%,
+    1.217 19.5%, 1.098 24.0%, 1.035 28.5%, 0.993 33.0%,
+    0.981 38.0%, 0.988 45.0%, 0.998 55.0%, 1.001 68.0%, 1
+  );
+  --spring-bouncy-duration: 0.5s;
+
+  /* 4. MATERIAL 3 EMPHASIZED SPRING — Container morphing (mass=1, stiffness=300, damping=22) */
+  --m3-spring: linear(
+    0, 0.007, 0.029 2.0%, 0.118 4.2%, 0.508 10.9%,
+    0.797 15.4%, 0.951 19.2%, 1.029 22.2%, 1.074 25.6%,
+    1.088 29.2%, 1.075 33.6%, 1.045 39.5%, 1.02 46.5%,
+    1.007 55.0%, 1.001 66.0%, 1
+  );
+  --m3-spring-duration: 0.6s;
+
+  /* Tier 2 Fallback Curves */
   --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-dramatic: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
-/* Base Body with Atmospheric Radial Mesh */
+/* ==========================================================================
+   BASE ATMOSPHERE & RESPONSIVE LAYOUT
+   ========================================================================== */
+
 body {
   background-color: var(--bg-primary);
   background-image: 
@@ -58,9 +104,19 @@ body {
   letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  animation: atmosphericPulse 20s infinite ease-in-out alternate;
 }
 
-/* Subtle Film Grain Atmosphere Overlay */
+@keyframes atmosphericPulse {
+  0% {
+    background-position: 0% 0%;
+  }
+  100% {
+    background-position: 100% 100%;
+  }
+}
+
+/* Subtle Film Grain Overlay */
 body::after {
   content: '';
   position: fixed;
@@ -80,19 +136,14 @@ h1, h2, h3, h4, h5, h6 {
   text-wrap: balance;
 }
 
-h1 {
-  font-weight: 800;
-}
+h1 { font-weight: 800; }
+h2 { font-weight: 700; }
+h3 { font-weight: 600; }
 
-h2 {
-  font-weight: 700;
-}
+/* ==========================================================================
+   GLASS CARDS WITH 3D TILT & SPRING LEVITATION
+   ========================================================================== */
 
-h3 {
-  font-weight: 600;
-}
-
-/* Glassmorphism Cards with Tactical Depth */
 .glass-card {
   background: rgba(18, 18, 28, 0.65);
   backdrop-filter: blur(20px) saturate(180%);
@@ -103,21 +154,60 @@ h3 {
     0 4px 24px -2px rgba(0, 0, 0, 0.5),
     inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
   transition: 
-    transform 0.35s var(--ease-snap),
-    border-color 0.35s var(--ease-snap),
-    box-shadow 0.35s var(--ease-snap);
+    transform var(--spring-snappy-duration) var(--spring-snappy),
+    border-color 0.3s var(--ease-snap),
+    box-shadow 0.35s var(--ease-snap),
+    background 0.3s var(--ease-snap);
+  transform-style: preserve-3d;
+  will-change: transform, box-shadow, border-color;
 }
 
 .glass-card:hover {
   border-color: var(--border-hover);
   box-shadow: 
-    0 12px 36px -6px rgba(108, 92, 231, 0.25),
-    0 0 0 1px rgba(162, 155, 254, 0.2),
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
-  transform: translateY(-3px);
+    0 16px 40px -8px rgba(108, 92, 231, 0.3),
+    0 0 0 1px rgba(162, 155, 254, 0.25),
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+  transform: translateY(-4px) scale(1.008);
 }
 
-/* Buttons with Physical Hover Physics & Active Press Feedback */
+.glass-card:active {
+  transform: translateY(-1px) scale(0.995);
+  transition-duration: 0.1s;
+}
+
+/* Interactive Card Motion Variant */
+.interactive-card-spring {
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.interactive-card-spring::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.05) 50%,
+    transparent 100%
+  );
+  transition: transform 0.6s var(--ease-out);
+  pointer-events: none;
+}
+
+.interactive-card-spring:hover::before {
+  transform: translateX(200%);
+}
+
+/* ==========================================================================
+   BUTTONS WITH TACTILE PRESSURE DEPTH & RIPPLE
+   ========================================================================== */
+
 .btn {
   font-family: var(--font-body);
   font-weight: 600;
@@ -125,21 +215,25 @@ h3 {
   letter-spacing: -0.01em;
   padding: 10px 20px;
   border-radius: var(--radius-sm);
+  position: relative;
+  overflow: hidden;
   transition: 
-    transform 0.3s var(--ease-snap),
-    box-shadow 0.3s var(--ease-snap),
+    transform 0.3s var(--spring-snappy),
+    box-shadow 0.3s var(--spring-snappy),
     background 0.3s var(--ease-snap),
     border-color 0.3s var(--ease-snap),
     opacity 0.2s ease;
+  will-change: transform, box-shadow;
 }
 
 .btn:hover:not(:disabled) {
-  transform: translateY(-2px);
+  transform: translateY(-2px) scale(1.02);
 }
 
 .btn:active:not(:disabled) {
-  transform: translateY(0) scale(0.97) !important;
-  transition-duration: 0.08s !important;
+  transform: translateY(1px) scale(0.96) !important;
+  transition: transform 0.08s var(--ease-snap) !important;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.4) !important;
 }
 
 .btn-primary {
@@ -155,9 +249,9 @@ h3 {
 .btn-primary:hover:not(:disabled) {
   opacity: 1;
   box-shadow: 
-    0 8px 25px rgba(124, 58, 237, 0.6),
-    0 0 0 1px rgba(255, 255, 255, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+    0 8px 28px rgba(124, 58, 237, 0.65),
+    0 0 0 1px rgba(255, 255, 255, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 
 .btn-secondary {
@@ -171,7 +265,7 @@ h3 {
 .btn-secondary:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.09);
   border-color: rgba(255, 255, 255, 0.22);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
 }
 
 .btn-danger {
@@ -183,28 +277,70 @@ h3 {
 .btn-danger:hover:not(:disabled) {
   background: rgba(239, 68, 68, 0.25);
   border-color: rgba(239, 68, 68, 0.5);
-  box-shadow: 0 4px 16px rgba(239, 68, 68, 0.3);
+  box-shadow: 0 4px 18px rgba(239, 68, 68, 0.35);
 }
 
-/* Sidebar & Navigation Upgrade */
+/* Ripple Click Physics */
+.btn-ripple {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-ripple::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3) 10%, transparent 10.01%);
+  background-repeat: no-repeat;
+  background-position: 50%;
+  transform: scale(10, 10);
+  opacity: 0;
+  transition: transform 0.5s, opacity 1s;
+  pointer-events: none;
+}
+
+.btn-ripple:active::after {
+  transform: scale(0, 0);
+  opacity: 0.3;
+  transition: 0s;
+}
+
+/* ==========================================================================
+   SIDEBAR & NAVIGATION SPRING CHOREOGRAPHY
+   ========================================================================== */
+
 .sidebar-aside {
   background: rgba(13, 13, 21, 0.75) !important;
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border-right: 1px solid var(--border-subtle) !important;
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
+  animation: springSlideRight 0.6s var(--spring-snappy) both;
+}
+
+@keyframes springSlideRight {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .sidebar-proj-link {
+  position: relative;
   transition: 
-    transform 0.25s var(--ease-snap),
+    transform var(--spring-snappy-duration) var(--spring-snappy),
     background 0.25s var(--ease-snap),
     color 0.25s var(--ease-snap) !important;
+  will-change: transform;
 }
 
 .sidebar-proj-link:hover {
   background: rgba(255, 255, 255, 0.06) !important;
-  transform: translateX(4px);
+  transform: translateX(6px);
   color: #ffffff !important;
 }
 
@@ -213,10 +349,23 @@ h3 {
   border-left: 3px solid var(--accent-secondary);
   color: #ffffff !important;
   font-weight: 600;
-  box-shadow: 0 2px 12px rgba(108, 92, 231, 0.25);
+  box-shadow: 0 2px 14px rgba(108, 92, 231, 0.3);
+  animation: linkPulseGlow 3s infinite ease-in-out;
 }
 
-/* Badges & Tag Chips */
+@keyframes linkPulseGlow {
+  0%, 100% {
+    box-shadow: 0 2px 14px rgba(108, 92, 231, 0.3);
+  }
+  50% {
+    box-shadow: 0 4px 20px rgba(162, 155, 254, 0.5);
+  }
+}
+
+/* ==========================================================================
+   BADGES, PULSE & AMBIENT SHIMMER
+   ========================================================================== */
+
 .badge {
   font-family: var(--font-mono);
   border-radius: var(--radius-xl) !important;
@@ -225,9 +374,32 @@ h3 {
   letter-spacing: 0.06em !important;
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: transform 0.3s var(--spring-bouncy);
 }
 
-/* Form Controls & Inputs */
+.badge:hover {
+  transform: scale(1.06);
+}
+
+.badge-pulse {
+  animation: statusPulse 2s infinite ease-in-out;
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.04);
+  }
+}
+
+/* ==========================================================================
+   FORM CONTROLS & FOCUS GLOW ACCENT
+   ========================================================================== */
+
 input[type="text"],
 input[type="url"],
 input[type="number"],
@@ -241,7 +413,8 @@ select {
   transition: 
     border-color 0.25s var(--ease-snap),
     box-shadow 0.25s var(--ease-snap),
-    background 0.25s var(--ease-snap) !important;
+    background 0.25s var(--ease-snap),
+    transform 0.25s var(--spring-snappy) !important;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
@@ -253,18 +426,27 @@ textarea:focus,
 select:focus {
   background: rgba(0, 0, 0, 0.6) !important;
   border-color: var(--accent-secondary) !important;
+  transform: translateY(-1px);
   box-shadow: 
     0 0 0 3px rgba(124, 58, 237, 0.3),
-    0 0 16px rgba(124, 58, 237, 0.2),
+    0 0 20px rgba(124, 58, 237, 0.25),
     inset 0 2px 4px rgba(0, 0, 0, 0.4) !important;
 }
 
-/* Custom Entry Keyframes & Animations */
-@keyframes enterUp {
+/* Toggle Switch Spring Animation */
+.toggle-switch-handle {
+  transition: transform 0.35s var(--spring-bouncy) !important;
+}
+
+/* ==========================================================================
+   STAGGERED ENTRY ANIMATIONS (SPRING + BLUR DEBLUR)
+   ========================================================================== */
+
+@keyframes enterUpSpring {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.99);
-    filter: blur(4px);
+    transform: translateY(24px) scale(0.96);
+    filter: blur(8px);
   }
   to {
     opacity: 1;
@@ -273,18 +455,104 @@ select:focus {
   }
 }
 
+.stagger-entry > * {
+  animation: enterUpSpring var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+.stagger-entry > *:nth-child(1) { animation-delay: 40ms; }
+.stagger-entry > *:nth-child(2) { animation-delay: 90ms; }
+.stagger-entry > *:nth-child(3) { animation-delay: 140ms; }
+.stagger-entry > *:nth-child(4) { animation-delay: 190ms; }
+.stagger-entry > *:nth-child(5) { animation-delay: 240ms; }
+.stagger-entry > *:nth-child(6) { animation-delay: 290ms; }
+.stagger-entry > *:nth-child(7) { animation-delay: 340ms; }
+.stagger-entry > *:nth-child(8) { animation-delay: 390ms; }
+
 .dashboard-stats > div,
 .yaml-section-box,
 main > div {
-  animation: enterUp 0.6s var(--ease-out) both;
+  animation: enterUpSpring var(--spring-snappy-duration) var(--spring-snappy) both;
 }
 
 .dashboard-stats > div:nth-child(1) { animation-delay: 50ms; }
-.dashboard-stats > div:nth-child(2) { animation-delay: 100ms; }
-.dashboard-stats > div:nth-child(3) { animation-delay: 150ms; }
-.dashboard-stats > div:nth-child(4) { animation-delay: 200ms; }
+.dashboard-stats > div:nth-child(2) { animation-delay: 110ms; }
+.dashboard-stats > div:nth-child(3) { animation-delay: 170ms; }
+.dashboard-stats > div:nth-child(4) { animation-delay: 230ms; }
 
-/* Custom Scrollbars */
+/* ==========================================================================
+   MODAL & DIALOG SPRING ENTRANCE & GLASS BLUR
+   ========================================================================== */
+
+@keyframes backdropFadeIn {
+  from { opacity: 0; backdrop-filter: blur(0px); }
+  to { opacity: 1; backdrop-filter: blur(12px); }
+}
+
+@keyframes modalSpringIn {
+  from {
+    opacity: 0;
+    transform: translateY(32px) scale(0.92);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+.modal-overlay-spring {
+  animation: backdropFadeIn 0.3s var(--ease-out) both;
+}
+
+.modal-dialog-spring {
+  animation: modalSpringIn var(--spring-snappy-duration) var(--spring-snappy) both;
+}
+
+/* ==========================================================================
+   TOAST NOTIFICATION SPRING ELASTIC ENTRANCE & PROGRESS TRACK
+   ========================================================================== */
+
+@keyframes toastElasticIn {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.88);
+    filter: blur(4px);
+  }
+  70% {
+    transform: translateY(-4px) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes toastProgressTrack {
+  from { width: 100%; }
+  to { width: 0%; }
+}
+
+.toast-item-spring {
+  animation: toastElasticIn var(--spring-bouncy-duration) var(--spring-bouncy) both;
+  position: relative;
+  overflow: hidden;
+}
+
+.toast-progress-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--accent-gradient);
+  animation: toastProgressTrack 4s linear forwards;
+}
+
+/* ==========================================================================
+   CUSTOM SCROLLBARS WITH SMOOTH THUMB GLOW
+   ========================================================================== */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
@@ -298,8 +566,37 @@ main > div {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 4px;
   border: 2px solid rgba(7, 7, 12, 0.8);
+  transition: background 0.25s ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(162, 155, 254, 0.4);
+  background: rgba(162, 155, 254, 0.5);
+}
+
+/* ==========================================================================
+   REDUCED MOTION AUDIT (Mandatory Accessibility standard)
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+    transform: none !important;
+  }
+
+  body {
+    animation: none !important;
+  }
+
+  .glass-card:hover {
+    transform: none !important;
+  }
+
+  .btn:hover, .btn:active {
+    transform: none !important;
+  }
 }
