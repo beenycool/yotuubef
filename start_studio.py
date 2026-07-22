@@ -50,8 +50,16 @@ def run_colab_studio(port: int = 8420):
         from google.colab import output
         from IPython.display import display, HTML
 
-        output.serve_kernel_port(port)
-        url = output.eval_js(f'google.colab.kernel.proxyPort({port})')
+        if hasattr(output, "serve_kernel_port"):
+            try:
+                output.serve_kernel_port(port)
+            except Exception:
+                pass
+
+        try:
+            url = output.eval_js(f'google.colab.kernel.proxyPort({port})')
+        except Exception:
+            url = f"http://localhost:{port}"
 
         html_code = f"""
         <div style="
