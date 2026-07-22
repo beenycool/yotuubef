@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import type { ConfigData, PreflightResult } from '../api/types';
 import { useToast } from './Toast';
+import { YamlBoxEditor } from './YamlBoxEditor';
 
 interface ConfigFormProps {
   config: ConfigData;
@@ -204,24 +205,24 @@ export const ConfigForm: React.FC<ConfigFormProps> = ({
 
       {/* Tab 2: YAML Config */}
       {activeTab === 'yaml' && (
-        <div className="glass-card" style={{ padding: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className="glass-card" style={{ padding: '20px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <div>
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>⚙️ Configuration YAML (config.yaml)</h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                ⚙️ Configuration Studio (config.yaml)
+              </h3>
               <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                Fine-tune processing limits, model selection, timing parameters, and directory paths.
+                Visual card boxes for video processing, audio settings, model selection, paths, & YouTube parameters.
               </p>
             </div>
             <button className="btn btn-primary" onClick={handleSaveYaml} disabled={savingYaml}>
-              {savingYaml ? <><span className="spinner" /> Saving...</> : '💾 Save YAML'}
+              {savingYaml ? <><span className="spinner" /> Saving...</> : '💾 Save YAML Configuration'}
             </button>
           </div>
 
-          <textarea
-            rows={18}
-            value={yamlContent}
-            onChange={(e) => setYamlContent(e.target.value)}
-            style={{ fontFamily: 'var(--font-mono)', fontSize: '0.85rem', lineHeight: '1.6' }}
+          <YamlBoxEditor
+            yamlContent={yamlContent}
+            onChangeYaml={(newYaml) => setYamlContent(newYaml)}
           />
         </div>
       )}
