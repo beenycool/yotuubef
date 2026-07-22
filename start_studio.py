@@ -50,11 +50,12 @@ def run_colab_studio(port: int = 8420):
         from google.colab import output
         from IPython.display import display, HTML
 
-        if hasattr(output, "serve_kernel_port"):
-            try:
-                output.serve_kernel_port(port)
-            except Exception:
-                pass
+        try:
+            serve_fn = getattr(output, "serve_kernel_port", None)
+            if serve_fn and callable(serve_fn):
+                serve_fn(port)
+        except Exception:
+            pass
 
         try:
             url = output.eval_js(f'google.colab.kernel.proxyPort({port})')
@@ -106,7 +107,7 @@ def run_colab_studio(port: int = 8420):
         """
         display(HTML(html_code))
         print(f"✨ Studio URL: {url}")
-    except ImportError:
+    except Exception:
         print(f"✨ FastAPI running on http://localhost:{port} (serving GUI static app at /)")
 
     return proc
